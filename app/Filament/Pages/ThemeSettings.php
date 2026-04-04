@@ -63,6 +63,38 @@ class ThemeSettings extends Page implements HasForms
             }
         }
 
+        // Filament فیلدهای متنی را string می‌خواهد؛ Setting::value گاهی JSON را به array برمی‌گرداند → 500
+        $mustBeStringKeys = [
+            'plisio_api_key',
+            'plisio_source_currency',
+            'plisio_allowed_psys_cids',
+            'payment_card_number',
+            'payment_card_holder_name',
+            'payment_card_instructions',
+        ];
+        foreach ($mustBeStringKeys as $sk) {
+            if (! array_key_exists($sk, $settings) || $settings[$sk] === null) {
+                continue;
+            }
+            if (is_array($settings[$sk])) {
+                $settings[$sk] = $sk === 'plisio_allowed_psys_cids'
+                    ? implode(',', array_map('strval', $settings[$sk]))
+                    : '';
+                Log::warning('ThemeSettings: setting '.$sk.' was array; coerced for form fill.');
+            } elseif (! is_string($settings[$sk]) && ! is_numeric($settings[$sk])) {
+                $settings[$sk] = (string) $settings[$sk];
+            }
+        }
+
+        if (array_key_exists('plisio_enabled', $settings) && $settings['plisio_enabled'] !== null) {
+            $settings['plisio_enabled'] = filter_var($settings['plisio_enabled'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (array_key_exists('plisio_amount_multiplier', $settings) && $settings['plisio_amount_multiplier'] !== null && $settings['plisio_amount_multiplier'] !== '') {
+            $settings['plisio_amount_multiplier'] = is_numeric($settings['plisio_amount_multiplier'])
+                ? (float) $settings['plisio_amount_multiplier']
+                : 10;
+        }
+
         $this->form->fill(array_merge([
             'panel_type' => 'marzban',
             'xui_host' => null,
@@ -282,7 +314,6 @@ class ThemeSettings extends Page implements HasForms
                                 TextInput::make('plisio_api_key')
                                     ->label('Secret key (API)')
                                     ->password()
-                                    ->revealable()
                                     ->helperText('از پنل Plisio → API settings کپی کنید.'),
                                 TextInput::make('plisio_source_currency')
                                     ->label('ارز مبنای فاکتور (fiat)')
