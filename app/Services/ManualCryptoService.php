@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Setting;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 final class ManualCryptoService
 {
@@ -35,8 +36,23 @@ final class ManualCryptoService
         ],
     ];
 
+    /**
+     * بدون اجرای مایگریشن `2026_04_04_160000_add_manual_crypto_fields_to_orders_table` نباید گزینهٔ پرداخت دستی فعال شود.
+     */
+    public static function databaseReady(): bool
+    {
+        try {
+            return Schema::hasTable('orders') && Schema::hasColumn('orders', 'crypto_network');
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     public static function isEnabled(Collection $settings): bool
     {
+        if (! self::databaseReady()) {
+            return false;
+        }
         if (! filter_var($settings->get('manual_crypto_enabled'), FILTER_VALIDATE_BOOLEAN)) {
             return false;
         }

@@ -719,6 +719,12 @@ class WebhookController extends Controller
         }
 
         if (Str::startsWith($user->bot_state, 'waiting_crypto_tx_')) {
+            if (! ManualCryptoService::databaseReady()) {
+                $user->update(['bot_state' => null]);
+                Telegram::sendMessage(['chat_id' => $chatId, 'text' => '⚠️ ذخیرهٔ تصویر ممکن نیست. لطفاً با پشتیبانی تماس بگیرید.']);
+
+                return;
+            }
             $orderId = Str::after($user->bot_state, 'waiting_crypto_tx_');
             $order = Order::find($orderId);
             if ($order && $order->user_id === $user->id && $order->status === 'pending' && $order->payment_method === 'manual_crypto') {
@@ -1110,6 +1116,15 @@ class WebhookController extends Controller
 
     protected function applyManualCryptoNetwork(User $user, int $orderId, string $code, $messageId = null): void
     {
+        if (! ManualCryptoService::databaseReady()) {
+            Log::error('Manual crypto: database columns missing — run: php artisan migrate');
+            Telegram::sendMessage([
+                'chat_id' => $user->telegram_chat_id,
+                'text' => '⚠️ پرداخت کریپتو روی سرور هنوز فعال نشده. لطفاً بعداً تلاش کنید یا با پشتیبانی تماس بگیرید.',
+            ]);
+
+            return;
+        }
         $order = Order::find($orderId);
         if (! $order || $order->user_id !== $user->id || $order->status !== 'pending') {
             $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ سفارش نامعتبر است.', $messageId);
@@ -1151,6 +1166,11 @@ class WebhookController extends Controller
 
     protected function processManualCryptoTxHash(User $user, string $orderId, string $text): void
     {
+        if (! ManualCryptoService::databaseReady()) {
+            $user->update(['bot_state' => null]);
+
+            return;
+        }
         $order = Order::find($orderId);
         if (! $order || $order->user_id !== $user->id || $order->payment_method !== 'manual_crypto') {
             $user->update(['bot_state' => null]);

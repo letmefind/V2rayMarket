@@ -871,6 +871,9 @@ class OrderController extends Controller
     public function submitManualCryptoProof(Request $request, Order $order)
     {
         $this->assertManualCryptoOrderOwned($order);
+        if (! ManualCryptoService::databaseReady()) {
+            return redirect()->route('order.show', $order)->with('error', 'پایگاه داده به‌روز نشده است. مدیر سرور باید دستور php artisan migrate را اجرا کند.');
+        }
         if ($order->payment_method !== 'manual_crypto' || ! $order->crypto_network) {
             return redirect()->route('payment.manual-crypto', $order)->with('error', 'ابتدا شبکه پرداخت را انتخاب کنید.');
         }
