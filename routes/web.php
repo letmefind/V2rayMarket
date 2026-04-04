@@ -116,6 +116,9 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/payment/card/{order}', [OrderController::class, 'processCardPayment'])->name('payment.card.process');
 
     Route::post('/payment/crypto/{order}', [OrderController::class, 'processCryptoPayment'])->name('payment.crypto.process');
+    Route::get('/payment/manual-crypto/{order}', [OrderController::class, 'showManualCrypto'])->name('payment.manual-crypto');
+    Route::post('/payment/manual-crypto/{order}/pick', [OrderController::class, 'pickManualCryptoNetwork'])->name('payment.manual-crypto.pick');
+    Route::post('/payment/manual-crypto/{order}/proof', [OrderController::class, 'submitManualCryptoProof'])->name('payment.manual-crypto.proof');
     Route::post('/payment/wallet/{order}', [OrderController::class, 'processWalletPayment'])->name('payment.wallet.process');
 });
 

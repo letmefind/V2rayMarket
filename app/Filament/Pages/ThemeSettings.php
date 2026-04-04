@@ -71,6 +71,9 @@ class ThemeSettings extends Page implements HasForms
             'payment_card_number',
             'payment_card_holder_name',
             'payment_card_instructions',
+            'manual_crypto_usdt_erc20_address',
+            'manual_crypto_usdt_bep20_address',
+            'manual_crypto_usdc_erc20_address',
         ];
         foreach ($mustBeStringKeys as $sk) {
             if (! array_key_exists($sk, $settings) || $settings[$sk] === null) {
@@ -88,6 +91,9 @@ class ThemeSettings extends Page implements HasForms
 
         if (array_key_exists('plisio_enabled', $settings) && $settings['plisio_enabled'] !== null) {
             $settings['plisio_enabled'] = filter_var($settings['plisio_enabled'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (array_key_exists('manual_crypto_enabled', $settings) && $settings['manual_crypto_enabled'] !== null) {
+            $settings['manual_crypto_enabled'] = filter_var($settings['manual_crypto_enabled'], FILTER_VALIDATE_BOOLEAN);
         }
         if (array_key_exists('plisio_amount_multiplier', $settings) && $settings['plisio_amount_multiplier'] !== null && $settings['plisio_amount_multiplier'] !== '') {
             $settings['plisio_amount_multiplier'] = is_numeric($settings['plisio_amount_multiplier'])
@@ -143,6 +149,12 @@ class ThemeSettings extends Page implements HasForms
             'marzban_host' => null,
             'marzban_sudo_username' => null,
             'marzban_sudo_password' => null,
+            'manual_crypto_enabled' => false,
+            'manual_crypto_toman_per_usdt' => null,
+            'manual_crypto_toman_per_usdc' => null,
+            'manual_crypto_usdt_erc20_address' => null,
+            'manual_crypto_usdt_bep20_address' => null,
+            'manual_crypto_usdc_erc20_address' => null,
         ], $settings));
     }
 
@@ -342,6 +354,30 @@ class ThemeSettings extends Page implements HasForms
                             TextInput::make('payment_card_holder_name')->label('نام صاحب حساب'),
                             Textarea::make('payment_card_instructions')->label('توضیحات اضافی')->rows(3),
                         ]),
+                        Section::make('پرداخت دستی USDT / USDC (تأیید ادمین)')
+                            ->description('کاربر آدرس ولت را می‌بیند و واریز می‌کند؛ پس از ارسال TxID یا اسکرین‌شات، شما از بخش سفارشات «تایید و اجرا» می‌زنید. جدا از Plisio است.')
+                            ->schema([
+                                Toggle::make('manual_crypto_enabled')
+                                    ->label('فعال‌سازی گزینه USDT/USDC دستی')
+                                    ->default(false),
+                                TextInput::make('manual_crypto_toman_per_usdt')
+                                    ->label('هر ۱ USDT معادل چند تومان؟')
+                                    ->numeric()
+                                    ->helperText('برای محاسبه مقدار USDT از مبلغ سفارش (تومان).'),
+                                TextInput::make('manual_crypto_toman_per_usdc')
+                                    ->label('هر ۱ USDC معادل چند تومان؟ (اختیاری)')
+                                    ->numeric()
+                                    ->helperText('اگر خالی باشد از نرخ USDT بالا استفاده می‌شود.'),
+                                TextInput::make('manual_crypto_usdt_erc20_address')
+                                    ->label('آدرس ولت USDT — شبکه ERC20')
+                                    ->maxLength(128),
+                                TextInput::make('manual_crypto_usdt_bep20_address')
+                                    ->label('آدرس ولت USDT — شبکه BEP20 (BSC)')
+                                    ->maxLength(128),
+                                TextInput::make('manual_crypto_usdc_erc20_address')
+                                    ->label('آدرس ولت USDC — شبکه ERC20')
+                                    ->maxLength(128),
+                            ]),
                         Section::make('Plisio (plisio.net) — پرداخت کریپتو')
                             ->description('وب‌هوک: '.url('/webhooks/plisio').' — این آدرس باید از اینترنت در دسترس باشد (HTTPS).')
                             ->schema([

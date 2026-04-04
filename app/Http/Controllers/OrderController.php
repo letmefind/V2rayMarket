@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Models\Transaction;
+use App\Services\ManualCryptoService;
 use App\Services\MarzbanService;
 use App\Services\PlisioService;
 use App\Services\XUIService;
@@ -783,5 +784,125 @@ class OrderController extends Controller
         }
 
         return redirect()->away($invoice['invoice_url']);
+    }
+
+    protected function assertManualCryptoOrderOwned(Order $order): void
+    {
+        if (Auth::id() !== $order->user_id || $order->status !== 'pending') {
+            abort(403, 'دسترسی غیرمجاز یا سفارش نامعتبر.');
+        }
+    }
+
+    public function showManualCrypto(Request $request, Order $order)
+    {
+        $this->assertManualCryptoOrderOwned($order);
+        $settings = Setting::all()->pluck('value', 'key');
+        if (! ManualCryptoService::isEnabled($settings)) {
+            return redirect()->route('order.show', $order)->with('error', 'پرداخت USDT/USDC دستی در حال حاضر غیرفعال است.');
+        }
+        $networks = ManualCryptoService::availableNetworks($settings);
+        if ($networks === []) {
+            return redirect()->route('order.show', $order)->with('error', 'هیچ شبکه‌ای برای پرداخت دستی پیکربندی نشده است.');
+        }
+
+        if ($request->boolean('reset') && $order->crypto_network) {
+            $order->update([
+                'payment_method' => null,
+                'crypto_network' => null,
+                'crypto_tx_hash' => null,
+                'crypto_amount_expected' => null,
+                'crypto_payment_proof' => null,
+            ]);
+
+            return redirect()->route('payment.manual-crypto', $order);
+        }
+
+        if (! $order->crypto_network) {
+            return view('payment.manual-crypto-pick', [
+                'order' => $order,
+                'networks' => $networks,
+            ]);
+        }
+
+        $addr = ManualCryptoService::address($settings, $order->crypto_network);
+        $label = ManualCryptoService::label($order->crypto_network);
+        $expected = $order->crypto_amount_expected;
+
+        return view('payment.manual-crypto-submit', [
+            'order' => $order,
+            'addr' => $addr,
+            'label' => $label,
+            'expected' => $expected,
+        ]);
+    }
+
+    public function pickManualCryptoNetwork(Request $request, Order $order)
+    {
+        $this->assertManualCryptoOrderOwned($order);
+        $settings = Setting::all()->pluck('value', 'key');
+        if (! ManualCryptoService::isEnabled($settings)) {
+            return redirect()->route('order.show', $order)->with('error', 'پرداخت USDT/USDC دستی غیرفعال است.');
+        }
+
+        $request->validate(['network' => 'required|string|max:32']);
+        $network = $request->input('network');
+        if (! ManualCryptoService::validateNetwork($network) || ! ManualCryptoService::networkIsReady($settings, $network)) {
+            return redirect()->back()->with('error', 'شبکه انتخاب‌شده معتبر نیست یا آدرس/نرخ تنظیم نشده است.');
+        }
+
+        $amountToman = (float) $order->amount;
+        $crypto = ManualCryptoService::expectedAmount($amountToman, $settings, $network);
+        if ($crypto === null) {
+            return redirect()->back()->with('error', 'نرخ تبدیل معتبر نیست.');
+        }
+
+        $order->update([
+            'payment_method' => 'manual_crypto',
+            'crypto_network' => $network,
+            'crypto_amount_expected' => $crypto,
+            'crypto_tx_hash' => null,
+            'crypto_payment_proof' => null,
+        ]);
+
+        return redirect()->route('payment.manual-crypto', $order)
+            ->with('status', 'شبکه انتخاب شد. پس از واریز، شناسه تراکنش یا تصویر را ثبت کنید.');
+    }
+
+    public function submitManualCryptoProof(Request $request, Order $order)
+    {
+        $this->assertManualCryptoOrderOwned($order);
+        if ($order->payment_method !== 'manual_crypto' || ! $order->crypto_network) {
+            return redirect()->route('payment.manual-crypto', $order)->with('error', 'ابتدا شبکه پرداخت را انتخاب کنید.');
+        }
+
+        $request->validate([
+            'tx_hash' => 'nullable|string|max:120',
+            'screenshot' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:4096',
+        ]);
+
+        $hash = trim((string) $request->input('tx_hash', ''));
+        if ($hash === '' && ! $request->hasFile('screenshot')) {
+            return redirect()->back()->with('error', 'حداقل یکی از موارد «شناسه تراکنش» یا «تصویر تراکنش» را ارسال کنید.');
+        }
+
+        $updates = [];
+        if ($hash !== '') {
+            $updates['crypto_tx_hash'] = $hash;
+        }
+        if ($request->hasFile('screenshot')) {
+            $updates['crypto_payment_proof'] = $request->file('screenshot')->store('crypto-proofs', 'public');
+        }
+        if ($updates !== []) {
+            $order->update($updates);
+        }
+
+        Auth::user()->notifications()->create([
+            'type' => 'manual_crypto_submitted',
+            'title' => 'اطلاعات پرداخت کریپتو ثبت شد',
+            'message' => "سفارش #{$order->id}: پس از تأیید مدیر، نتیجه اعلام می‌شود.",
+            'link' => route('order.show', $order->id),
+        ]);
+
+        return redirect()->route('dashboard')->with('status', 'اطلاعات پرداخت ثبت شد. پس از تأیید مدیر، سفارش تکمیل می‌شود.');
     }
 }

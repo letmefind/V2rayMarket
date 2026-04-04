@@ -10,6 +10,7 @@ class Order extends Model
     protected $fillable = [
         'user_id', 'plan_id', 'status', 'expires_at',
         'payment_method', 'card_payment_receipt', 'nowpayments_payment_id', 'plisio_txn_id',
+        'crypto_network', 'crypto_tx_hash', 'crypto_amount_expected', 'crypto_payment_proof',
         'config_details',
         'amount',
         'discount_amount',
@@ -18,6 +19,10 @@ class Order extends Model
         'source',
         'panel_username',
 
+    ];
+
+    protected $casts = [
+        'crypto_amount_expected' => 'decimal:8',
     ];
 
     public function user()

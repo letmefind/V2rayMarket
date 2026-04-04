@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Models\TelegramBotSetting;
+use App\Services\ManualCryptoService;
 use App\Services\PlisioService;
 use App\Services\XUIService;
 use App\Models\User;
@@ -217,6 +218,9 @@ class WebhookController extends Controller
             elseif (Str::startsWith($user->bot_state, 'awaiting_username_for_order|')) {
                 $planId = Str::after($user->bot_state, 'awaiting_username_for_order|');
                 $this->processUsername($user, $planId, $text);
+            } elseif (Str::startsWith($user->bot_state, 'waiting_crypto_tx_')) {
+                $orderId = Str::after($user->bot_state, 'waiting_crypto_tx_');
+                $this->processManualCryptoTxHash($user, $orderId, $text);
             }
 
             return;
@@ -448,6 +452,14 @@ class WebhookController extends Controller
                 Log::warning('answerCallbackQuery pay_plisio: '.$e->getMessage());
             }
             $this->startPlisioPayment($user, $orderId, $messageId);
+        } elseif (Str::startsWith($data, 'pay_mc_')) {
+            $orderId = (int) Str::after($data, 'pay_mc_');
+            $ord = Order::find($orderId);
+            if ($ord && $ord->user_id === $user->id && $ord->status === 'pending' && $ord->plan_id) {
+                $this->sendManualCryptoNetworkPicker($chatId, $orderId, $messageId);
+            }
+        } elseif (preg_match('/^mcn_(\d+)_(e|b|u)$/', $data, $mcn)) {
+            $this->applyManualCryptoNetwork($user, (int) $mcn[1], $mcn[2], $messageId);
         } elseif (Str::startsWith($data, 'deposit_card_')) {
             $orderId = Str::after($data, 'deposit_card_');
             $ord = Order::find($orderId);
@@ -465,6 +477,12 @@ class WebhookController extends Controller
             } catch (\Exception $e) {
             }
             $this->startPlisioPayment($user, $orderId, $messageId);
+        } elseif (Str::startsWith($data, 'deposit_mc_')) {
+            $orderId = (int) Str::after($data, 'deposit_mc_');
+            $ord = Order::find($orderId);
+            if ($ord && $ord->user_id === $user->id && $ord->status === 'pending' && ! $ord->plan_id) {
+                $this->sendManualCryptoNetworkPicker($chatId, $orderId, $messageId);
+            }
         } elseif (Str::startsWith($data, 'enter_discount_')) {
             $orderId = Str::after($data, 'enter_discount_');
             $this->promptForDiscount($user, $orderId, $messageId);
@@ -522,6 +540,9 @@ class WebhookController extends Controller
             } catch (\Exception $e) {
             }
             $this->handleRenewPlisioPayment($user, $originalOrderId, $messageId);
+        } elseif (Str::startsWith($data, 'renew_pay_mc_')) {
+            $originalOrderId = Str::after($data, 'renew_pay_mc_');
+            $this->handleRenewManualCryptoPayment($user, $originalOrderId, $messageId);
         } elseif (Str::startsWith($data, 'deposit_amount_')) {
             $amount = Str::after($data, 'deposit_amount_');
             $this->processDepositAmount($user, $amount, $messageId);
@@ -697,6 +718,34 @@ class WebhookController extends Controller
             return;
         }
 
+        if (Str::startsWith($user->bot_state, 'waiting_crypto_tx_')) {
+            $orderId = Str::after($user->bot_state, 'waiting_crypto_tx_');
+            $order = Order::find($orderId);
+            if ($order && $order->user_id === $user->id && $order->status === 'pending' && $order->payment_method === 'manual_crypto') {
+                try {
+                    $fileName = $this->savePhotoAttachment($update, 'crypto-proofs');
+                    if (! $fileName) {
+                        throw new \Exception('Failed to save crypto proof image.');
+                    }
+                    $order->update(['crypto_payment_proof' => $fileName]);
+                    $user->update(['bot_state' => null]);
+                    Telegram::sendMessage([
+                        'chat_id' => $chatId,
+                        'text' => '✅ تصویر تراکنش ثبت شد. پس از بررسی توسط ادمین، نتیجه اعلام می‌شود.',
+                    ]);
+                    $this->notifyAdminManualCrypto($order, $user, 'تصویر تراکنش کریپتو ثبت شد');
+                } catch (\Exception $e) {
+                    Log::error('Crypto proof photo failed: '.$e->getMessage(), ['order_id' => $orderId]);
+                    Telegram::sendMessage(['chat_id' => $chatId, 'text' => '❌ خطا در ذخیره تصویر. دوباره تلاش کنید.']);
+                }
+            } else {
+                Telegram::sendMessage(['chat_id' => $chatId, 'text' => '❌ سفارش نامعتبر است.']);
+                $user->update(['bot_state' => null]);
+            }
+
+            return;
+        }
+
         if (Str::startsWith($user->bot_state, 'waiting_receipt_')) {
             $orderId = Str::after($user->bot_state, 'waiting_receipt_');
             $order = Order::find($orderId);
@@ -836,6 +885,9 @@ class WebhookController extends Controller
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "pay_card_{$order->id}"])]);
         if ($this->isPlisioActive()) {
             $keyboard->row([Keyboard::inlineButton(['text' => '💎 پرداخت Plisio (کریپتو)', 'callback_data' => "pay_plisio_{$order->id}"])]);
+        }
+        if ($this->isManualCryptoActive()) {
+            $keyboard->row([Keyboard::inlineButton(['text' => '💠 USDT / USDC (دستی)', 'callback_data' => "pay_mc_{$order->id}"])]);
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به پلن‌ها', 'callback_data' => '/plans'])]);
 
@@ -1017,6 +1069,141 @@ class WebhookController extends Controller
         $keyboard = Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '❌ انصراف از پرداخت', 'callback_data' => '/cancel_action'])]);
 
         $this->sendRawMarkdownMessage($chatId, $message, $keyboard, $messageId);
+    }
+
+    protected function isManualCryptoActive(): bool
+    {
+        return ManualCryptoService::isEnabled($this->settings);
+    }
+
+    protected function sendManualCryptoNetworkPicker($chatId, $orderId, $messageId = null): void
+    {
+        $order = Order::find($orderId);
+        $telegramUser = User::where('telegram_chat_id', $chatId)->first();
+        if (! $order || ! $telegramUser || $order->user_id !== $telegramUser->id || $order->status !== 'pending') {
+            $this->sendOrEditMainMenu($chatId, '❌ سفارش نامعتبر است.', $messageId);
+
+            return;
+        }
+        $networks = ManualCryptoService::availableNetworks($this->settings);
+        if ($networks === []) {
+            $this->sendOrEditMessage(
+                $chatId,
+                '❌ پرداخت USDT/USDC فعال نیست یا آدرس/نرخ در تنظیمات سایت کامل نشده.',
+                Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => '/wallet'])]),
+                $messageId
+            );
+
+            return;
+        }
+        $keyboard = Keyboard::make()->inline();
+        foreach ($networks as $netId => $label) {
+            $code = array_search($netId, ManualCryptoService::CALLBACK_CODES, true);
+            if ($code === false) {
+                continue;
+            }
+            $keyboard->row([Keyboard::inlineButton(['text' => $label, 'callback_data' => "mcn_{$orderId}_{$code}"])]);
+        }
+        $keyboard->row([Keyboard::inlineButton(['text' => '❌ انصراف', 'callback_data' => '/cancel_action'])]);
+        $this->sendOrEditMessage($chatId, '💠 شبکهٔ واریز USDT / USDC را انتخاب کنید:', $keyboard, $messageId);
+    }
+
+    protected function applyManualCryptoNetwork(User $user, int $orderId, string $code, $messageId = null): void
+    {
+        $order = Order::find($orderId);
+        if (! $order || $order->user_id !== $user->id || $order->status !== 'pending') {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ سفارش نامعتبر است.', $messageId);
+
+            return;
+        }
+        $network = ManualCryptoService::networkFromCallbackCode($code);
+        if (! $network || ! ManualCryptoService::networkIsReady($this->settings, $network)) {
+            Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => '❌ این شبکه در دسترس نیست.']);
+
+            return;
+        }
+        $crypto = ManualCryptoService::expectedAmount((float) $order->amount, $this->settings, $network);
+        if ($crypto === null) {
+            Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => '❌ نرخ تبدیل در تنظیمات نامعتبر است.']);
+
+            return;
+        }
+        $order->update([
+            'payment_method' => 'manual_crypto',
+            'crypto_network' => $network,
+            'crypto_amount_expected' => $crypto,
+            'crypto_tx_hash' => null,
+            'crypto_payment_proof' => null,
+        ]);
+        $addr = ManualCryptoService::address($this->settings, $network);
+        $label = ManualCryptoService::label($network);
+        $symbol = str_contains($network, 'usdc') ? 'USDC' : 'USDT';
+        $fmtCrypto = rtrim(rtrim(sprintf('%.8F', $crypto), '0'), '.');
+        $user->update(['bot_state' => 'waiting_crypto_tx_'.$orderId]);
+        $msg = "💠 {$label}\n\n";
+        $msg .= 'مبلغ سفارش: '.number_format($order->amount)." تومان\n";
+        $msg .= "مقدار دقیق واریز:\n{$fmtCrypto} {$symbol}\n\n";
+        $msg .= "آدرس ولت:\n{$addr}\n\n";
+        $msg .= 'پس از واریز، TxID را در یک پیام بنویسید یا تصویر تراکنش را بفرستید.';
+        $keyboard = Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '❌ انصراف', 'callback_data' => '/cancel_action'])]);
+        $this->sendOrEditMessage($user->telegram_chat_id, $msg, $keyboard, $messageId);
+    }
+
+    protected function processManualCryptoTxHash(User $user, string $orderId, string $text): void
+    {
+        $order = Order::find($orderId);
+        if (! $order || $order->user_id !== $user->id || $order->payment_method !== 'manual_crypto') {
+            $user->update(['bot_state' => null]);
+
+            return;
+        }
+        $hash = trim(mb_substr($text, 0, 120));
+        if (strlen($hash) < 8) {
+            Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => '❌ شناسه تراکنش خیلی کوتاه است. دوباره ارسال کنید.']);
+
+            return;
+        }
+        $order->update(['crypto_tx_hash' => $hash]);
+        $user->update(['bot_state' => null]);
+        Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => '✅ TxID ثبت شد. پس از تأیید ادمین نتیجه اعلام می‌شود.']);
+        $this->notifyAdminManualCrypto($order->fresh(), $user, 'TxID کریپتو ثبت شد');
+    }
+
+    protected function notifyAdminManualCrypto(Order $order, User $user, string $captionLine): void
+    {
+        $adminChatId = $this->settings->get('telegram_admin_chat_id');
+        if (! $adminChatId) {
+            return;
+        }
+        $network = $order->crypto_network ? ManualCryptoService::label($order->crypto_network) : '—';
+        $body = $captionLine."\nسفارش #{$order->id}\nکاربر: {$user->name} ({$user->id})\nمبلغ: ".number_format($order->amount)." تومان\nشبکه: {$network}\nTx: ".($order->crypto_tx_hash ?? '—');
+        try {
+            Telegram::sendMessage(['chat_id' => (int) $adminChatId, 'text' => $body]);
+        } catch (\Exception $e) {
+            Log::warning('notifyAdminManualCrypto: '.$e->getMessage());
+        }
+    }
+
+    protected function handleRenewManualCryptoPayment(User $user, string $originalOrderId, $messageId): void
+    {
+        $originalOrder = $user->orders()->with('plan')->find($originalOrderId);
+        if (! $originalOrder || ! $originalOrder->plan || $originalOrder->status !== 'paid') {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ سرویس مورد نظر برای تمدید یافت نشد.', $messageId);
+
+            return;
+        }
+        $plan = $originalOrder->plan;
+        $newRenewalOrder = $user->orders()->create([
+            'plan_id' => $plan->id,
+            'status' => 'pending',
+            'source' => 'telegram_renewal',
+            'amount' => $plan->price,
+            'expires_at' => null,
+            'panel_username' => $originalOrder->panel_username,
+        ]);
+        $newRenewalOrder->renews_order_id = $originalOrder->id;
+        $newRenewalOrder->save();
+        $this->sendManualCryptoNetworkPicker($user->telegram_chat_id, $newRenewalOrder->id, $messageId);
     }
 
     // ========================================================================
@@ -1935,14 +2122,19 @@ class WebhookController extends Controller
             'plan_id' => null, 'status' => 'pending', 'source' => 'telegram_deposit', 'amount' => $amount
         ]);
         $user->update(['bot_state' => null]);
-        if ($this->isPlisioActive()) {
+        if ($this->isPlisioActive() || $this->isManualCryptoActive()) {
             $keyboard = Keyboard::make()->inline()
-                ->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "deposit_card_{$order->id}"])])
-                ->row([Keyboard::inlineButton(['text' => '💎 پرداخت با Plisio', 'callback_data' => "deposit_plisio_{$order->id}"])])
-                ->row([Keyboard::inlineButton(['text' => '⬅️ انصراف', 'callback_data' => '/wallet'])]);
+                ->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "deposit_card_{$order->id}"])]);
+            if ($this->isPlisioActive()) {
+                $keyboard->row([Keyboard::inlineButton(['text' => '💎 پرداخت با Plisio', 'callback_data' => "deposit_plisio_{$order->id}"])]);
+            }
+            if ($this->isManualCryptoActive()) {
+                $keyboard->row([Keyboard::inlineButton(['text' => '💠 USDT / USDC (دستی)', 'callback_data' => "deposit_mc_{$order->id}"])]);
+            }
+            $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ انصراف', 'callback_data' => '/wallet'])]);
             $this->sendOrEditMessage(
                 $user->telegram_chat_id,
-                "شارژ کیف پول به مبلغ *".number_format($amount)."* تومان ثبت شد.\n\nروش پرداخت را انتخاب کنید:",
+                'شارژ کیف پول به مبلغ '.number_format($amount)." تومان ثبت شد.\n\nروش پرداخت را انتخاب کنید:",
                 $keyboard,
                 $messageId
             );
@@ -2020,6 +2212,9 @@ class WebhookController extends Controller
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 تمدید با کارت به کارت', 'callback_data' => "renew_pay_card_{$originalOrderId}"])]);
         if ($this->isPlisioActive()) {
             $keyboard->row([Keyboard::inlineButton(['text' => '💎 تمدید با Plisio', 'callback_data' => "renew_pay_plisio_{$originalOrderId}"])]);
+        }
+        if ($this->isManualCryptoActive()) {
+            $keyboard->row([Keyboard::inlineButton(['text' => '💠 تمدید با USDT / USDC', 'callback_data' => "renew_pay_mc_{$originalOrderId}"])]);
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به سرویس‌ها', 'callback_data' => '/my_services'])]);
 

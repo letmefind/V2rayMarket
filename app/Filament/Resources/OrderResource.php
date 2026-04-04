@@ -57,6 +57,27 @@ class OrderResource extends Resource
                     return '';
                 })->color(fn(Order $record) => $record->renews_order_id ? 'primary' : 'gray'),
                 IconColumn::make('source')->label('منبع')->icon(fn (?string $state): string => match ($state) { 'web' => 'heroicon-o-globe-alt', 'telegram' => 'heroicon-o-paper-airplane', default => 'heroicon-o-question-mark-circle' })->color(fn (?string $state): string => match ($state) { 'web' => 'primary', 'telegram' => 'info', default => 'gray' }),
+                Tables\Columns\TextColumn::make('payment_method')->label('روش پرداخت')->toggleable(isToggledHiddenByDefault: true)->formatStateUsing(fn (?string $state): string => match ($state) {
+                    'manual_crypto' => 'USDT/USDC دستی',
+                    'card' => 'کارت',
+                    'wallet' => 'کیف پول',
+                    'plisio' => 'Plisio',
+                    default => $state ?? '—',
+                }),
+                Tables\Columns\TextColumn::make('crypto_network')->label('شبکه کریپتو')->toggleable(isToggledHiddenByDefault: true)->formatStateUsing(function (?string $state): string {
+                    if (! $state) {
+                        return '—';
+                    }
+                    return match ($state) {
+                        'usdt_erc20' => 'USDT ERC20',
+                        'usdt_bep20' => 'USDT BEP20',
+                        'usdc_erc20' => 'USDC ERC20',
+                        default => $state,
+                    };
+                }),
+                Tables\Columns\TextColumn::make('crypto_amount_expected')->label('مقدار ارز')->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('crypto_tx_hash')->label('TxID')->limit(24)->toggleable(isToggledHiddenByDefault: true),
+                ImageColumn::make('crypto_payment_proof')->label('اثبات کریپتو')->disk('public')->toggleable(isToggledHiddenByDefault: true)->size(60)->circular()->url(fn (Order $record): ?string => $record->crypto_payment_proof ? Storage::disk('public')->url($record->crypto_payment_proof) : null)->openUrlInNewTab(),
                 Tables\Columns\TextColumn::make('status')->label('وضعیت')->badge()->color(fn (string $state): string => match ($state) { 'pending' => 'warning', 'paid' => 'success', 'expired' => 'danger', default => 'gray' })->formatStateUsing(fn (string $state): string => match ($state) { 'pending' => 'در انتظار پرداخت', 'paid' => 'پرداخت شده', 'expired' => 'منقضی شده', default => $state }),
                 Tables\Columns\TextColumn::make('created_at')->label('تاریخ سفارش')->dateTime('Y-m-d')->sortable(),
                 Tables\Columns\TextColumn::make('expires_at')->label('تاریخ انقضا')->dateTime('Y-m-d')->sortable(),

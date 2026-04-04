@@ -100,6 +100,13 @@
                                         </button>
                                     </form>
                                 @endif
+
+                                @if (\App\Services\ManualCryptoService::isEnabledFromDatabase())
+                                    <a href="{{ route('payment.manual-crypto', $order) }}"
+                                       class="block w-full p-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-center">
+                                        💠 پرداخت USDT / USDC (دستی)
+                                    </a>
+                                @endif
                             </div>
                         </div>
                     </div>
