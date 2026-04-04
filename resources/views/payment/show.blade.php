@@ -144,12 +144,25 @@
                             </button>
                         </form>
 
-                        <div class="w-full text-center p-6 border-2 rounded-lg transition dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 cursor-not-allowed opacity-60">
-                            <h4 class="font-bold text-gray-500 dark:text-gray-400">پرداخت با ارز دیجیتال</h4>
-                            <p class="text-sm text-gray-500 dark:text-gray-500 mt-2">
-                                (به زودی)
-                            </p>
-                        </div>
+                        @if (\App\Services\PlisioService::fromDatabase()->isEnabled())
+                            <form method="POST" action="{{ route('payment.crypto.process', $order->id) }}">
+                                @csrf
+                                <button type="submit"
+                                        class="w-full text-center p-6 border-2 rounded-lg hover:border-emerald-500 transition dark:border-gray-600 dark:hover:border-emerald-500">
+                                    <h4 class="font-bold text-gray-900 dark:text-gray-100">پرداخت با کریپتو (Plisio)</h4>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                                        هدایت به درگاه امن Plisio
+                                    </p>
+                                </button>
+                            </form>
+                        @else
+                            <div class="w-full text-center p-6 border-2 rounded-lg transition dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 cursor-not-allowed opacity-60">
+                                <h4 class="font-bold text-gray-500 dark:text-gray-400">پرداخت با ارز دیجیتال</h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                                    از پنل ادمین Plisio را فعال کنید
+                                </p>
+                            </div>
+                        @endif
 
                     </div>
                 </div>

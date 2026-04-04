@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Models\TelegramBotSetting;
+use App\Services\PlisioService;
 use App\Services\XUIService;
 use App\Models\User;
 use App\Services\MarzbanService;
@@ -429,6 +430,31 @@ class WebhookController extends Controller
         } elseif (Str::startsWith($data, 'pay_card_')) {
             $orderId = Str::after($data, 'pay_card_');
             $this->sendCardPaymentInfo($chatId, $orderId, $messageId);
+        } elseif (Str::startsWith($data, 'pay_plisio_')) {
+            $orderId = (int) Str::after($data, 'pay_plisio_');
+            try {
+                Telegram::answerCallbackQuery(['callback_query_id' => $callbackQuery->getId()]);
+            } catch (\Exception $e) {
+                Log::warning('answerCallbackQuery pay_plisio: '.$e->getMessage());
+            }
+            $this->startPlisioPayment($user, $orderId, $messageId);
+        } elseif (Str::startsWith($data, 'deposit_card_')) {
+            $orderId = Str::after($data, 'deposit_card_');
+            $ord = Order::find($orderId);
+            if ($ord && $ord->user_id === $user->id) {
+                try {
+                    Telegram::answerCallbackQuery(['callback_query_id' => $callbackQuery->getId()]);
+                } catch (\Exception $e) {
+                }
+                $this->sendCardPaymentInfo($chatId, $orderId, $messageId);
+            }
+        } elseif (Str::startsWith($data, 'deposit_plisio_')) {
+            $orderId = (int) Str::after($data, 'deposit_plisio_');
+            try {
+                Telegram::answerCallbackQuery(['callback_query_id' => $callbackQuery->getId()]);
+            } catch (\Exception $e) {
+            }
+            $this->startPlisioPayment($user, $orderId, $messageId);
         } elseif (Str::startsWith($data, 'enter_discount_')) {
             $orderId = Str::after($data, 'enter_discount_');
             $this->promptForDiscount($user, $orderId, $messageId);
@@ -479,6 +505,13 @@ class WebhookController extends Controller
         } elseif (Str::startsWith($data, 'renew_pay_card_')) {
             $originalOrderId = Str::after($data, 'renew_pay_card_');
             $this->handleRenewCardPayment($user, $originalOrderId, $messageId);
+        } elseif (Str::startsWith($data, 'renew_pay_plisio_')) {
+            $originalOrderId = Str::after($data, 'renew_pay_plisio_');
+            try {
+                Telegram::answerCallbackQuery(['callback_query_id' => $callbackQuery->getId()]);
+            } catch (\Exception $e) {
+            }
+            $this->handleRenewPlisioPayment($user, $originalOrderId, $messageId);
         } elseif (Str::startsWith($data, 'deposit_amount_')) {
             $amount = Str::after($data, 'deposit_amount_');
             $this->processDepositAmount($user, $amount, $messageId);
@@ -790,8 +823,11 @@ class WebhookController extends Controller
         if ($balance >= $order->amount) {
             $keyboard->row([Keyboard::inlineButton(['text' => '✅ پرداخت با کیف پول', 'callback_data' => "pay_wallet_order_{$order->id}"])]);
         }
-        $keyboard->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "pay_card_{$order->id}"])])
-            ->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به پلن‌ها', 'callback_data' => '/plans'])]);
+        $keyboard->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "pay_card_{$order->id}"])]);
+        if ($this->isPlisioActive()) {
+            $keyboard->row([Keyboard::inlineButton(['text' => '💎 پرداخت Plisio (کریپتو)', 'callback_data' => "pay_plisio_{$order->id}"])]);
+        }
+        $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به پلن‌ها', 'callback_data' => '/plans'])]);
 
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
@@ -1889,7 +1925,20 @@ class WebhookController extends Controller
             'plan_id' => null, 'status' => 'pending', 'source' => 'telegram_deposit', 'amount' => $amount
         ]);
         $user->update(['bot_state' => null]);
-        $this->sendCardPaymentInfo($user->telegram_chat_id, $order->id, $messageId);
+        if ($this->isPlisioActive()) {
+            $keyboard = Keyboard::make()->inline()
+                ->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "deposit_card_{$order->id}"])])
+                ->row([Keyboard::inlineButton(['text' => '💎 پرداخت با Plisio', 'callback_data' => "deposit_plisio_{$order->id}"])])
+                ->row([Keyboard::inlineButton(['text' => '⬅️ انصراف', 'callback_data' => '/wallet'])]);
+            $this->sendOrEditMessage(
+                $user->telegram_chat_id,
+                "شارژ کیف پول به مبلغ *".number_format($amount)."* تومان ثبت شد.\n\nروش پرداخت را انتخاب کنید:",
+                $keyboard,
+                $messageId
+            );
+        } else {
+            $this->sendCardPaymentInfo($user->telegram_chat_id, $order->id, $messageId);
+        }
     }
 
     protected function sendRawMarkdownMessage($chatId, $text, $keyboard, $messageId = null, $disablePreview = false)
@@ -1941,8 +1990,11 @@ class WebhookController extends Controller
         if ($balance >= $plan->price) {
             $keyboard->row([Keyboard::inlineButton(['text' => '✅ تمدید با کیف پول (آنی)', 'callback_data' => "renew_pay_wallet_{$originalOrderId}"])]);
         }
-        $keyboard->row([Keyboard::inlineButton(['text' => '💳 تمدید با کارت به کارت', 'callback_data' => "renew_pay_card_{$originalOrderId}"])])
-            ->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به سرویس‌ها', 'callback_data' => '/my_services'])]);
+        $keyboard->row([Keyboard::inlineButton(['text' => '💳 تمدید با کارت به کارت', 'callback_data' => "renew_pay_card_{$originalOrderId}"])]);
+        if ($this->isPlisioActive()) {
+            $keyboard->row([Keyboard::inlineButton(['text' => '💎 تمدید با Plisio', 'callback_data' => "renew_pay_plisio_{$originalOrderId}"])]);
+        }
+        $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به سرویس‌ها', 'callback_data' => '/my_services'])]);
 
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
@@ -2085,6 +2137,72 @@ class WebhookController extends Controller
         $newRenewalOrder->save();
 
         $this->sendCardPaymentInfo($user->telegram_chat_id, $newRenewalOrder->id, $messageId);
+    }
+
+    protected function handleRenewPlisioPayment($user, $originalOrderId, $messageId)
+    {
+        $originalOrder = $user->orders()->with('plan')->find($originalOrderId);
+        if (! $originalOrder || ! $originalOrder->plan || $originalOrder->status !== 'paid') {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ سرویس مورد نظر برای تمدید یافت نشد.', $messageId);
+
+            return;
+        }
+        $plan = $originalOrder->plan;
+
+        $newRenewalOrder = $user->orders()->create([
+            'plan_id' => $plan->id,
+            'status' => 'pending',
+            'source' => 'telegram_renewal',
+            'amount' => $plan->price,
+            'expires_at' => null,
+            'panel_username' => $originalOrder->panel_username,
+        ]);
+        $newRenewalOrder->renews_order_id = $originalOrder->id;
+        $newRenewalOrder->save();
+
+        $this->startPlisioPayment($user, $newRenewalOrder->id, $messageId);
+    }
+
+    protected function isPlisioActive(): bool
+    {
+        return (new PlisioService($this->settings))->isEnabled();
+    }
+
+    protected function startPlisioPayment(User $user, int $orderId, ?int $messageId): void
+    {
+        $order = Order::find($orderId);
+        if (! $order || $order->user_id !== $user->id || $order->status !== 'pending') {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ سفارش نامعتبر یا دیگر در انتظار پرداخت نیست.', $messageId);
+
+            return;
+        }
+
+        $plisio = new PlisioService($this->settings);
+        if (! $plisio->isEnabled()) {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ درگاه Plisio در تنظیمات سایت فعال نیست.', $messageId);
+
+            return;
+        }
+
+        try {
+            $data = $plisio->createInvoice($order, $user->email ?? null);
+            $order->update([
+                'plisio_txn_id' => $data['txn_id'],
+                'payment_method' => 'plisio',
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Telegram Plisio invoice: '.$e->getMessage());
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ خطا در ساخت فاکتور Plisio.', $messageId);
+
+            return;
+        }
+
+        $msg = "💎 *پرداخت Plisio*\n\n▫️ مبلغ: *".number_format($order->amount)."* تومان\n\nبرای ادامه دکمه زیر را بزنید.";
+        $keyboard = Keyboard::make()->inline()
+            ->row([Keyboard::inlineButton(['text' => '🔗 صفحه پرداخت Plisio', 'url' => $data['invoice_url']])])
+            ->row([Keyboard::inlineButton(['text' => '⬅️ منوی اصلی', 'callback_data' => '/start'])]);
+
+        $this->sendOrEditMessage($user->telegram_chat_id, $msg, $keyboard, $messageId);
     }
 
     protected function renewUserAccount(Order $originalOrder, Plan $plan)

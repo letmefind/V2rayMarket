@@ -92,13 +92,14 @@
                                     </button>
                                 </form>
 
-                                <!-- پرداخت ارز دیجیتال -->
-                                <form method="POST" action="{{ route('payment.crypto.process', $order) }}">
-                                    @csrf
-                                    <button type="submit" class="w-full p-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                                        🪙 پرداخت ارز دیجیتال
-                                    </button>
-                                </form>
+                                @if (\App\Services\PlisioService::fromDatabase()->isEnabled())
+                                    <form method="POST" action="{{ route('payment.crypto.process', $order) }}">
+                                        @csrf
+                                        <button type="submit" class="w-full p-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                                            🪙 پرداخت کریپتو (Plisio)
+                                        </button>
+                                    </form>
+                                @endif
                             </div>
                         </div>
                     </div>

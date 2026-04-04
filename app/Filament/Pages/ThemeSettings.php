@@ -272,6 +272,34 @@ class ThemeSettings extends Page implements HasForms
                             TextInput::make('payment_card_holder_name')->label('نام صاحب حساب'),
                             Textarea::make('payment_card_instructions')->label('توضیحات اضافی')->rows(3),
                         ]),
+                        Section::make('Plisio (plisio.net) — پرداخت کریپتو')
+                            ->description('وب‌هوک: '.url('/webhooks/plisio').' — این آدرس باید از اینترنت در دسترس باشد (HTTPS).')
+                            ->schema([
+                                Toggle::make('plisio_enabled')
+                                    ->label('فعال‌سازی Plisio')
+                                    ->default(false)
+                                    ->helperText('پس از فعال‌سازی، دکمه پرداخت کریپتو در سایت و ربات نمایش داده می‌شود.'),
+                                TextInput::make('plisio_api_key')
+                                    ->label('Secret key (API)')
+                                    ->password()
+                                    ->revealable()
+                                    ->helperText('از پنل Plisio → API settings کپی کنید.'),
+                                TextInput::make('plisio_source_currency')
+                                    ->label('ارز مبنای فاکتور (fiat)')
+                                    ->default('IRR')
+                                    ->placeholder('IRR')
+                                    ->helperText('مثال: IRR، USD. باید با Plisio سازگار باشد.'),
+                                TextInput::make('plisio_amount_multiplier')
+                                    ->label('ضریب مبلغ ارسالی به Plisio')
+                                    ->numeric()
+                                    ->default(10)
+                                    ->helperText('قیمت‌های سایت به تومان: معمولاً ۱۰ (تبدیل به ریال برای IRR). اگر مبلغ سایت به ریال است ۱ بگذارید.'),
+                                Textarea::make('plisio_allowed_psys_cids')
+                                    ->label('ارزهای مجاز (اختیاری)')
+                                    ->rows(2)
+                                    ->placeholder('BTC,USDT_TRX,ETH')
+                                    ->helperText('لیست جدا با کاما از شناسه ارزهای Plisio؛ خالی = همه فعال‌های فروشگاه.'),
+                            ]),
                     ]),
 
                     Tabs\Tab::make('تنظیمات ربات تلگرام')->icon('heroicon-o-paper-airplane')->schema([

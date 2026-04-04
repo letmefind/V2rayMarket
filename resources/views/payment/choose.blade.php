@@ -28,16 +28,17 @@
                     </form>
 
 
-                    <!-- گزینه ارز دیجیتال -->
-                    <form method="POST" action="{{ route('payment.crypto.process', $order->id) }}">
-                        @csrf
-                        <button type="submit" class="w-full text-center p-6 border-2 rounded-lg hover:border-green-500 transition">
-                            <h4 class="font-bold text-gray-900 dark:text-gray-100">پرداخت با ارز دیجیتال (USDT)</h4>
-                            <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                                پرداخت آنی و خودکار.
-                            </p>
-                        </button>
-                    </form>
+                    @if (\App\Services\PlisioService::fromDatabase()->isEnabled())
+                        <form method="POST" action="{{ route('payment.crypto.process', $order->id) }}">
+                            @csrf
+                            <button type="submit" class="w-full text-center p-6 border-2 rounded-lg hover:border-green-500 transition">
+                                <h4 class="font-bold text-gray-900 dark:text-gray-100">پرداخت با Plisio (کریپتو)</h4>
+                                <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                                    هدایت به درگاه Plisio
+                                </p>
+                            </button>
+                        </form>
+                    @endif
 
                 </div>
             </div>

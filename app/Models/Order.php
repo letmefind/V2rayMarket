@@ -9,9 +9,12 @@ class Order extends Model
 
     protected $fillable = [
         'user_id', 'plan_id', 'status', 'expires_at',
-        'payment_method', 'card_payment_receipt', 'nowpayments_payment_id',
+        'payment_method', 'card_payment_receipt', 'nowpayments_payment_id', 'plisio_txn_id',
         'config_details',
         'amount',
+        'discount_amount',
+        'discount_code_id',
+        'renews_order_id',
         'source',
         'panel_username',
 

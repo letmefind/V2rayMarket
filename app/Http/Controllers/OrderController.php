@@ -11,6 +11,7 @@ use App\Models\Plan;
 use App\Models\Setting;
 use App\Models\Transaction;
 use App\Services\MarzbanService;
+use App\Services\PlisioService;
 use App\Services\XUIService;
 use App\Models\Notification;
 use Illuminate\Http\Request;
@@ -737,19 +738,50 @@ class OrderController extends Controller
         return redirect()->route('dashboard')->with('status', 'سرویس شما با موفقیت فعال شد.');
     }
     /**
-     * Process crypto payment (placeholder).
+     * پرداخت از طریق Plisio (کریپتو) — هدایت به صفحه فاکتور Plisio.
      */
     public function processCryptoPayment(Order $order)
     {
-        $order->update(['payment_method' => 'crypto']);
+        if (Auth::id() !== $order->user_id) {
+            abort(403);
+        }
 
-        Auth::user()->notifications()->create([
-            'type' => 'crypto_payment_info',
-            'title' => 'پرداخت با ارز دیجیتال',
-            'message' => "اطلاعات پرداخت با ارز دیجیتال برای سفارش #{$order->id} ثبت شد. لطفاً به زودی اقدام به پرداخت کنید.",
-            'link' => route('order.show', $order->id),
-        ]);
+        if ($order->status === 'paid') {
+            return redirect()->route('dashboard')->with('status', 'این سفارش قبلاً پرداخت شده است.');
+        }
 
-        return redirect()->back()->with('status', '💡 پرداخت با ارز دیجیتال به زودی فعال می‌شود. لطفاً از روش کارت به کارت استفاده کنید.');
+        $plisio = PlisioService::fromDatabase();
+        if (! $plisio->isEnabled()) {
+            return redirect()->back()->with('error', 'درگاه پرداخت Plisio فعال نیست. از پنل ادمین آن را فعال و API Key را ذخیره کنید.');
+        }
+
+        if ($order->plan_id) {
+            $originalAmount = $order->plan->price;
+            $discountAmount = (float) ($order->discount_amount ?? 0);
+            if ($discountAmount <= 0 && (int) session('discount_applied_order_id') === (int) $order->id) {
+                $discountAmount = (float) session('discount_amount', 0);
+            }
+            $finalAmount = max(0, $originalAmount - $discountAmount);
+            $order->update([
+                'payment_method' => 'plisio',
+                'discount_amount' => $discountAmount,
+                'amount' => $finalAmount,
+            ]);
+        } else {
+            $order->update([
+                'payment_method' => 'plisio',
+            ]);
+        }
+
+        try {
+            $invoice = $plisio->createInvoice($order, Auth::user()->email);
+            $order->update(['plisio_txn_id' => $invoice['txn_id']]);
+        } catch (\Throwable $e) {
+            Log::error('Plisio invoice: '.$e->getMessage());
+
+            return redirect()->back()->with('error', 'ساخت فاکتور Plisio ناموفق بود: '.$e->getMessage());
+        }
+
+        return redirect()->away($invoice['invoice_url']);
     }
 }
