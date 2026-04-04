@@ -2725,7 +2725,14 @@ class WebhookController extends Controller
     protected function handleTrialRequest($user)
     {
         $settings = $this->settings;
-        $chatId = $user->telegram_chat_id;
+        $chatId = $user->telegram_chat_id !== null && $user->telegram_chat_id !== ''
+            ? (int) $user->telegram_chat_id
+            : null;
+        if ($chatId === null || $chatId === 0) {
+            Log::error('Trial request: missing telegram_chat_id', ['user_id' => $user->id]);
+
+            return;
+        }
 
         Log::info('Trial request initiated', [
             'user_id' => $user->id,
@@ -2735,12 +2742,17 @@ class WebhookController extends Controller
         ]);
 
         $trialEnabled = filter_var($settings->get('trial_enabled') ?? '0', FILTER_VALIDATE_BOOLEAN);
-        if (!$trialEnabled) {
-            Telegram::sendMessage([
-                'chat_id' => $chatId,
-                'text' => $this->escape('❌ قابلیت دریافت اکانت تست در حال حاضر غیرفعال است.')
-            ]);
+        if (! $trialEnabled) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => '❌ قابلیت دریافت اکانت تست در حال حاضر غیرفعال است.',
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Trial disabled message failed: '.$e->getMessage(), ['chat_id' => $chatId]);
+            }
             Log::warning('Trial account is disabled in settings');
+
             return;
         }
 
@@ -2748,18 +2760,19 @@ class WebhookController extends Controller
         $currentTrials = $user->trial_accounts_taken ?? 0;
 
         if ($currentTrials >= $limit) {
-            $escapedCurrent = $this->escape($currentTrials);
-            $escapedLimit = $this->escape($limit);
-            $message = "❗️ *شما به حداکثر تعداد اکانت تست رسیده‌اید\\!*\n\n";
-            $message .= "📊 *تعداد اکانت تست گرفته شده:* `{$escapedCurrent}` از `{$escapedLimit}`\n\n";
-            $message .= "⚠️ دیگر مجاز به دریافت اکانت تست نیستید\\.";
-            
-            Telegram::sendMessage([
-                'chat_id' => $chatId,
-                'text' => $message,
-                'parse_mode' => 'MarkdownV2'
-            ]);
+            $plain = "❗️ شما به حداکثر تعداد اکانت تست رسیده‌اید.\n\n"
+                ."تعداد اکانت تست گرفته‌شده: {$currentTrials} از {$limit}\n\n"
+                .'دیگر مجاز به دریافت اکانت تست نیستید.';
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => $plain,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Trial limit message failed: '.$e->getMessage(), ['chat_id' => $chatId]);
+            }
             Log::info('User trial limit reached', ['current' => $currentTrials, 'limit' => $limit]);
+
             return;
         }
 
@@ -3026,45 +3039,34 @@ class WebhookController extends Controller
                 $trialNumber = $currentTrials + 1;
                 $remainingTrials = max(0, $limit - $trialNumber);
 
-                // پیام بهبود یافته با فرمت بهتر
-                $escapedVolume = $this->escape($volumeMB);
-                $escapedDuration = $this->escape($durationHours);
-                $escapedTrialNumber = $this->escape($trialNumber);
-                $escapedRemaining = $this->escape($remainingTrials);
-                
-                // پیام اصلی با اطلاعات
-                $escapedLimit = $this->escape($limit);
-                $message = "✨ *اکانت تست شما آماده است\\!*\n\n";
+                $h = static fn ($t) => htmlspecialchars((string) $t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $message = '<b>✨ اکانت تست شما آماده است!</b>'."\n\n";
                 $message .= "━━━━━━━━━━━━━━━━\n\n";
-                $message .= "🔢 *شماره اکانت تست:* `{$escapedTrialNumber}` از `{$escapedLimit}`\n";
-                
+                $message .= '🔢 شماره اکانت تست: <code>'.$h($trialNumber).'</code> از <code>'.$h($limit)."</code>\n";
+
                 if ($remainingTrials > 0) {
-                    $message .= "📊 *باقی‌مانده:* `{$escapedRemaining} اکانت تست`\n";
+                    $message .= '📊 باقی‌مانده: <code>'.$h($remainingTrials).' اکانت تست</code>'."\n";
                 } else {
-                    $message .= "⚠️ *این آخرین اکانت تست شماست\\!*\n";
+                    $message .= "⚠️ <b>این آخرین اکانت تست شماست!</b>\n";
                 }
-                
+
                 $message .= "\n━━━━━━━━━━━━━━━━\n\n";
-                $message .= "📦 *حجم:* `{$escapedVolume} مگابایت`\n";
-                $message .= "⏳ *اعتبار:* `{$escapedDuration} ساعت`\n\n";
+                $message .= '📦 حجم: <code>'.$h($volumeMB).' مگابایت</code>'."\n";
+                $message .= '⏳ اعتبار: <code>'.$h($durationHours).' ساعت</code>'."\n\n";
                 $message .= "━━━━━━━━━━━━━━━━\n\n";
-                $message .= "🔗 *لینک اتصال در پیام بعدی ارسال می‌شود\\.*\n";
-                $message .= "💡 *نکته:* لینک را انتخاب کرده و کپی کنید\\.";
+                $message .= "🔗 لینک اتصال در پیام بعدی ارسال می‌شود.\n";
+                $message .= '💡 نکته: لینک را انتخاب کرده و کپی کنید.';
 
                 Telegram::sendMessage([
                     'chat_id' => $chatId,
                     'text' => $message,
-                    'parse_mode' => 'MarkdownV2'
+                    'parse_mode' => 'HTML',
                 ]);
-                
-                // ارسال لینک در یک پیام جداگانه با فرمت monospace برای کپی آسان
-                // در MarkdownV2، داخل backtick فقط باید backtick و backslash escape شوند
-                $escapedLinkForMonospace = str_replace(['`', '\\'], ['\\`', '\\\\'], $configLink);
-                $linkMessage = "`{$escapedLinkForMonospace}`";
+
                 Telegram::sendMessage([
                     'chat_id' => $chatId,
-                    'text' => $linkMessage,
-                    'parse_mode' => 'MarkdownV2'
+                    'text' => '<code>'.$h($configLink).'</code>',
+                    'parse_mode' => 'HTML',
                 ]);
 
                 Log::info('Trial account created successfully', [
@@ -3082,10 +3084,14 @@ class WebhookController extends Controller
                 'trace' => $e->getTraceAsString()
             ]);
 
-            Telegram::sendMessage([
-                'chat_id' => $chatId,
-                'text' => $this->escape('❌ خطا در ساخت اکانت تست. لطفاً بعداً تلاش کنید.')
-            ]);
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => '❌ خطا در ساخت اکانت تست. لطفاً بعداً تلاش کنید.',
+                ]);
+            } catch (\Throwable $sendEx) {
+                Log::error('Trial error user notify failed: '.$sendEx->getMessage(), ['chat_id' => $chatId]);
+            }
         }
     }
 
