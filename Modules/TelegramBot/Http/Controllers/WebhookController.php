@@ -184,9 +184,12 @@ class WebhookController extends Controller
                         $welcomeMessage .= "\n\n🎁 هدیه خوش‌آمدگویی: " . number_format($welcomeGift) . " تومان به کیف پول شما اضافه شد.";
                     }
                     if ($referrer->telegram_chat_id) {
-                        $referrerMessage = "👤 *خبر خوب!*\n\nکاربر جدیدی با نام «{$userFirstName}» با لینک دعوت شما به ربات پیوست.";
+                        $referrerMessage = "👤 خبر خوب!\n\nکاربر جدیدی با نام «{$userFirstName}» با لینک دعوت شما به ربات پیوست.";
                         try {
-                            Telegram::sendMessage(['chat_id' => $referrer->telegram_chat_id, 'text' => $this->escape($referrerMessage), 'parse_mode' => 'MarkdownV2']);
+                            Telegram::sendMessage([
+                                'chat_id' => (int) $referrer->telegram_chat_id,
+                                'text' => $referrerMessage,
+                            ]);
                         } catch (\Exception $e) {
                             Log::error("Failed to send referral notification: " . $e->getMessage());
                         }
@@ -195,9 +198,9 @@ class WebhookController extends Controller
             }
 
             Telegram::sendMessage([
-                'chat_id' => $chatId,
+                'chat_id' => (int) $chatId,
                 'text' => $welcomeMessage,
-                'reply_markup' => $this->getReplyMainMenu()
+                'reply_markup' => $this->getReplyMainMenu(),
             ]);
             return;
         }
@@ -248,19 +251,26 @@ class WebhookController extends Controller
             case '/start':
                 $telegramSettings = \App\Models\TelegramBotSetting::pluck('value', 'key');
                 $startMessage = $telegramSettings->get('start_message', 'سلام مجدد! لطفاً یک گزینه را انتخاب کنید:');
-                Telegram::sendMessage([
-                    'chat_id' => $chatId,
-                    'text' => $this->escape($startMessage),
-                    'parse_mode' => 'MarkdownV2',
-                    'reply_markup' => $this->getReplyMainMenu()
-                ]);
+                try {
+                    Telegram::sendMessage([
+                        'chat_id' => (int) $chatId,
+                        'text' => $startMessage,
+                        'reply_markup' => $this->getReplyMainMenu(),
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::error('Telegram /start sendMessage failed: '.$e->getMessage(), ['chat_id' => $chatId]);
+                }
                 break;
             default:
-                Telegram::sendMessage([
-                    'chat_id' => $chatId,
-                    'text' => 'دستور شما نامفهوم است. لطفاً از دکمه‌های منو استفاده کنید.',
-                    'reply_markup' => $this->getReplyMainMenu()
-                ]);
+                try {
+                    Telegram::sendMessage([
+                        'chat_id' => (int) $chatId,
+                        'text' => 'دستور شما نامفهوم است. لطفاً از دکمه‌های منو استفاده کنید.',
+                        'reply_markup' => $this->getReplyMainMenu(),
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::error('Telegram default reply failed: '.$e->getMessage(), ['chat_id' => $chatId]);
+                }
                 break;
         }
     }
@@ -1944,11 +1954,11 @@ class WebhookController extends Controller
     protected function sendRawMarkdownMessage($chatId, $text, $keyboard, $messageId = null, $disablePreview = false)
     {
         $payload = [
-            'chat_id' => $chatId,
+            'chat_id' => (int) $chatId,
             'text' => $text,
             'parse_mode' => 'MarkdownV2',
             'reply_markup' => $keyboard,
-            'disable_web_page_preview' => $disablePreview
+            'disable_web_page_preview' => $disablePreview,
         ];
 
         try {
@@ -1961,7 +1971,24 @@ class WebhookController extends Controller
         } catch (\Exception $e) {
             if ($messageId && Str::contains($e->getMessage(), 'not found')) {
                 unset($payload['message_id']);
-                Telegram::sendMessage($payload);
+                try {
+                    Telegram::sendMessage($payload);
+                } catch (\Exception $e2) {
+                    Log::error('sendRawMarkdownMessage fallback send failed: '.$e2->getMessage());
+                }
+            } else {
+                Log::warning('sendRawMarkdownMessage failed: '.$e->getMessage());
+                unset($payload['parse_mode']);
+                try {
+                    if ($messageId) {
+                        $payload['message_id'] = $messageId;
+                        Telegram::editMessageText($payload);
+                    } else {
+                        Telegram::sendMessage($payload);
+                    }
+                } catch (\Exception $e2) {
+                    Log::error('sendRawMarkdownMessage plain retry failed: '.$e2->getMessage());
+                }
             }
         }
     }
@@ -3097,11 +3124,11 @@ class WebhookController extends Controller
 
     protected function sendOrEditMessage($chatId, $text, $keyboard, $messageId = null)
     {
+        // بدون parse_mode: MarkdownV2 + escape() روی متن فارسی/پویا اغلب باعث خطای API (و در SDK گاهی «Not Found») می‌شود.
         $payload = [
-            'chat_id'      => $chatId,
-            'text'         => $this->escape($text),
-            'parse_mode'   => 'MarkdownV2',
-            'reply_markup' => $keyboard
+            'chat_id'      => (int) $chatId,
+            'text'         => $text,
+            'reply_markup' => $keyboard,
         ];
         try {
             if ($messageId) {
