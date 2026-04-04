@@ -125,7 +125,23 @@ final class ManualCryptoService
             return null;
         }
 
-        return round($amountToman / $rate, 8);
+        return round($amountToman / $rate, self::displayDecimals($settings));
+    }
+
+    /** تعداد ارقام اعشار برای نمایش و گرد کردن مقدار ارز (۰ تا ۸). */
+    public static function displayDecimals(Collection $settings): int
+    {
+        $raw = $settings->get('manual_crypto_display_decimals', 2);
+        $n = is_numeric($raw) ? (int) $raw : 2;
+
+        return min(8, max(0, $n));
+    }
+
+    public static function formatAmountForDisplay(float $amount, Collection $settings): string
+    {
+        $d = self::displayDecimals($settings);
+
+        return number_format($amount, $d, '.', '');
     }
 
     public static function validateNetwork(string $network): bool

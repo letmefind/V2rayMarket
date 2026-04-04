@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\Inbound;
 use App\Models\Setting;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Section;
@@ -21,6 +22,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\HtmlString;
 
 class ThemeSettings extends Page implements HasForms
 {
@@ -100,6 +102,11 @@ class ThemeSettings extends Page implements HasForms
                 ? (float) $settings['plisio_amount_multiplier']
                 : 10;
         }
+        if (array_key_exists('manual_crypto_display_decimals', $settings) && $settings['manual_crypto_display_decimals'] !== null && $settings['manual_crypto_display_decimals'] !== '') {
+            $settings['manual_crypto_display_decimals'] = is_numeric($settings['manual_crypto_display_decimals'])
+                ? (int) $settings['manual_crypto_display_decimals']
+                : 2;
+        }
 
         // Repeater فقط آرایه می‌پذیرد؛ رشتهٔ JSON خراب یا @channel به‌صورت متن → foreach() string given
         $defaultTelegramChannels = [
@@ -155,6 +162,7 @@ class ThemeSettings extends Page implements HasForms
             'manual_crypto_usdt_erc20_address' => null,
             'manual_crypto_usdt_bep20_address' => null,
             'manual_crypto_usdc_erc20_address' => null,
+            'manual_crypto_display_decimals' => 2,
         ], $settings));
     }
 
@@ -368,6 +376,13 @@ class ThemeSettings extends Page implements HasForms
                                     ->label('هر ۱ USDC معادل چند تومان؟ (اختیاری)')
                                     ->numeric()
                                     ->helperText('اگر خالی باشد از نرخ USDT بالا استفاده می‌شود.'),
+                                TextInput::make('manual_crypto_display_decimals')
+                                    ->label('تعداد رقم اعشار مقدار USDT/USDC')
+                                    ->numeric()
+                                    ->default(2)
+                                    ->minValue(0)
+                                    ->maxValue(8)
+                                    ->helperText('مثلاً ۲ → نمایش ۳٫۳۳ USDC؛ محاسبه و ذخیره هم با همین دقت گرد می‌شود.'),
                                 TextInput::make('manual_crypto_usdt_erc20_address')
                                     ->label('آدرس ولت USDT — شبکه ERC20')
                                     ->maxLength(128),
@@ -410,8 +425,30 @@ class ThemeSettings extends Page implements HasForms
                     Tabs\Tab::make('تنظیمات ربات تلگرام')->icon('heroicon-o-paper-airplane')->schema([
                         Section::make('اطلاعات اتصال ربات')->schema([
                             TextInput::make('telegram_bot_token')->label('توکن ربات تلگرام')->password(),
-                            TextInput::make('telegram_admin_chat_id')->label('چت آی‌دی ادمین')->numeric(),
+                            TextInput::make('telegram_admin_chat_id')
+                                ->label('چت آی‌دی ادمین')
+                                ->numeric()
+                                ->helperText('پیام‌های رسید کارت، کریپتو دستی و دکمه‌های تأیید/لغو سفارش فقط به این چت ارسال می‌شود.'),
                         ]),
+                        Section::make('تأیید سفارش از داخل تلگرام (ادمین)')
+                            ->icon('heroicon-o-check-badge')
+                            ->schema([
+                                Placeholder::make('telegram_admin_order_help')
+                                    ->hiddenLabel()
+                                    ->columnSpanFull()
+                                    ->content(new HtmlString(
+                                        '<div class="text-sm text-gray-600 dark:text-gray-400 space-y-3 max-w-3xl">'
+                                        .'<p><strong>دکمه‌ها کجا هستند؟</strong> دکمه‌های «تأیید پرداخت» و «لغو سفارش» زیر منوی کاربران عادی (/start) <strong>اضافه نمی‌شوند</strong>. فقط در <strong>چت خصوصی شما با ربات</strong> (همین چت آی‌دی ادمین) دیده می‌شوند.</p>'
+                                        .'<ul class="list-disc ps-5 space-y-1">'
+                                        .'<li>وقتی مشتری <strong>رسید کارت</strong> یا <strong>TxID / تصویر</strong> پرداخت USDT-USDC دستی را در ربات ثبت کند، برای شما پیام با دکمه می‌آید.</li>'
+                                        .'<li>یا همین حالا در چت با ربات بفرستید: <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded font-mono">/pending</code> (یا <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded font-mono">orders</code> یا کلمهٔ «سفارشات») تا تا <strong>۲۰</strong> سفارش معلق با همان دکمه‌ها لیست شود.</li>'
+                                        .'</ul>'
+                                        .'<p class="text-xs text-gray-500 dark:text-gray-500 border-t border-gray-200 dark:border-gray-700 pt-2">تعداد رقم اعشار USDT/USDC: تب «تنظیمات پرداخت» ← بخش «پرداخت دستی USDT / USDC».</p>'
+                                        .'</div>'
+                                    )),
+                            ])
+                            ->collapsible()
+                            ->collapsed(false),
                         Section::make('اجبار به عضویت در کانال')
                             ->description('کاربران باید قبل از استفاده از ربات، در تمام کانال‌های زیر عضو شوند.')
                             ->schema([

@@ -24,7 +24,7 @@
                     <p><span class="text-gray-500">معادل تومانی سفارش:</span> <strong>{{ number_format($order->amount) }} تومان</strong></p>
                     <p class="text-lg">
                         <span class="text-gray-500">مقدار دقیق واریز:</span>
-                        <strong class="text-emerald-600 dark:text-emerald-400 font-mono">{{ rtrim(rtrim(number_format((float) $expected, 8, '.', ''), '0'), '.') ?: '0' }}</strong>
+                        <strong class="text-emerald-600 dark:text-emerald-400 font-mono">{{ $expectedFormatted }}</strong>
                         <span class="text-gray-700 dark:text-gray-300">{{ str_contains($order->crypto_network ?? '', 'usdc') ? 'USDC' : 'USDT' }}</span>
                     </p>
                     <div class="mt-4 space-y-2">

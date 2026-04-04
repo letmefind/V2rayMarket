@@ -826,13 +826,16 @@ class OrderController extends Controller
 
         $addr = ManualCryptoService::address($settings, $order->crypto_network);
         $label = ManualCryptoService::label($order->crypto_network);
-        $expected = $order->crypto_amount_expected;
+        $expectedFormatted = ManualCryptoService::formatAmountForDisplay(
+            (float) ($order->crypto_amount_expected ?? 0),
+            $settings
+        );
 
         return view('payment.manual-crypto-submit', [
             'order' => $order,
             'addr' => $addr,
             'label' => $label,
-            'expected' => $expected,
+            'expectedFormatted' => $expectedFormatted,
         ]);
     }
 

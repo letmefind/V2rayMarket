@@ -2,9 +2,11 @@
 
 namespace Modules\TelegramBot\Http\Controllers;
 
+use App\Actions\ApprovePendingOrderAction;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Setting;
+use App\Support\AdminOrderCallback;
 use App\Models\TelegramBotSetting;
 use App\Services\ManualCryptoService;
 use App\Services\PlisioService;
@@ -145,6 +147,11 @@ class WebhookController extends Controller
         $message = $update->getMessage();
         $chatId = $message->getChat()->getId();
         $text = trim($message->getText() ?? '');
+
+        if ($this->handleTelegramAdminCommands($chatId, $text)) {
+            return;
+        }
+
         $user = User::where('telegram_chat_id', $chatId)->first();
 
         if ($user && !$this->isUserMemberOfChannel($user)) {
@@ -333,12 +340,263 @@ class WebhookController extends Controller
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
 
+    protected function adminPendingOrderKeyboard(Order $order): Keyboard
+    {
+        return Keyboard::make()->inline()
+            ->row([
+                Keyboard::inlineButton(['text' => '✅ تأیید پرداخت', 'callback_data' => AdminOrderCallback::approveData($order->id)]),
+                Keyboard::inlineButton(['text' => '🗑 لغو سفارش', 'callback_data' => AdminOrderCallback::cancelData($order->id)]),
+            ]);
+    }
+
+    /**
+     * دستورهای متنی فقط برای چت آی‌دی ادمین (بدون نیاز به ثبت‌نام به‌عنوان «کاربر» ربات).
+     */
+    protected function handleTelegramAdminCommands(int|string $chatId, string $text): bool
+    {
+        $adminId = $this->settings->get('telegram_admin_chat_id');
+        if ($adminId === null || $adminId === '') {
+            return false;
+        }
+        if ((string) $chatId !== trim((string) $adminId)) {
+            return false;
+        }
+
+        $ascii = strtolower($text);
+        $triggersFa = ['سفارشات', 'سفارشات معلق', 'لیست سفارشات'];
+        $triggersEn = ['/pending', '/orders', 'pending', 'orders'];
+        if (! in_array($text, $triggersFa, true) && ! in_array($ascii, $triggersEn, true)) {
+            return false;
+        }
+
+        $this->sendAdminPendingOrderMessages((int) $chatId);
+
+        return true;
+    }
+
+    protected function sendAdminPendingOrderMessages(int $adminChatId): void
+    {
+        $orders = Order::query()
+            ->with(['user', 'plan'])
+            ->where('status', 'pending')
+            ->orderByDesc('id')
+            ->limit(20)
+            ->get();
+
+        if ($orders->isEmpty()) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $adminChatId,
+                    'text' => '📭 هیچ سفارش در انتظار تأیید نیست.',
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('sendAdminPendingOrderMessages empty: '.$e->getMessage());
+            }
+
+            return;
+        }
+
+        try {
+            Telegram::sendMessage([
+                'chat_id' => $adminChatId,
+                'text' => "📋 سفارش‌های در انتظار: {$orders->count()} مورد\nهر کدام در پیام جدا با دکمهٔ تأیید / لغو ارسال می‌شود.",
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('sendAdminPendingOrderMessages header: '.$e->getMessage());
+        }
+
+        foreach ($orders as $order) {
+            $u = $order->user;
+            $planLabel = $order->plan_id ? ($order->plan->name ?? 'پلن') : 'شارژ کیف پول';
+            $pay = match ($order->payment_method) {
+                'manual_crypto' => 'USDT/USDC دستی',
+                'card' => 'کارت به کارت',
+                'wallet' => 'کیف پول',
+                'plisio' => 'Plisio',
+                default => $order->payment_method ?? '—',
+            };
+            $line = "🧾 سفارش #{$order->id}\n{$planLabel}\nکاربر: ".($u->name ?? '—')." ({$order->user_id})\nمبلغ: ".number_format($order->amount)." تومان\nروش: {$pay}";
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $adminChatId,
+                    'text' => $line,
+                    'reply_markup' => $this->adminPendingOrderKeyboard($order),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('sendAdminPendingOrderMessages row: '.$e->getMessage(), ['order_id' => $order->id]);
+            }
+        }
+    }
+
+    protected function isTelegramAdminChat(int|string $chatId): bool
+    {
+        $id = $this->settings->get('telegram_admin_chat_id');
+        if ($id === null || $id === '') {
+            return false;
+        }
+
+        return (string) $chatId === trim((string) $id);
+    }
+
+    protected function stripAdminOrderInlineKeyboard($callbackQuery): void
+    {
+        try {
+            $msg = $callbackQuery->getMessage();
+            Telegram::editMessageReplyMarkup([
+                'chat_id' => $msg->getChat()->getId(),
+                'message_id' => $msg->getMessageId(),
+                'reply_markup' => json_encode(['inline_keyboard' => []]),
+            ]);
+        } catch (\Throwable $e) {
+            Log::debug('stripAdminOrderInlineKeyboard: '.$e->getMessage());
+        }
+    }
+
+    protected function handleAdminApprovePendingOrder($callbackQuery, int $orderId): void
+    {
+        if (! $this->isTelegramAdminChat($callbackQuery->getMessage()->getChat()->getId())) {
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'فقط ادمین ربات می‌تواند این کار را انجام دهد.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return;
+        }
+
+        $order = Order::find($orderId);
+        if (! $order || $order->status !== 'pending') {
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'سفارش نامعتبر یا قبلاً پردازش شده.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return;
+        }
+
+        $result = ApprovePendingOrderAction::execute($order->fresh());
+
+        $answerText = $result->success
+            ? $result->title
+            : Str::limit(trim($result->title.($result->body ? ': '.$result->body : '')), 190);
+
+        try {
+            Telegram::answerCallbackQuery([
+                'callback_query_id' => $callbackQuery->getId(),
+                'text' => $answerText,
+                'show_alert' => ! $result->success,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('admin approve answerCallbackQuery: '.$e->getMessage());
+        }
+
+        $this->stripAdminOrderInlineKeyboard($callbackQuery);
+
+        if ($result->success) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $callbackQuery->getMessage()->getChat()->getId(),
+                    'text' => "✅ سفارش #{$orderId} تأیید و اجرا شد.",
+                ]);
+            } catch (\Throwable $e) {
+            }
+        }
+    }
+
+    protected function handleAdminCancelPendingOrder($callbackQuery, int $orderId): void
+    {
+        if (! $this->isTelegramAdminChat($callbackQuery->getMessage()->getChat()->getId())) {
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'فقط ادمین ربات می‌تواند این کار را انجام دهد.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return;
+        }
+
+        $order = Order::find($orderId);
+        if (! $order || $order->status !== 'pending') {
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'سفارش نامعتبر یا قبلاً پردازش شده.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return;
+        }
+
+        $buyer = $order->user;
+        try {
+            $order->delete();
+        } catch (\Throwable $e) {
+            Log::error('Admin cancel order delete failed: '.$e->getMessage(), ['order_id' => $orderId]);
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'حذف سفارش با خطا مواجه شد.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e2) {
+            }
+
+            return;
+        }
+
+        try {
+            Telegram::answerCallbackQuery([
+                'callback_query_id' => $callbackQuery->getId(),
+                'text' => 'سفارش حذف شد.',
+                'show_alert' => false,
+            ]);
+        } catch (\Throwable $e) {
+        }
+
+        $this->stripAdminOrderInlineKeyboard($callbackQuery);
+
+        if ($buyer && $buyer->telegram_chat_id) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => (int) $buyer->telegram_chat_id,
+                    'text' => "❌ سفارش #{$orderId} توسط مدیریت لغو شد. اگر مبلغی واریز کرده‌اید با پشتیبانی هماهنگ کنید.",
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('notify buyer cancel: '.$e->getMessage());
+            }
+        }
+    }
+
     protected function handleCallbackQuery($update)
     {
         $callbackQuery = $update->getCallbackQuery();
         $chatId = $callbackQuery->getMessage()->getChat()->getId();
         $messageId = $callbackQuery->getMessage()->getMessageId();
-        $data = $callbackQuery->getData();
+        $data = $callbackQuery->getData() ?? '';
+
+        if (preg_match('/^aok_(\d+)_([a-f0-9]{8})$/', $data, $adm) && AdminOrderCallback::verify((int) $adm[1], $adm[2])) {
+            $this->handleAdminApprovePendingOrder($callbackQuery, (int) $adm[1]);
+
+            return;
+        }
+        if (preg_match('/^acn_(\d+)_([a-f0-9]{8})$/', $data, $adm) && AdminOrderCallback::verify((int) $adm[1], $adm[2])) {
+            $this->handleAdminCancelPendingOrder($callbackQuery, (int) $adm[1]);
+
+            return;
+        }
+
         $user = User::where('telegram_chat_id', $chatId)->first();
 
         if ($user && !$this->isUserMemberOfChannel($user)) {
@@ -782,13 +1040,14 @@ class WebhookController extends Controller
                         $adminMessage .= "*کاربر:* " . $this->escape($user->name) . " \\(ID: `{$user->id}`\\)\n";
                         $adminMessage .= "*مبلغ:* " . $this->escape(number_format($order->amount) . ' تومان') . "\n";
                         $adminMessage .= "*نوع سفارش:* " . $this->escape($orderType) . "\n\n";
-                        $adminMessage .= $this->escape("لطفا در پنل مدیریت بررسی و تایید کنید.");
+                        $adminMessage .= $this->escape('با دکمه‌های زیر تأیید کنید یا سفارش را لغو کنید.');
 
                         Telegram::sendPhoto([
                             'chat_id' => $adminChatId,
                             'photo' => InputFile::create(Storage::disk('public')->path($fileName)),
                             'caption' => $adminMessage,
-                            'parse_mode' => 'MarkdownV2'
+                            'parse_mode' => 'MarkdownV2',
+                            'reply_markup' => $this->adminPendingOrderKeyboard($order->fresh()),
                         ]);
                     }
 
@@ -1156,7 +1415,7 @@ class WebhookController extends Controller
         $addr = ManualCryptoService::address($this->settings, $network);
         $label = ManualCryptoService::label($network);
         $symbol = str_contains($network, 'usdc') ? 'USDC' : 'USDT';
-        $fmtCrypto = rtrim(rtrim(sprintf('%.8F', $crypto), '0'), '.');
+        $fmtCrypto = ManualCryptoService::formatAmountForDisplay((float) $crypto, $this->settings);
         $user->update(['bot_state' => 'waiting_crypto_tx_'.$orderId]);
         $h = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $msg = "💠 <b>{$h($label)}</b>\n\n";
@@ -1227,10 +1486,25 @@ class WebhookController extends Controller
         if (! $adminChatId) {
             return;
         }
+        $order = $order->fresh();
         $network = $order->crypto_network ? ManualCryptoService::label($order->crypto_network) : '—';
-        $body = $captionLine."\nسفارش #{$order->id}\nکاربر: {$user->name} ({$user->id})\nمبلغ: ".number_format($order->amount)." تومان\nشبکه: {$network}\nTx: ".($order->crypto_tx_hash ?? '—');
+        $body = $captionLine."\nسفارش #{$order->id}\nکاربر: {$user->name} ({$user->id})\nمبلغ: ".number_format($order->amount)." تومان\nشبکه: {$network}\nTx: ".($order->crypto_tx_hash ?? '—')."\n\nبا دکمه‌ها تأیید یا لغو کنید.";
+        $keyboard = $this->adminPendingOrderKeyboard($order);
         try {
-            Telegram::sendMessage(['chat_id' => (int) $adminChatId, 'text' => $body]);
+            if ($order->crypto_payment_proof && Storage::disk('public')->exists($order->crypto_payment_proof)) {
+                Telegram::sendPhoto([
+                    'chat_id' => (int) $adminChatId,
+                    'photo' => InputFile::create(Storage::disk('public')->path($order->crypto_payment_proof)),
+                    'caption' => $body,
+                    'reply_markup' => $keyboard,
+                ]);
+            } else {
+                Telegram::sendMessage([
+                    'chat_id' => (int) $adminChatId,
+                    'text' => $body,
+                    'reply_markup' => $keyboard,
+                ]);
+            }
         } catch (\Exception $e) {
             Log::warning('notifyAdminManualCrypto: '.$e->getMessage());
         }
