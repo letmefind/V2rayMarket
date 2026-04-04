@@ -382,7 +382,8 @@ class WebhookController extends Controller
             return;
         }
 
-        if (!Str::startsWith($data, ['/deposit_custom', '/support_new', 'reply_ticket_', 'enter_discount_'])) {
+        if (! Str::startsWith($data, ['/deposit_custom', '/support_new', 'reply_ticket_', 'enter_discount_'])
+            && ! Str::startsWith($data, 'ccaddr_')) {
             $user->update(['bot_state' => null]);
         }
 
@@ -460,6 +461,8 @@ class WebhookController extends Controller
             }
         } elseif (preg_match('/^mcn_(\d+)_(e|b|u)$/', $data, $mcn)) {
             $this->applyManualCryptoNetwork($user, (int) $mcn[1], $mcn[2], $messageId);
+        } elseif (preg_match('/^ccaddr_(\d+)$/', $data, $cca)) {
+            $this->sendManualCryptoAddressCopyMessage($user, (int) $cca[1]);
         } elseif (Str::startsWith($data, 'deposit_card_')) {
             $orderId = Str::after($data, 'deposit_card_');
             $ord = Order::find($orderId);
@@ -1155,13 +1158,42 @@ class WebhookController extends Controller
         $symbol = str_contains($network, 'usdc') ? 'USDC' : 'USDT';
         $fmtCrypto = rtrim(rtrim(sprintf('%.8F', $crypto), '0'), '.');
         $user->update(['bot_state' => 'waiting_crypto_tx_'.$orderId]);
-        $msg = "💠 {$label}\n\n";
-        $msg .= 'مبلغ سفارش: '.number_format($order->amount)." تومان\n";
-        $msg .= "مقدار دقیق واریز:\n{$fmtCrypto} {$symbol}\n\n";
-        $msg .= "آدرس ولت:\n{$addr}\n\n";
+        $h = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $msg = "💠 <b>{$h($label)}</b>\n\n";
+        $msg .= 'مبلغ سفارش: '.$h(number_format($order->amount))." تومان\n";
+        $msg .= "مقدار دقیق واریز:\n<b>{$h($fmtCrypto)} {$h($symbol)}</b>\n\n";
+        $msg .= "آدرس ولت — <i>روی بلوک زیر بزنید تا کپی شود:</i>\n<code>{$h($addr)}</code>\n\n";
         $msg .= 'پس از واریز، TxID را در یک پیام بنویسید یا تصویر تراکنش را بفرستید.';
-        $keyboard = Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '❌ انصراف', 'callback_data' => '/cancel_action'])]);
-        $this->sendOrEditMessage($user->telegram_chat_id, $msg, $keyboard, $messageId);
+        $keyboard = Keyboard::make()->inline()
+            ->row([Keyboard::inlineButton(['text' => '📋 ارسال آدرس در پیام جدا (کپی)', 'callback_data' => "ccaddr_{$orderId}"])])
+            ->row([Keyboard::inlineButton(['text' => '❌ انصراف', 'callback_data' => '/cancel_action'])]);
+        $this->sendOrEditMessage($user->telegram_chat_id, $msg, $keyboard, $messageId, 'HTML');
+    }
+
+    protected function sendManualCryptoAddressCopyMessage(User $user, int $orderId): void
+    {
+        $order = Order::find($orderId);
+        if (! $order || $order->user_id !== $user->id || $order->payment_method !== 'manual_crypto' || ! $order->crypto_network) {
+            Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => '❌ سفارش یا اطلاعات شبکه معتبر نیست.']);
+
+            return;
+        }
+        $addr = ManualCryptoService::address($this->settings, $order->crypto_network);
+        if (trim($addr) === '') {
+            Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => '❌ آدرسی ثبت نشده است.']);
+
+            return;
+        }
+        $h = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        try {
+            Telegram::sendMessage([
+                'chat_id' => (int) $user->telegram_chat_id,
+                'text' => "📋 <b>فقط این آدرس را کپی کنید:</b>\n\n<code>{$h($addr)}</code>",
+                'parse_mode' => 'HTML',
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('sendManualCryptoAddressCopyMessage: '.$e->getMessage());
+        }
     }
 
     protected function processManualCryptoTxHash(User $user, string $orderId, string $text): void
@@ -3337,7 +3369,7 @@ class WebhookController extends Controller
         }
     }
 
-    protected function sendOrEditMessage($chatId, $text, $keyboard, $messageId = null)
+    protected function sendOrEditMessage($chatId, $text, $keyboard, $messageId = null, ?string $parseMode = null)
     {
         // بدون parse_mode: MarkdownV2 + escape() روی متن فارسی/پویا اغلب باعث خطای API (و در SDK گاهی «Not Found») می‌شود.
         $payload = [
@@ -3345,6 +3377,9 @@ class WebhookController extends Controller
             'text'         => $text,
             'reply_markup' => $keyboard,
         ];
+        if ($parseMode !== null && $parseMode !== '') {
+            $payload['parse_mode'] = $parseMode;
+        }
         try {
             if ($messageId) {
                 $payload['message_id'] = $messageId;

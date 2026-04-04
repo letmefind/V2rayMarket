@@ -27,8 +27,20 @@
                         <strong class="text-emerald-600 dark:text-emerald-400 font-mono">{{ rtrim(rtrim(number_format((float) $expected, 8, '.', ''), '0'), '.') ?: '0' }}</strong>
                         <span class="text-gray-700 dark:text-gray-300">{{ str_contains($order->crypto_network ?? '', 'usdc') ? 'USDC' : 'USDT' }}</span>
                     </p>
-                    <div class="mt-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg break-all dir-ltr text-left font-mono text-sm">
-                        {{ $addr }}
+                    <div class="mt-4 space-y-2">
+                        <span class="text-sm text-gray-600 dark:text-gray-400">آدرس ولت — با یک ضربه روی فیلد یا دکمهٔ «کپی آدرس» کپی کنید</span>
+                        <div class="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                            <input type="text" readonly id="manual-crypto-wallet-address"
+                                   value="{{ $addr }}"
+                                   class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 px-3 py-2.5 font-mono text-sm dir-ltr text-left cursor-pointer"
+                                   onclick="this.select(); this.setSelectionRange(0, this.value.length);"
+                                   title="برای انتخاب همه و کپی">
+                            <button type="button" id="manual-crypto-copy-btn"
+                                    class="shrink-0 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-700">
+                                کپی آدرس
+                            </button>
+                        </div>
+                        <p id="manual-crypto-copy-toast" class="hidden text-sm text-green-600 dark:text-green-400">در کلیپ‌بورد کپی شد.</p>
                     </div>
                     <p class="text-sm text-amber-700 dark:text-amber-300">
                         فقط به همین آدرس و فقط روی همین شبکه واریز کنید. اشتباه شبکه باعث از دست رفتن دارایی می‌شود.
@@ -63,4 +75,24 @@
             </div>
         </div>
     </div>
+
+    @push('scripts')
+        <script>
+            document.getElementById('manual-crypto-copy-btn')?.addEventListener('click', async function () {
+                const el = document.getElementById('manual-crypto-wallet-address');
+                const addr = el?.value || '';
+                const toast = document.getElementById('manual-crypto-copy-toast');
+                try {
+                    await navigator.clipboard.writeText(addr);
+                    toast?.classList.remove('hidden');
+                    setTimeout(() => toast?.classList.add('hidden'), 2500);
+                } catch (e) {
+                    el?.select();
+                    document.execCommand('copy');
+                    toast?.classList.remove('hidden');
+                    setTimeout(() => toast?.classList.add('hidden'), 2500);
+                }
+            });
+        </script>
+    @endpush
 </x-app-layout>
