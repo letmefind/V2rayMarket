@@ -11,6 +11,7 @@ use App\Models\Setting;
 use App\Models\Transaction;
 use App\Services\MarzbanService;
 use App\Services\XUIService;
+use App\Support\TelegramBotToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Telegram\Bot\Laravel\Facades\Telegram;
@@ -79,7 +80,7 @@ class FulfillOrderAfterPaymentAction
         if (! $user->telegram_chat_id) {
             return;
         }
-        $token = $settings->get('telegram_bot_token');
+        $token = TelegramBotToken::normalize($settings->get('telegram_bot_token'));
         if (! $token) {
             return;
         }
@@ -381,7 +382,7 @@ class FulfillOrderAfterPaymentAction
         if (! $user->telegram_chat_id) {
             return;
         }
-        $token = $settings->get('telegram_bot_token');
+        $token = TelegramBotToken::normalize($settings->get('telegram_bot_token'));
         if (! $token) {
             return;
         }

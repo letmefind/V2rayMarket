@@ -11,6 +11,7 @@ use App\Models\Transaction;
 use App\Models\Notification as UserNotification;
 use App\Services\MarzbanService;
 use App\Services\XUIService;
+use App\Support\TelegramBotToken;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
@@ -93,12 +94,15 @@ class OrderResource extends Resource
                                         $telegramMessage = "✅ کیف پول شما به مبلغ *" . number_format($order->amount) . " تومان* با موفقیت شارژ شد.\n\n";
                                         $telegramMessage .= "موجودی جدید شما: *" . number_format($user->fresh()->balance) . " تومان*";
 
-                                        Telegram::setAccessToken($settings->get('telegram_bot_token'));
-                                        Telegram::sendMessage([
-                                            'chat_id' => $user->telegram_chat_id,
-                                            'text' => $telegramMessage,
-                                            'parse_mode' => 'Markdown'
-                                        ]);
+                                        $tgToken = TelegramBotToken::normalize($settings->get('telegram_bot_token'));
+                                        if ($tgToken) {
+                                            Telegram::setAccessToken($tgToken);
+                                            Telegram::sendMessage([
+                                                'chat_id' => $user->telegram_chat_id,
+                                                'text' => $telegramMessage,
+                                                'parse_mode' => 'Markdown',
+                                            ]);
+                                        }
                                     } catch (\Exception $e) {
                                         Log::error('Failed to send wallet charge notification via Telegram: ' . $e->getMessage());
                                     }
@@ -519,8 +523,11 @@ class OrderResource extends Resource
                                         $telegramMessage = $isRenewal
                                             ? "✅ سرویس شما (*{$plan->name}*) با موفقیت تمدید شد.\n\n❗️*نکته مهم:* لینک اشتراک شما تغییر کرده است. لطفاً لینک جدید زیر را کپی و در نرم‌افزار خود آپدیت کنید:\n\n`" . $finalConfig . "`"
                                             : "✅ سرویس شما (*{$plan->name}*) با موفقیت فعال شد.\n\nاطلاعات کانفیگ شما:\n`" . $finalConfig . "`\n\nمی‌توانید لینک بالا را کپی کرده و در نرم‌افزار خود import کنید.";
-                                        Telegram::setAccessToken($settings->get('telegram_bot_token'));
-                                        Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => $telegramMessage, 'parse_mode' => 'Markdown']);
+                                        $tgToken = TelegramBotToken::normalize($settings->get('telegram_bot_token'));
+                                        if ($tgToken) {
+                                            Telegram::setAccessToken($tgToken);
+                                            Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => $telegramMessage, 'parse_mode' => 'Markdown']);
+                                        }
                                     } catch (\Exception $e) {
                                         Log::error('Failed to send Telegram notification: ' . $e->getMessage());
                                     }

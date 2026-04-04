@@ -26,6 +26,7 @@ use Telegram\Bot\Keyboard\Keyboard;
 use Illuminate\Support\Str;
 use App\Models\DiscountCode;
 use App\Models\DiscountCodeUsage;
+use App\Support\TelegramBotToken;
 use Carbon\Carbon;
 use Telegram\Bot\FileUpload\InputFile;
 
@@ -41,7 +42,7 @@ class WebhookController extends Controller
                 $this->settings = \App\Models\Setting::all()->pluck('value', 'key');
             }
 
-            $botToken = $this->settings->get('telegram_bot_token');
+            $botToken = TelegramBotToken::normalize($this->settings->get('telegram_bot_token'));
             if (!$botToken) {
                 \Log::error('❌ Cannot send broadcast message: bot token is not set.');
                 return false;
@@ -78,7 +79,7 @@ class WebhookController extends Controller
             if (!$this->settings) {
                 $this->settings = \App\Models\Setting::all()->pluck('value', 'key');
             }
-            $botToken = $this->settings->get('telegram_bot_token');
+            $botToken = TelegramBotToken::normalize($this->settings->get('telegram_bot_token'));
             if (!$botToken) {
                 \Illuminate\Support\Facades\Log::error('Cannot send single Telegram message: bot token is not set.');
                 return false;
@@ -114,7 +115,7 @@ class WebhookController extends Controller
 
         try {
             $this->settings = Setting::all()->pluck('value', 'key');
-            $botToken = $this->settings->get('telegram_bot_token');
+            $botToken = TelegramBotToken::normalize($this->settings->get('telegram_bot_token'));
             if (!$botToken) {
                 Log::warning('Telegram bot token is not set.');
                 return response('ok', 200);
@@ -2551,7 +2552,7 @@ class WebhookController extends Controller
             return false;
         }
 
-        $botToken = $this->settings->get('telegram_bot_token');
+        $botToken = TelegramBotToken::normalize($this->settings->get('telegram_bot_token'));
         if (empty($botToken)) {
             Log::error('❌ Bot token is not set!');
             return false;
@@ -2724,12 +2725,15 @@ class WebhookController extends Controller
         $photo = collect($update->getMessage()->getPhoto())->last();
         if(!$photo) return null;
 
-        $botToken = $this->settings->get('telegram_bot_token');
+        $botToken = TelegramBotToken::normalize($this->settings->get('telegram_bot_token'));
         try {
             $file = Telegram::getFile(['file_id' => $photo->getFileId()]);
             $filePath = method_exists($file, 'getFilePath') ? $file->getFilePath() : ($file['file_path'] ?? null);
             if(!$filePath) { throw new \Exception('File path not found in Telegram response.'); }
 
+            if (empty($botToken)) {
+                throw new \Exception('Telegram bot token is not set.');
+            }
             $fileContents = file_get_contents("https://api.telegram.org/file/bot{$botToken}/{$filePath}");
             if ($fileContents === false) { throw new \Exception('Failed to download file content.');}
 

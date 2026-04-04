@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Models\Inbound;
 use App\Models\Setting;
+use App\Support\TelegramBotToken;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
@@ -373,7 +374,16 @@ class ThemeSettings extends Page implements HasForms
 
                     Tabs\Tab::make('تنظیمات ربات تلگرام')->icon('heroicon-o-paper-airplane')->schema([
                         Section::make('اطلاعات اتصال ربات')->schema([
-                            TextInput::make('telegram_bot_token')->label('توکن ربات تلگرام')->password(),
+                            TextInput::make('telegram_bot_token')
+                                ->label('توکن ربات تلگرام')
+                                ->password()
+                                ->dehydrateStateUsing(function ($state) {
+                                    if ($state === null || $state === '') {
+                                        return $state;
+                                    }
+
+                                    return TelegramBotToken::normalize($state) ?? trim((string) $state);
+                                }),
                             TextInput::make('telegram_admin_chat_id')->label('چت آی‌دی ادمین')->numeric(),
                         ]),
                         Section::make('اجبار به عضویت در کانال')

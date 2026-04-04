@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Setting;
+use App\Support\TelegramBotToken;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -41,7 +42,8 @@ class SetTelegramWebhook extends Command
         if ($botToken && is_array($botToken)) {
             $botToken = (string)($botToken[0] ?? '');
         }
-        $botToken = $botToken ? trim((string)$botToken) : null;
+        $botToken = $botToken ? trim((string) $botToken) : null;
+        $botToken = TelegramBotToken::normalize($botToken);
 
         if (!$appUrl || $appUrl === 'http://localhost') {
             $errorMessage = 'Error: APP_URL is not set correctly in your .env file. It should be your public domain (e.g., https://yourdomain.com).';
