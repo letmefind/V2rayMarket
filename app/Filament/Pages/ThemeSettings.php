@@ -95,6 +95,44 @@ class ThemeSettings extends Page implements HasForms
                 : 10;
         }
 
+        // Repeater فقط آرایه می‌پذیرد؛ رشتهٔ JSON خراب یا @channel به‌صورت متن → foreach() string given
+        $defaultTelegramChannels = [
+            ['channel_id' => '', 'channel_name' => null],
+        ];
+        if (! isset($settings['telegram_required_channels'])) {
+            $settings['telegram_required_channels'] = $defaultTelegramChannels;
+        } else {
+            $trc = $settings['telegram_required_channels'];
+            if (is_string($trc)) {
+                $decoded = json_decode($trc, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $settings['telegram_required_channels'] = $decoded === [] ? $defaultTelegramChannels : array_values($decoded);
+                } elseif (trim($trc) !== '') {
+                    $settings['telegram_required_channels'] = [
+                        ['channel_id' => $trc, 'channel_name' => null],
+                    ];
+                } else {
+                    $settings['telegram_required_channels'] = $defaultTelegramChannels;
+                }
+            } elseif (! is_array($trc)) {
+                $settings['telegram_required_channels'] = $defaultTelegramChannels;
+            } elseif ($trc === []) {
+                $settings['telegram_required_channels'] = $defaultTelegramChannels;
+            } else {
+                $normalized = [];
+                foreach ($trc as $row) {
+                    if (! is_array($row)) {
+                        continue;
+                    }
+                    $normalized[] = [
+                        'channel_id' => (string) ($row['channel_id'] ?? ''),
+                        'channel_name' => $row['channel_name'] ?? null,
+                    ];
+                }
+                $settings['telegram_required_channels'] = $normalized === [] ? $defaultTelegramChannels : $normalized;
+            }
+        }
+
         $this->form->fill(array_merge([
             'panel_type' => 'marzban',
             'xui_host' => null,
