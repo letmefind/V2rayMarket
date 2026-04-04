@@ -3,7 +3,6 @@
 namespace Modules\TelegramBot\Listeners;
 
 use App\Models\Setting;
-use App\Support\TelegramBotToken;
 use Illuminate\Contracts\Queue\ShouldQueue; // <-- مهم: برای استفاده از صف
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -51,7 +50,7 @@ class SendTelegramReplyNotification
             Log::info("Attempting to send Telegram notification for ticket #{$ticket->id} to user {$ticketOwner->id}.");
 
             $settings = Setting::pluck('value', 'key');
-            $botToken = TelegramBotToken::normalize($settings->get('telegram_bot_token'));
+            $botToken = $settings->get('telegram_bot_token');
             if (!$botToken) {
                 Log::error('Telegram bot token not found in settings.');
                 return;
