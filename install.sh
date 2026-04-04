@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # ==================================================================================
-# === اسکریپت نصب نهایی، هوشمند و ضد خطا برای پروژه VPNMarket روی Ubuntu 22.04 ===
-# === نویسنده: Arvin Vahed                                                       ===
-# === https://github.com/arvinvahed/VPNMarket                                    ===
+# === اسکریپت نصب برای V2rayMarket (fork کاستوم) روی Ubuntu 22.04                ===
+# === منبع اصلی پروژه: https://github.com/arvinvahed/VPNMarket (Arvin Vahed)      ===
+# === این مخزن: https://github.com/letmefind/V2rayMarket                         ===
 # ==================================================================================
 
 set -e
@@ -16,7 +16,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 PROJECT_PATH="/var/www/vpnmarket"
-GITHUB_REPO="https://github.com/arvinvahed/VPNMarket.git"
+GITHUB_REPO="https://github.com/letmefind/V2rayMarket.git"
 PHP_VERSION="8.3"
 
 # === تابع جلوگیری از نصب Go ===

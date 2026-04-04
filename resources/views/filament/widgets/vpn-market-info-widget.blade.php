@@ -4,17 +4,18 @@
             <div class="flex-1">
 
                 <a
-                    href="https://github.com/arvinvahed/VPNMarket"
+                    href="https://github.com/letmefind/V2rayMarket"
                     rel="noopener noreferrer"
                     target="_blank"
                     class="block text-xl font-bold text-gray-950 dark:text-white"
                 >
 
-                    VPNMarket Project
+                    V2rayMarket
                 </a>
 
                 <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                    نسخه 1.1.0 - پنل مدیریت هوشمند VPN
+                    نسخه کاستوم — پنل مدیریت VPN (مبتنی بر
+                    <a href="https://github.com/arvinvahed/VPNMarket" target="_blank" rel="noopener noreferrer" class="underline hover:text-primary-600">VPNMarket</a>)
                 </p>
             </div>
 
@@ -22,7 +23,7 @@
 
                 <x-filament::link
                     color="gray"
-                    href="https://github.com/arvinvahed/VPNMarket"
+                    href="https://github.com/letmefind/V2rayMarket"
                     icon-alias="panels::widgets.filament-info.open-github-button"
                     rel="noopener noreferrer"
                     target="_blank"

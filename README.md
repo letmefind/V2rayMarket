@@ -1,109 +1,94 @@
-<p align="center">
-  <!-- لوگوی پروژه شما از پوشه github/github/logo.png -->
-  <img src="https://raw.githubusercontent.com/arvinvahed/VPNMarket/main/github/github/logo.png" width="350" alt="VPNMarket Logo">
-</p>
+# V2rayMarket (نسخهٔ کاستوم)
 
-<h1 align="center">VPNMarket - پنل مدیریت جامع و هوشمند مرزبان و X-UI</h1>
-
-<p align="center">
-  <strong>یک ابزار قدرتمند، رایگان و متن-باز برای مدیریت، فروش و کسب درآمد از سرویس‌های VPN مبتنی بر پنل‌های Marzban و Sanaei (X-UI)</strong>
-</p>
-
-<p align="center">
-  <a href="https://t.me/VPNMarket_OfficialSupport"><img src="https://img.shields.io/badge/Telegram-Group-blue.svg?style=for-the-badge&logo=telegram" alt="گروه تلگرام"></a>
-  <a href="https://www.youtube.com/@iraneclips8168/videos"><img src="https://img.shields.io/badge/YouTube-Channel-red.svg?style=for-the-badge&logo=youtube" alt="کانال یوتیوب"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="لایسنس"></a>
-</p>
+پنل مدیریت و فروش سرویس VPN مبتنی بر **Marzban** و **X-UI (Sanaei)** — ساخته‌شده با **Laravel** و **Filament**.
 
 ---
 
-**VPNMarket** فقط یک پنل مدیریت ساده نیست؛ یک اکوسیستم کامل برای متحول کردن کسب‌وکار VPN شماست. اگر از پنل‌های پیچیده، کاربری سخت و عدم وجود امکانات فروش خودکار خسته شده‌اید، این پروژه برای شما ساخته شده است. ما با استفاده از قدرت **لاراول** و زیبایی **فیلامنت**، ابزاری را توسعه داده‌ایم که نه تنها مدیریت را ساده می‌کند، بلکه به شما در کسب درآمد نیز کمک می‌کند.
+## منبع اصلی پروژه (الزامی)
 
-## ✨ نمایی از محیط پنل
+این مخزن **بر پایهٔ پروژهٔ متن‌باز VPNMarket** توسعه داده شده است. استفاده، مطالعه یا مشارکت در این کد بدون آگاهی از منبع اصلی کامل نیست.
 
-<p align="center">
-   <img src="https://raw.githubusercontent.com/arvinvahed/VPNMarket/main/github/github/panel1.PNG" width="45%" alt="داشبورد اصلی">
-  <img src="https://raw.githubusercontent.com/arvinvahed/VPNMarket/main/github/github/panel2.PNG" width="45%" alt="مدیریت کاربران">
-  <br>
-  <img src="https://raw.githubusercontent.com/arvinvahed/VPNMarket/main/github/github/panel3.PNG" width="90%" alt="تنظیمات سرور">
-</p>
+| | لینک |
+|---|------|
+| **مخزن اصلی (upstream)** | [**github.com/arvinvahed/VPNMarket**](https://github.com/arvinvahed/VPNMarket) |
+| **این نسخهٔ کاستوم** | [**github.com/letmefind/V2rayMarket**](https://github.com/letmefind/V2rayMarket) |
 
-## 🚀 ویژگی‌های کلیدی که عاشقشان خواهید شد
+تغییرات متعددی نسبت به خط اصلی اعمال شده است (به‌روزرسانی پشته، ماژول‌ها، امکانات ادمین و رفتار سیستم). با این حال **ریشهٔ ایده، معماری اولیه و بخش عمدهٔ پایه از VPNMarket است** و باید در هر بازنشر، مستند یا مشتق دیگر به مخزن بالا ارجاع داده شود.
 
-- 🌐 **پشتیبانی همزمان از Marzban و X-UI (Sanaei):** به سادگی چندین سرور از هر دو پنل را به سیستم متصل و به صورت یکپارچه مدیریت کنید.
+---
 
-- 🤖 **ربات تلگرام هوشمند:**
-  - فروش خودکار اشتراک‌ها و تحویل آنی به کاربر.
-  - ارائه اطلاعات حساب و لینک‌های اتصال.
-  - پشتیبانی از درگاه‌های پرداخت مختلف.
+## تفاوت این مخزن با upstream (خلاصه)
 
-- 📱 **اپلیکیشن اختصاصی اندروید:** کاربران شما می‌توانند به راحتی اشتراک خود را مدیریت کرده و به سرورها متصل شوند.
+- به‌روزرسانی پشته: **Laravel 12**، **PHP 8.3+**، **Filament 3.2**، ابزارهای فرانت‌اند جدیدتر (مثلاً Vite 7).
+- معماری **ماژولار** (`nwidart/laravel-modules`) با ماژول‌هایی از جمله:
+  - **TelegramBot** — ربات و وب‌هوک
+  - **Ticketing** — تیکت و پشتیبانی
+  - **Blog** — وبلاگ (دسته و پست)
+  - **Referral** — ارجاع و معرفی
+- پنل ادمین و منابع اصلی اپلیکیشن: کاربران، سفارش‌ها، پلن‌ها، اینباندها، کدهای تخفیف، پخش تلگرام و غیره.
+- پشتیبانی از چند تم در بخش فرانت (مثلاً dragon، cyberpunk، arcane، rocket) و بومی‌سازی فارسی در `resources/lang`.
 
-- 💰 **سیستم کسب درآمد:**
-  - تعریف پلن‌های مختلف (بر اساس حجم، زمان یا هر دو).
-  - اتصال به درگاه‌های پرداخت ایرانی و بین‌المللی.
-  - مدیریت کامل تراکنش‌ها و فاکتورها.
+جزئیات دقیق تغییرات را می‌توانید با مقایسهٔ تاریخچهٔ گیت با upstream دنبال کنید.
 
-- 🧩 **معماری پلاگین-محور:**
-  - قابلیت توسعه و افزودن امکانات جدید از طریق پلاگین‌ها.
-  - به راحتی درگاه پرداخت یا قابلیت جدید خود را به سیستم اضافه کنید.
+---
 
-- ⚡ **نصب جادویی با یک دستور:** کل سیستم را در کمتر از چند دقیقه روی سرور خود راه‌اندازی کنید، بدون نیاز به دانش فنی پیچیده.
+## پیش‌نیازها
 
-- ❤️ **کاملاً رایگان و متن-باز:** ما به قدرت جامعه متن-باز ایمان داریم. این پروژه همیشه رایگان خواهد بود و شما می‌توانید در توسعه آن مشارکت کنید.
+- PHP **^8.3** با اکستنشن‌های معمول Laravel
+- Composer 2
+- Node.js و npm (برای بیلد فرانت)
+- پایگاه داده: معمولاً **MySQL** / MariaDB
+- وب‌سرور: Nginx یا Apache (تنظیم `public` به‌عنوان document root)
 
-## 🛠️ تکنولوژی‌های استفاده شده
-- **فریم‌ورک:** Laravel 11
-- **پنل مدیریت:** Filament 3
-- **زبان:** PHP 8.2+
-- **وب سرور:** Nginx
-- **دیتابیس:** MySQL
+---
 
-## 💬 به جامعه بزرگ ما بپیوندید!
-
-برای دریافت پشتیبانی، گفتگو با سایر کاربران، ارائه پیشنهاد و اطلاع از آخرین آپدیت‌ها، ما را در شبکه‌های اجتماعی دنبال کنید:
-
-- 🔵 **گروه پشتیبانی تلگرام:** [**VPNMarket_OfficialSupport**](https://t.me/VPNMarket_OfficialSupport)
-  - *محل اصلی برای پرسش و پاسخ و حل مشکلات شما.*
-
-- 🔴 **کانال آموزشی یوتیوب:** [**Iran Eclips**](https://www.youtube.com/@iraneclips8168/videos)
-  - *آموزش‌های ویدیویی نصب، کانفیگ و استفاده از تمام امکانات پروژه.*
-
-## ⚙️ راهنمای نصب (جادوی تک-دستوری)
-
-### پیش‌نیازها
-*   یک سرور تمیز با سیستم‌عامل **Ubuntu 22.04**.
-*   یک دامنه یا زیردامنه که به IP سرور شما متصل شده باشد.
-*   دسترسی SSH به سرور با کاربر `root` یا دسترسی `sudo`.
-
-### دستور نصب
-وارد سرور خود شوید و دستور زیر را اجرا کنید. اسکریپت ما بقیه کارها را به صورت خودکار انجام می‌دهد!
+## نصب سریع (کلون این مخزن)
 
 ```bash
-wget -O install.sh https://raw.githubusercontent.com/arvinvahed/VPNMarket/main/install.sh && sudo bash install.sh
+git clone https://github.com/letmefind/V2rayMarket.git
+cd V2rayMarket
+cp .env.example .env
+composer install
+php artisan key:generate
+php artisan migrate --seed   # در صورت وجود seeder مناسب
+npm install && npm run build
+php artisan storage:link
 ```
 
-## 🔄 نحوه آپدیت پروژه
+سپس متغیرهای `.env` (دیتابیس، URL اپ، تنظیمات پنل Marzban/X-UI، تلگرام و درگاه‌ها) را مطابق سرور خود پر کنید.
 
-اگر پروژه را قبلاً نصب کرده‌اید، برای آپدیت به آخرین نسخه و دریافت قابلیت‌های جدید، **نیازی به نصب مجدد نیست.** کافیست مراحل زیر را دنبال کنید:
+### نصب یک‌خطی (Ubuntu — همان اسکریپت رسمی در این مخزن)
 
-۱. از طریق SSH به سرور خود متصل شوید.
-۲. وارد پوشه اصلی پروژه شوید:
-   ```bash
-   cd /var/www/vpnmarket
-   ```
-۳. دستور زیر را اجرا کنید تا اسکریپت آپدیت، آخرین تغییرات را دریافت و نصب کند:
-   ```bash
-   sudo git pull origin main && sudo bash update.sh
-   ```
-این دستور ابتدا خود اسکریپت `update.sh` را آپدیت می‌کند و سپس آن را اجرا می‌کند.
+```bash
+wget -O install.sh https://raw.githubusercontent.com/letmefind/V2rayMarket/main/install.sh && sudo bash install.sh
+```
 
-**توجه:** فرآیند آپدیت ممکن است چند دقیقه طول بکشد. در این مدت سایت شما در حالت "تعمیر" خواهد بود.
+اسکریپت به‌طور پیش‌فرض همین مخزن (`letmefind/V2rayMarket`) را کلون می‌کند. برای نصب از **upstream**، مقدار `GITHUB_REPO` در `install.sh` را به `https://github.com/arvinvahed/VPNMarket.git` تغییر دهید.
 
-## 🤝 مشارکت در پروژه
+---
 
-ما همیشه از مشارکت شما استقبال می‌کنیم! اگر ایده‌ای برای بهبود پروژه دارید، باگی پیدا کرده‌اید یا می‌خواهید قابلیت جدیدی اضافه کنید، لطفاً از طریق بخش **Issues** یا **Pull Requests** در گیت‌هاب با ما در ارتباط باشید.
+## آپدیت (پس از استقرار با Git)
 
-## 📄 مجوز استفاده (License)
+```bash
+cd /path/to/V2rayMarket
+git pull origin main
+composer install --no-dev --optimize-autoloader
+php artisan migrate --force
+npm ci && npm run build
+php artisan optimize:clear
+```
 
-این پروژه تحت [لایسنس MIT](https://opensource.org/licenses/MIT) منتشر شده است. استفاده، تغییر و توزیع آن برای همگان آزاد است.
+در صورت استفاده از `update.sh` روی سرور، ابتدا مطمئن شوید مخزن ریموت همان همین fork است.
+
+---
+
+## لایسنس
+
+طبق `composer.json` و سنت پروژهٔ upstream، مجوز **MIT** برای پایه در نظر گرفته می‌شود. برای متن دقیق مجوز، مخزن [**arvinvahed/VPNMarket**](https://github.com/arvinvahed/VPNMarket) را ببینید.
+
+---
+
+## جمع‌بندی ارجاع
+
+- **منبع اصلی و اعتبار پروژهٔ پایه:** [VPNMarket — arvinvahed](https://github.com/arvinvahed/VPNMarket)  
+- **نسخهٔ کاستوم حاضر:** [V2rayMarket — letmefind](https://github.com/letmefind/V2rayMarket)

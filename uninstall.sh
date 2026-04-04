@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # ==================================================================================
-# === اسکریپت حذف کامل و ایمن پروژه VPNMarket ===
+# === اسکریپت حذف کامل V2rayMarket (مسیر پیش‌فرض: /var/www/vpnmarket) ===
+# === منبع اصلی: https://github.com/arvinvahed/VPNMarket ===
 # ==================================================================================
 
 set -e
@@ -13,7 +14,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 PROJECT_PATH="/var/www/vpnmarket"
 
-echo -e "${YELLOW}--- شروع فرآیند حذف کامل پروژه VPNMarket ---${NC}"
+echo -e "${YELLOW}--- شروع فرآیند حذف کامل پروژه V2rayMarket ---${NC}"
 echo -e "${RED}⚠️ هشدار: این عملیات غیرقابل بازگشت است و تمام فایل‌ها و دیتابیس پروژه را حذف می‌کند.${NC}"
 echo
 
@@ -83,4 +84,4 @@ echo -e "${GREEN}=====================================================${NC}"
 حالا که سرور شما کاملاً تمیز شده است، به سادگی می‌توانید با اجرای همان دستور اولیه، پروژه را از نو نصب کنید:
 
 ```bash
-wget -O install.sh https://raw.githubusercontent.com/arvinvahed/VPNMarket/main/install.sh && sudo bash install.sh
+wget -O install.sh https://raw.githubusercontent.com/letmefind/V2rayMarket/main/install.sh && sudo bash install.sh
