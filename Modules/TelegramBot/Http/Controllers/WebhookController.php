@@ -2980,9 +2980,9 @@ class WebhookController extends Controller
                     throw new \Exception('❌ خطا در لاگین به پنل X-UI.');
                 }
 
-                $inbound = Inbound::whereJsonContains('inbound_data->id', (int)$inboundId)->first();
+                $inbound = Inbound::findByPanelInboundId($inboundId);
                 if (!$inbound || !$inbound->inbound_data) {
-                    throw new \Exception("❌ اینباند با ID {$inboundId} در دیتابیس یافت نشد.");
+                    throw new \Exception("❌ اینباند با ID {$inboundId} در دیتابیس یافت نشد. از ادمین اینباندها را Sync کنید.");
                 }
 
                 $inboundData = is_string($inbound->inbound_data)
@@ -3501,22 +3501,16 @@ class WebhookController extends Controller
             } elseif ($panelType === 'xui') {
                 $xuiService = new XUIService($settings->get('xui_host'), $settings->get('xui_user'), $settings->get('xui_pass'));
                 $inboundId = $settings->get('xui_default_inbound_id');
-                
-                // تبدیل به integer برای جستجو
-                $inboundIdInt = !empty($inboundId) ? (int) $inboundId : null;
-                $inbound = null;
-                
-                if ($inboundIdInt) {
-                    $inbound = Inbound::whereJsonContains('inbound_data->id', $inboundIdInt)
-                        ->orWhere('inbound_data->id', $inboundIdInt)
-                        ->first();
-                }
+
+                $inbound = Inbound::findByPanelInboundId($inboundId);
 
                 // اگر اینباند پیش‌فرض یافت نشد، از اولین اینباند فعال استفاده کن
                 if (!$inbound || !$inbound->inbound_data) {
-                    $inbound = Inbound::whereJsonContains('inbound_data->enable', true)
-                        ->orWhere('inbound_data->enable', '1')
-                        ->first();
+                    $inbound = Inbound::all()->first(function ($row) {
+                        $d = $row->inbound_data;
+
+                        return is_array($d) && filter_var($d['enable'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                    });
                     
                     if ($inbound && $inbound->inbound_data) {
                         $foundId = $inbound->inbound_data['id'] ?? 'نامشخص';

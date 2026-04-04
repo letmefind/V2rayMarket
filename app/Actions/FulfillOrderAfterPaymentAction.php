@@ -172,11 +172,10 @@ class FulfillOrderAfterPaymentAction
                 throw new \RuntimeException('تنظیمات اینباند پیش‌فرض برای X-UI یافت نشد.');
             }
 
-            $numericInboundId = (int) $defaultInboundId;
-            $inbound = Inbound::whereJsonContains('inbound_data->id', $numericInboundId)->first();
+            $inbound = Inbound::findByPanelInboundId($defaultInboundId);
 
             if (! $inbound || ! $inbound->inbound_data) {
-                throw new \RuntimeException("اینباند با ID {$defaultInboundId} در دیتابیس یافت نشد.");
+                throw new \RuntimeException("اینباند X-UI با id «{$defaultInboundId}» در دیتابیس نیست؛ ابتدا از پنل ادمین اینباندها را با X-UI همگام‌سازی کنید.");
             }
 
             $inboundData = $inbound->inbound_data;

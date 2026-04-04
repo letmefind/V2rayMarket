@@ -442,11 +442,10 @@ class OrderController extends Controller
                         throw new \Exception('تنظیمات اینباند پیش‌فرض برای X-UI یافت نشد.');
                     }
 
-                    $numericInboundId = (int) $defaultInboundId;
-                    $inbound = Inbound::whereJsonContains('inbound_data->id', $numericInboundId)->first();
+                    $inbound = Inbound::findByPanelInboundId($defaultInboundId);
 
                     if (!$inbound || !$inbound->inbound_data) {
-                        throw new \Exception("اینباند با ID {$defaultInboundId} در دیتابیس یافت نشد.");
+                        throw new \Exception("اینباند X-UI با id «{$defaultInboundId}» در دیتابیس نیست؛ از ادمین → اینباندها همگام‌سازی با X-UI را اجرا کنید.");
                     }
 
                     $inboundData = $inbound->inbound_data;

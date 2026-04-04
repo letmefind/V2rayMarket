@@ -168,7 +168,7 @@ class InboundResource extends Resource
 
                             $synced = 0;
                             foreach ($inbounds as $inbound) {
-                                $existing = Inbound::where('inbound_data->id', $inbound['id'])->first();
+                                $existing = Inbound::findByPanelInboundId($inbound['id'] ?? null);
 
                                 if ($existing) {
                                     $existing->update([

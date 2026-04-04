@@ -86,10 +86,10 @@ if ($panelType === 'marzban') {
 } elseif ($panelType === 'xui') {
     $xuiService = new XUIService($settings->get('xui_host'), $settings->get('xui_user'), $settings->get('xui_pass'));
     $defaultInboundId = $settings->get('xui_default_inbound_id');
-    $inbound = Inbound::where('inbound_data->id', $defaultInboundId)->first();
+    $inbound = Inbound::findByPanelInboundId($defaultInboundId);
 
     if (!$inbound || !$inbound->inbound_data) {
-        return ApprovePendingOrderResult::fail('خطا', 'اطلاعات اینباند پیش‌فرض برای X-UI یافت نشد.');
+        return ApprovePendingOrderResult::fail('خطا', 'اینباند پیش‌فرض X-UI در دیتابیس نیست. از ادمین → اینباندها دکمهٔ «همگام‌سازی با X-UI» را بزنید؛ سپس در تنظیمات تم مقدار «اینباند پیش‌فرض» را روی id پنل (مثلاً 1) بگذارید.');
     }
     if (!$xuiService->login()) {
         return ApprovePendingOrderResult::fail('خطا', 'خطا در لاگین به پنل X-UI.');
