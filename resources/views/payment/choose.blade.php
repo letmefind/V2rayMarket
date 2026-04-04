@@ -40,6 +40,16 @@
                         </form>
                     @endif
 
+                    @if (\App\Services\ManualCryptoService::isEnabledFromDatabase())
+                        <a href="{{ route('payment.manual-crypto', $order) }}"
+                           class="block w-full text-center p-6 border-2 rounded-lg hover:border-amber-500 transition">
+                            <h4 class="font-bold text-gray-900 dark:text-gray-100">پرداخت USDT / USDC (دستی)</h4>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                                آدرس ولت، واریز، ثبت TxID — تأیید مدیر
+                            </p>
+                        </a>
+                    @endif
+
                 </div>
             </div>
         </div>
