@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Support\AdminOrderCallback;
+use App\Support\AdminTicketCallback;
 use App\Models\TelegramBotSetting;
 use App\Services\ManualCryptoService;
 use App\Services\PlisioService;
@@ -19,6 +20,7 @@ use Modules\Ticketing\Events\TicketReplied;
 use Modules\Ticketing\Models\Ticket;
 use Illuminate\Routing\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Hash;
@@ -147,6 +149,10 @@ class WebhookController extends Controller
         $message = $update->getMessage();
         $chatId = $message->getChat()->getId();
         $text = trim($message->getText() ?? '');
+
+        if ($this->handleTelegramAdminTicketReplyCompose($chatId, $text)) {
+            return;
+        }
 
         if ($this->handleTelegramAdminCommands($chatId, $text)) {
             return;
@@ -579,6 +585,144 @@ class WebhookController extends Controller
         }
     }
 
+    protected function adminTicketComposeCacheKey(int $adminChatId): string
+    {
+        return 'tg_admin_ticket_compose:'.$adminChatId;
+    }
+
+    protected function handleTelegramAdminTicketReplyCompose(int|string $chatId, string $text): bool
+    {
+        if (! $this->isTelegramAdminChat($chatId)) {
+            return false;
+        }
+
+        $cid = (int) $chatId;
+        $ticketId = Cache::get($this->adminTicketComposeCacheKey($cid));
+        if ($ticketId === null) {
+            return false;
+        }
+
+        $lower = strtolower($text);
+        if (in_array($lower, ['/cancel', 'cancel', 'انصراف'], true)) {
+            Cache::forget($this->adminTicketComposeCacheKey($cid));
+            try {
+                Telegram::sendMessage(['chat_id' => $cid, 'text' => '❌ ارسال پاسخ تیکت لغو شد.']);
+            } catch (\Throwable $e) {
+            }
+
+            return true;
+        }
+
+        $staff = User::query()->where('is_admin', true)->orderBy('id')->first();
+        if (! $staff) {
+            Cache::forget($this->adminTicketComposeCacheKey($cid));
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $cid,
+                    'text' => '⚠️ هیچ کاربری با نقش ادمین (is_admin) در سایت نیست؛ پاسخ ثبت نشد.',
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return true;
+        }
+
+        $ticket = Ticket::find((int) $ticketId);
+        if (! $ticket || $ticket->status === 'closed') {
+            Cache::forget($this->adminTicketComposeCacheKey($cid));
+            try {
+                Telegram::sendMessage(['chat_id' => $cid, 'text' => '❌ تیکت نامعتبر یا بسته است.']);
+            } catch (\Throwable $e) {
+            }
+
+            return true;
+        }
+
+        $reply = $ticket->replies()->create([
+            'user_id' => $staff->id,
+            'message' => $text,
+        ]);
+        $ticket->update(['status' => 'answered']);
+
+        event(new TicketReplied($reply));
+
+        Cache::forget($this->adminTicketComposeCacheKey($cid));
+
+        try {
+            Telegram::sendMessage([
+                'chat_id' => $cid,
+                'text' => "✅ پاسخ برای تیکت #{$ticket->id} ثبت شد و برای کاربر ارسال شد.",
+            ]);
+        } catch (\Throwable $e) {
+        }
+
+        return true;
+    }
+
+    protected function handleAdminTicketReplyStart($callbackQuery, int $ticketId): void
+    {
+        $adminChatId = (int) $callbackQuery->getMessage()->getChat()->getId();
+        if (! $this->isTelegramAdminChat($adminChatId)) {
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'فقط چت ادمین.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return;
+        }
+
+        $ticket = Ticket::find($ticketId);
+        if (! $ticket || $ticket->status === 'closed') {
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'تیکت نامعتبر یا بسته است.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return;
+        }
+
+        if (! User::query()->where('is_admin', true)->exists()) {
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'هیچ کاربر ادمینی در دیتابیس نیست.',
+                    'show_alert' => true,
+                ]);
+            } catch (\Throwable $e) {
+            }
+
+            return;
+        }
+
+        Cache::put($this->adminTicketComposeCacheKey($adminChatId), $ticketId, now()->addHours(4));
+
+        try {
+            Telegram::answerCallbackQuery([
+                'callback_query_id' => $callbackQuery->getId(),
+                'text' => 'پاسخ را در پیام بعدی بفرستید.',
+                'show_alert' => false,
+            ]);
+        } catch (\Throwable $e) {
+        }
+
+        try {
+            Telegram::sendMessage([
+                'chat_id' => $adminChatId,
+                'text' => "✏️ پاسخ تیکت #{$ticketId}\nموضوع: {$ticket->subject}\n\nمتن پاسخ را همینجا بفرستید.\nلغو: /cancel",
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('handleAdminTicketReplyStart: '.$e->getMessage());
+        }
+    }
+
     protected function handleCallbackQuery($update)
     {
         $callbackQuery = $update->getCallbackQuery();
@@ -593,6 +737,11 @@ class WebhookController extends Controller
         }
         if (preg_match('/^acn_(\d+)_([a-f0-9]{8})$/', $data, $adm) && AdminOrderCallback::verify((int) $adm[1], $adm[2])) {
             $this->handleAdminCancelPendingOrder($callbackQuery, (int) $adm[1]);
+
+            return;
+        }
+        if (preg_match('/^trep_(\d+)_([a-f0-9]{8})$/', $data, $adm) && AdminTicketCallback::verify((int) $adm[1], $adm[2])) {
+            $this->handleAdminTicketReplyStart($callbackQuery, (int) $adm[1]);
 
             return;
         }

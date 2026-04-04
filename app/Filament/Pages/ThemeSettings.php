@@ -442,6 +442,7 @@ class ThemeSettings extends Page implements HasForms
                                         .'<ul class="list-disc ps-5 space-y-1">'
                                         .'<li>وقتی مشتری <strong>رسید کارت</strong> یا <strong>TxID / تصویر</strong> پرداخت USDT-USDC دستی را در ربات ثبت کند، برای شما پیام با دکمه می‌آید.</li>'
                                         .'<li>یا همین حالا در چت با ربات بفرستید: <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded font-mono">/pending</code> (یا <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded font-mono">orders</code> یا کلمهٔ «سفارشات») تا تا <strong>۲۰</strong> سفارش معلق با همان دکمه‌ها لیست شود.</li>'
+                                        .'<li><strong>تیکت پشتیبانی:</strong> با ثبت تیکت از ربات یا سایت، برای شما در تلگرام اعلان می‌آید؛ دکمهٔ «پاسخ در تلگرام» را بزنید، سپس متن پاسخ را بفرستید (لغو: <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">/cancel</code>). حداقل یک کاربر با <code class="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">is_admin</code> در دیتابیس لازم است.</li>'
                                         .'</ul>'
                                         .'<p class="text-xs text-gray-500 dark:text-gray-500 border-t border-gray-200 dark:border-gray-700 pt-2">تعداد رقم اعشار USDT/USDC: تب «تنظیمات پرداخت» ← بخش «پرداخت دستی USDT / USDC».</p>'
                                         .'</div>'

@@ -5,6 +5,8 @@ namespace Modules\Ticketing\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
+use Modules\Ticketing\Events\TicketCreated;
+use Modules\Ticketing\Events\TicketReplied;
 use Modules\Ticketing\Models\Ticket;
 
 class TicketController extends Controller
@@ -51,6 +53,8 @@ class TicketController extends Controller
 
         $ticket->replies()->create($replyData);
 
+        event(new TicketCreated($ticket));
+
         return redirect()->route('dashboard')->with('status', 'تیکت شما با موفقیت ارسال شد.');
     }
 
@@ -83,8 +87,10 @@ class TicketController extends Controller
             $replyData['attachment_path'] = $path;
         }
 
-        $ticket->replies()->create($replyData);
+        $reply = $ticket->replies()->create($replyData);
         $ticket->update(['status' => 'open']);
+
+        event(new TicketReplied($reply));
 
         return back()->with('status', 'پاسخ شما با موفقیت ثبت شد.');
     }
