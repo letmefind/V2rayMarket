@@ -93,6 +93,12 @@ class OrderController extends Controller
      */
     public function showChargeForm()
     {
+        $settings = Setting::all()->pluck('value', 'key');
+        if (($settings->get('panel_type') ?? '') === 'xmplus') {
+            return redirect()->route('dashboard')
+                ->with('error', 'شارژ کیف پول و موجودی در حالت پنل XMPlus از طریق خود پنل XMPlus انجام می‌شود. از دکمه «پنل کاربری و درگاه پرداخت» در داشبورد استفاده کنید.');
+        }
+
         return view('wallet.charge');
     }
 
@@ -101,6 +107,12 @@ class OrderController extends Controller
      */
     public function createChargeOrder(Request $request)
     {
+        $settings = Setting::all()->pluck('value', 'key');
+        if (($settings->get('panel_type') ?? '') === 'xmplus') {
+            return redirect()->route('dashboard')
+                ->with('error', 'شارژ کیف پول در حالت پنل XMPlus از طریق پنل XMPlus انجام می‌شود.');
+        }
+
         $request->validate(['amount' => 'required|numeric|min:10000']);
         $order = Auth::user()->orders()->create([
             'plan_id' => null,

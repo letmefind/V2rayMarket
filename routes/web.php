@@ -5,6 +5,7 @@ use App\Http\Controllers\ProfileController;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Support\XmplusCatalog;
+use App\Services\XmplusProvisioningService;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -98,8 +99,9 @@ Route::middleware(['auth'])->group(function () {
         $tickets = $user->tickets()->latest()->get();
         $dashSettings = Setting::all()->pluck('value', 'key');
         $xmplusCatalog = XmplusCatalog::get($dashSettings);
+        $xmplusUserSnapshot = XmplusProvisioningService::fetchWebDashboardSnapshot($user, $dashSettings);
 
-        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions', 'xmplusCatalog'));
+        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions', 'xmplusCatalog', 'xmplusUserSnapshot'));
     })->name('dashboard');
 
     // Wallet

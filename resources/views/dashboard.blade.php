@@ -64,18 +64,51 @@
         </div>
     </x-slot>
 
+    @php
+        $xp = $xmplusUserSnapshot ?? null;
+        $isXmplusPanel = is_array($xp) && (($xp['mode'] ?? '') === 'xmplus');
+        $xpLinked = $isXmplusPanel && ! empty($xp['linked']);
+        $xpPanelUrl = $isXmplusPanel ? (string) ($xp['panel_url'] ?? '') : '';
+    @endphp
+
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
 
             <div class="p-6 bg-white dark:bg-gray-800 shadow-sm sm:rounded-lg text-right">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center">
-                    <div class="mb-4 sm:mb-0">
-                        <span class="text-gray-500">موجودی کیف پول شما:</span>
-                        <span class="font-bold text-lg text-green-500 block sm:inline-block mt-1 sm:mt-0">{{ number_format(auth()->user()->balance) }} تومان</span>
-                    </div>
-                    <a href="{{ route('wallet.charge.form') }}" class="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-center">
-                        شارژ کیف پول
-                    </a>
+                    @if ($isXmplusPanel)
+                        <div class="mb-4 sm:mb-0 w-full sm:flex-1">
+                            @if (! $xpLinked)
+                                <p class="text-gray-600 dark:text-gray-300 text-sm leading-relaxed">
+                                    موجودی، لینک اشتراک و پرداخت در <strong>XMPlus</strong> مدیریت می‌شود. پس از اولین خرید از این سایت، حساب شما به XMPlus متصل می‌شود.
+                                </p>
+                                @if ($xpPanelUrl !== '')
+                                    <a href="{{ $xpPanelUrl }}" target="_blank" rel="noopener noreferrer" class="mt-3 inline-block text-indigo-600 dark:text-indigo-400 hover:underline font-medium">ورود به پنل کاربری XMPlus</a>
+                                @endif
+                            @elseif (! empty($xp['error']))
+                                <span class="text-red-600 dark:text-red-400 text-sm">{{ $xp['error'] }}</span>
+                            @else
+                                <span class="text-gray-500 dark:text-gray-400">موجودی (XMPlus):</span>
+                                <span class="font-bold text-lg text-green-500 block sm:inline-block mt-1 sm:mt-0">{{ $xp['money'] ?? '—' }}</span>
+                                @if (! empty($xp['username']))
+                                    <span class="text-sm text-gray-500 dark:text-gray-400 mr-2">({{ $xp['username'] }})</span>
+                                @endif
+                            @endif
+                        </div>
+                        @if ($xpLinked && empty($xp['error']) && $xpPanelUrl !== '')
+                            <a href="{{ $xpPanelUrl }}" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-center shrink-0 mt-4 sm:mt-0 sm:mr-4">
+                                پنل کاربری و درگاه پرداخت
+                            </a>
+                        @endif
+                    @else
+                        <div class="mb-4 sm:mb-0">
+                            <span class="text-gray-500">موجودی کیف پول شما:</span>
+                            <span class="font-bold text-lg text-green-500 block sm:inline-block mt-1 sm:mt-0">{{ number_format(auth()->user()->balance) }} تومان</span>
+                        </div>
+                        <a href="{{ route('wallet.charge.form') }}" class="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-center">
+                            شارژ کیف پول
+                        </a>
+                    @endif
                 </div>
             </div>
 
@@ -132,7 +165,80 @@
                 <div class="p-2 sm:p-4">
 
                     <div x-show="tab === 'my_services'" x-transition.opacity>
-                        @if($orders->isNotEmpty())
+                        @if ($isXmplusPanel)
+                            @if (! $xpLinked)
+                                <p class="text-gray-500 dark:text-gray-400 text-center py-10">پس از اولین خرید و اتصال حساب به XMPlus، سرویس‌های فعال شما از API XMPlus اینجا نمایش داده می‌شود.</p>
+                            @elseif (! empty($xp['error']))
+                                <p class="text-red-600 dark:text-red-400 text-center py-10">{{ $xp['error'] }}</p>
+                            @elseif (empty($xp['services']) || ! is_countable($xp['services']) || count($xp['services']) === 0)
+                                <p class="text-gray-500 dark:text-gray-400 text-center py-10">در XMPlus سرویس فعالی ثبت نشده است.</p>
+                            @else
+                                <div class="space-y-4">
+                                    @foreach ($xp['services'] as $svc)
+                                        @if (! is_array($svc))
+                                            @continue
+                                        @endif
+                                        @php
+                                            $svcSublink = (string) ($svc['sublink'] ?? '');
+                                            $svcPackage = (string) ($svc['package'] ?? '');
+                                            $svcStatus = (string) ($svc['status'] ?? '');
+                                            $svcExpire = (string) ($svc['expire_date'] ?? '');
+                                            $svcTraffic = (string) ($svc['traffic'] ?? '');
+                                        @endphp
+                                        <div class="p-5 rounded-xl bg-gray-50 dark:bg-gray-800/50 shadow-md transition-shadow hover:shadow-lg" x-data="{ open: false }">
+                                            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-center text-right">
+                                                <div>
+                                                    <span class="text-xs text-gray-500">بسته</span>
+                                                    <p class="font-bold text-gray-900 dark:text-white">{{ $svcPackage !== '' ? $svcPackage : '—' }}</p>
+                                                </div>
+                                                <div>
+                                                    <span class="text-xs text-gray-500">ترافیک</span>
+                                                    <p class="font-bold text-gray-900 dark:text-white">{{ $svcTraffic !== '' ? $svcTraffic : '—' }}</p>
+                                                </div>
+                                                <div>
+                                                    <span class="text-xs text-gray-500">وضعیت</span>
+                                                    <p class="font-semibold {{ $svcStatus === 'Active' ? 'text-green-500' : 'text-yellow-600 dark:text-yellow-400' }}">{{ $svcStatus !== '' ? $svcStatus : '—' }}</p>
+                                                </div>
+                                                <div>
+                                                    <span class="text-xs text-gray-500">تاریخ انقضا</span>
+                                                    <p class="font-mono text-gray-900 dark:text-white" dir="ltr">{{ $svcExpire !== '' ? $svcExpire : '—' }}</p>
+                                                </div>
+                                                <div class="text-left sm:text-right md:text-left mt-4 sm:mt-0">
+                                                    <div class="flex flex-col sm:flex-row justify-end space-y-2 sm:space-y-0 sm:space-x-2 sm:space-x-reverse">
+                                                        @if ($xpPanelUrl !== '')
+                                                            <a href="{{ $xpPanelUrl }}" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto px-3 py-2 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 text-center">تمدید در پنل XMPlus</a>
+                                                        @endif
+                                                        @if ($svcSublink !== '')
+                                                            <button @click="open = !open" type="button" class="w-full sm:w-auto px-3 py-2 bg-gray-700 text-white text-xs rounded-lg hover:bg-gray-600 focus:outline-none">
+                                                                <span x-show="!open">لینک اشتراک</span>
+                                                                <span x-show="open">بستن</span>
+                                                            </button>
+                                                        @endif
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            @if ($svcSublink !== '')
+                                                <div x-show="open" x-transition x-cloak class="mt-4 pt-4 border-t dark:border-gray-700">
+                                                    <h4 class="font-bold mb-2 text-gray-900 dark:text-white text-right">لینک اشتراک (XMPlus):</h4>
+                                                    <div class="p-3 bg-gray-100 dark:bg-gray-900 rounded-lg relative" x-data="{copied: false, copyToClipboard(text) { navigator.clipboard.writeText(text); this.copied = true; setTimeout(() => { this.copied = false }, 2000); }}">
+                                                        <pre class="text-left text-sm text-gray-800 dark:text-gray-300 whitespace-pre-wrap break-all overflow-x-auto" dir="ltr" style="padding-top: 2.5rem;">{{ $svcSublink }}</pre>
+                                                        <div class="absolute top-2 right-2 flex gap-2">
+                                                            <button type="button" @click="copyToClipboard(@js($svcSublink))" class="px-2 py-1 text-xs bg-gray-300 dark:bg-gray-700 rounded hover:bg-gray-400 transition-colors flex items-center gap-1">
+                                                                <span x-show="!copied">📋 کپی</span>
+                                                                <span x-show="copied" class="text-green-600 font-bold">✓ کپی شد!</span>
+                                                            </button>
+                                                            <button type="button" @click="$store.qrModal.open(@js($svcSublink), @js($svcPackage))" class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors flex items-center gap-1">
+                                                                📱 QR Code
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
+                        @elseif($orders->isNotEmpty())
                             <div class="space-y-4">
                                 @foreach ($orders->filter(fn($order) => !empty($order->config_details)) as $order)
                                     <div class="p-5 rounded-xl bg-gray-50 dark:bg-gray-800/50 shadow-md transition-shadow hover:shadow-lg" x-data="{ open: false }">
@@ -197,59 +303,126 @@
                     </div>
 
                     <div x-show="tab === 'order_history'" x-transition.opacity x-cloak>
-                        <h2 class="text-xl font-bold mb-4 text-gray-900 dark:text-white text-right">تاریخچه سفارشات و تراکنش‌ها</h2>
+                        <h2 class="text-xl font-bold mb-4 text-gray-900 dark:text-white text-right">
+                            @if ($isXmplusPanel)
+                                تاریخچه فاکتورها (XMPlus)
+                            @else
+                                تاریخچه سفارشات و تراکنش‌ها
+                            @endif
+                        </h2>
                         <div class="space-y-3">
-                            @forelse ($transactions as $transaction)
-                                <div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50">
-                                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-center text-right">
-                                        <div>
-                                            <span class="text-xs text-gray-500">نوع تراکنش</span>
-                                            <p class="font-bold text-gray-900 dark:text-white">
-                                                @if ($transaction->plan)
-                                                    {{ $transaction->renews_order_id ? 'تمدید سرویس' : 'خرید سرویس' }}
+                            @if ($isXmplusPanel)
+                                @if (! $xpLinked)
+                                    <p class="text-gray-500 dark:text-gray-400 text-center py-10">پس از اتصال حساب، فاکتورهای XMPlus اینجا نمایش داده می‌شود.</p>
+                                @elseif (! empty($xp['error']))
+                                    <p class="text-red-600 dark:text-red-400 text-center py-10">{{ $xp['error'] }}</p>
+                                @elseif (empty($xp['invoices']) || ! is_countable($xp['invoices']) || count($xp['invoices']) === 0)
+                                    <p class="text-gray-500 dark:text-gray-400 text-center py-10">فاکتوری ثبت نشده است.</p>
+                                @else
+                                    @foreach ($xp['invoices'] as $inv)
+                                        @if (! is_array($inv))
+                                            @continue
+                                        @endif
+                                        @php
+                                            $invId = $inv['invioce_id'] ?? $inv['invoice_id'] ?? $inv['orderid'] ?? '';
+                                            $invStatus = (string) ($inv['status'] ?? '');
+                                            $invAmount = (string) ($inv['amount'] ?? '');
+                                            $invCur = (string) ($inv['currency'] ?? '');
+                                            $invPkg = (string) ($inv['packagename'] ?? '');
+                                            $invCreated = (string) ($inv['created_at'] ?? '');
+                                        @endphp
+                                        <div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50">
+                                            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-center text-right">
+                                                <div>
+                                                    <span class="text-xs text-gray-500">شرح</span>
+                                                    <p class="font-bold text-gray-900 dark:text-white">{{ $invPkg !== '' ? $invPkg : 'فاکتور' }}</p>
+                                                    @if ($invId !== '')
+                                                        <p class="text-xs font-mono text-gray-500 mt-1" dir="ltr">{{ $invId }}</p>
+                                                    @endif
+                                                </div>
+                                                <div>
+                                                    <span class="text-xs text-gray-500">مبلغ</span>
+                                                    <p class="font-bold text-gray-900 dark:text-white" dir="ltr">{{ $invAmount }} {{ $invCur }}</p>
+                                                </div>
+                                                <div>
+                                                    <span class="text-xs text-gray-500">تاریخ</span>
+                                                    <p class="font-mono text-gray-900 dark:text-white" dir="ltr">{{ $invCreated !== '' ? $invCreated : '—' }}</p>
+                                                </div>
+                                                <div class="text-left sm:text-right md:text-left mt-4 sm:mt-0">
+                                                    @if (strcasecmp($invStatus, 'Paid') === 0)
+                                                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">پرداخت شده</span>
+                                                    @elseif (strcasecmp($invStatus, 'Pending') === 0)
+                                                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">در انتظار</span>
+                                                    @else
+                                                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">{{ $invStatus !== '' ? $invStatus : '—' }}</span>
+                                                    @endif
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                @endif
+                            @else
+                                @forelse ($transactions as $transaction)
+                                    <div class="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50">
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 items-center text-right">
+                                            <div>
+                                                <span class="text-xs text-gray-500">نوع تراکنش</span>
+                                                <p class="font-bold text-gray-900 dark:text-white">
+                                                    @if ($transaction->plan)
+                                                        {{ $transaction->renews_order_id ? 'تمدید سرویس' : 'خرید سرویس' }}
+                                                    @else
+                                                        شارژ کیف پول
+                                                    @endif
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <span class="text-xs text-gray-500">مبلغ</span>
+                                                <p class="font-bold text-gray-900 dark:text-white">
+                                                    {{ number_format($transaction->plan->price ?? $transaction->amount) }} تومان
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <span class="text-xs text-gray-500">تاریخ</span>
+                                                <p class="font-mono text-gray-900 dark:text-white" dir="ltr">
+                                                    {{ $transaction->created_at->format('Y-m-d') }}
+                                                </p>
+                                            </div>
+                                            <div class="text-left sm:text-right md:text-left mt-4 sm:mt-0">
+                                                @if ($transaction->status == 'paid')
+                                                    <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                                                        موفق
+                                                    </span>
+                                                @elseif ($transaction->status == 'pending')
+                                                    <span class="px-3 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                                                        در انتظار تایید
+                                                    </span>
                                                 @else
-                                                    شارژ کیف پول
+                                                    <span class="px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
+                                                        ناموفق/منقضی
+                                                    </span>
                                                 @endif
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <span class="text-xs text-gray-500">مبلغ</span>
-                                            <p class="font-bold text-gray-900 dark:text-white">
-                                                {{ number_format($transaction->plan->price ?? $transaction->amount) }} تومان
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <span class="text-xs text-gray-500">تاریخ</span>
-                                            <p class="font-mono text-gray-900 dark:text-white" dir="ltr">
-                                                {{ $transaction->created_at->format('Y-m-d') }}
-                                            </p>
-                                        </div>
-                                        <div class="text-left sm:text-right md:text-left mt-4 sm:mt-0">
-                                            @if ($transaction->status == 'paid')
-                                                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                                                    موفق
-                                                </span>
-                                            @elseif ($transaction->status == 'pending')
-                                                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                                                    در انتظار تایید
-                                                </span>
-                                            @else
-                                                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200">
-                                                    ناموفق/منقضی
-                                                </span>
-                                            @endif
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            @empty
-                                <p class="text-gray-500 dark:text-gray-400 text-center py-10">هیچ تراکنشی یافت نشد.</p>
-                            @endforelse
+                                @empty
+                                    <p class="text-gray-500 dark:text-gray-400 text-center py-10">هیچ تراکنشی یافت نشد.</p>
+                                @endforelse
+                            @endif
                         </div>
                     </div>
 
                     <div x-show="tab === 'new_service'" x-transition.opacity x-cloak>
                         <h2 class="text-2xl font-bold mb-6 text-gray-900 dark:text-white text-right">🚀 خرید سرویس جدید</h2>
                         @include('partials.xmplus-packages-catalog', ['xmplusCatalog' => $xmplusCatalog ?? [], 'xmplusCatalogVariant' => 'tailwind'])
+                        @if ($isXmplusPanel)
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-6 text-right leading-relaxed">
+                                در حالت پنل XMPlus، خرید و پرداخت از طریق کاتالوگ بالا و API XMPlus انجام می‌شود. پلن‌های محلی VPNMarket در این حالت نمایش داده نمی‌شوند.
+                                @if ($xpPanelUrl !== '')
+                                    <a href="{{ $xpPanelUrl }}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 dark:text-indigo-400 hover:underline mr-1">ورود به پنل XMPlus</a>
+                                @endif
+                            </p>
+                        @endif
+                        @unless ($isXmplusPanel)
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             @foreach ($plans as $plan)
                                 <div class="relative group p-0 rounded-2xl bg-white dark:bg-gray-800 shadow-lg hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 text-right overflow-hidden">
@@ -359,6 +532,7 @@
                                 </div>
                             @endforeach
                         </div>
+                        @endunless
                     </div>
                     <div x-show="tab === 'tutorials'" x-transition.opacity x-cloak class="text-right">
                         <h2 class="text-xl font-bold mb-4 text-gray-900 dark:text-white">راهنمای استفاده از سرویس‌ها</h2>
@@ -409,6 +583,16 @@
 
                     <div x-show="tab === 'referral'" x-transition.opacity x-cloak>
                         <h2 class="text-xl font-bold mb-6 text-gray-900 dark:text-white text-right">کسب درآمد با دعوت از دوستان</h2>
+                        @if ($isXmplusPanel)
+                            <div class="p-6 rounded-2xl bg-gray-50 dark:bg-gray-800/50 space-y-4 shadow-lg text-right">
+                                <p class="text-gray-600 dark:text-gray-300 leading-relaxed">
+                                    سیستم دعوت و پاداش در حالت پنل XMPlus از طریق Client API در دسترس نیست؛ دعوت از دوستان و لینک اختصاصی را از <strong>پنل کاربری XMPlus</strong> پیگیری کنید.
+                                </p>
+                                @if ($xpPanelUrl !== '')
+                                    <a href="{{ $xpPanelUrl }}" target="_blank" rel="noopener noreferrer" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ورود به پنل XMPlus</a>
+                                @endif
+                            </div>
+                        @else
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-right">
 
                             <div class="p-6 rounded-2xl bg-gray-50 dark:bg-gray-800/50 space-y-4 shadow-lg">
@@ -434,6 +618,7 @@
                             </div>
 
                         </div>
+                        @endif
                     </div>
 
                     @if (Module::isEnabled('Ticketing'))

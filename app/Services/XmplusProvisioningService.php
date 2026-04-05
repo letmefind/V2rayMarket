@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
@@ -309,6 +310,9 @@ class XmplusProvisioningService
             throw new RuntimeException('XMPlus: شناسه فاکتور (invid) در پاسخ invoice/create نیست.');
         }
 
+        $order->forceFill(['xmplus_inv_id' => $invid])->save();
+        self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, $shopPaymentAlreadyCollected);
+
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
 
@@ -417,6 +421,21 @@ class XmplusProvisioningService
     }
 
     /**
+     * اگر در تنظیمات فعال باشد، ردیف invoice در دیتابیس XMPlus را status=1 می‌کند (فقط وقتی پول در VPNMarket تأیید شده).
+     */
+    protected static function trySyncXmplusInvoiceDatabaseRow(Collection $settings, string $invid, ?Order $order, bool $shopPaymentAlreadyCollected): void
+    {
+        if (! $shopPaymentAlreadyCollected || ! XmplusInvoiceDatabaseSyncService::enabled($settings)) {
+            return;
+        }
+        try {
+            XmplusInvoiceDatabaseSyncService::markInvoicePaid($settings, $invid, $order);
+        } catch (\Throwable $e) {
+            Log::channel('xmplus')->warning('XMPlus invoice DB sync: '.$e->getMessage(), ['invid' => $invid]);
+        }
+    }
+
+    /**
      * پس از ثبت پرداخت (کیف پول / Plisio و غیره) و قبل از تکمیل درگاه XMPlus، کش را به‌روز کن تا تراکنش دوباره ساخته نشود.
      */
     public static function markInvoiceContextWalletCharged(int $orderId): void
@@ -465,6 +484,11 @@ class XmplusProvisioningService
         }
         $invid = $renew['invid'] ?? null;
         $invid = is_scalar($invid) ? (string) $invid : '';
+
+        if ($invid !== '') {
+            $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
+            self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, $shopPaymentAlreadyCollected);
+        }
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
@@ -767,10 +791,74 @@ class XmplusProvisioningService
     }
 
     /**
+     * دادهٔ نمایش داشبورد وب از XMPlus (موجودی، سرویس‌ها، فاکتورها) وقتی پنل فعال XMPlus است.
+     *
+     * @return array<string, mixed>|null  null یعنی پنل XMPlus فعال نیست — از دادهٔ محلی VPNMarket استفاده کنید.
+     */
+    public static function fetchWebDashboardSnapshot(User $user, Collection $settings): ?array
+    {
+        if (($settings->get('panel_type') ?? '') !== 'xmplus') {
+            return null;
+        }
+        $panelBase = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
+        $email = $user->xmplus_client_email;
+        $pwd = $user->xmplus_client_password;
+        if (! is_string($email) || $email === '' || ! is_string($pwd) || $pwd === '') {
+            return [
+                'mode' => 'xmplus',
+                'linked' => false,
+                'panel_url' => $panelBase,
+            ];
+        }
+        try {
+            $api = self::fromSettings($settings);
+            $acc = $api->accountInfo($email, $pwd);
+            $payload = self::extractAccountPayload($acc);
+            $services = $payload['services'] ?? [];
+            if (! is_array($services)) {
+                $services = [];
+            }
+            $money = $payload['money'] ?? (is_array($acc['data'] ?? null) ? ($acc['data']['money'] ?? '—') : '—');
+            $username = $payload['username'] ?? (is_array($acc['data'] ?? null) ? ($acc['data']['username'] ?? '') : '');
+            $invoices = [];
+            try {
+                $invResp = $api->listInvoices($email, $pwd);
+                $invoices = $invResp['invoices'] ?? [];
+                if (! is_array($invoices)) {
+                    $invoices = [];
+                }
+            } catch (\Throwable $e) {
+                Log::channel('xmplus')->warning('XMPlus listInvoices (dashboard): '.$e->getMessage(), ['user_id' => $user->id]);
+            }
+
+            return [
+                'mode' => 'xmplus',
+                'linked' => true,
+                'panel_url' => $panelBase,
+                'money' => is_string($money) ? $money : json_encode($money),
+                'username' => is_string($username) ? $username : '',
+                'services' => $services,
+                'invoices' => $invoices,
+            ];
+        } catch (\Throwable $e) {
+            Log::channel('xmplus')->warning('XMPlus fetchWebDashboardSnapshot: '.$e->getMessage(), ['user_id' => $user->id]);
+
+            return [
+                'mode' => 'xmplus',
+                'linked' => true,
+                'panel_url' => $panelBase,
+                'error' => $e->getMessage(),
+                'services' => [],
+                'invoices' => [],
+            ];
+        }
+    }
+
+    /**
      * @param  array<string, mixed>  $response
      * @return array{services?: array<int, mixed>}
      */
-    protected static function extractAccountPayload(array $response): array
+    public static function extractAccountPayload(array $response): array
     {
         $data = $response['data'] ?? $response;
         if (! is_array($data)) {

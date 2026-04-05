@@ -19,6 +19,7 @@ class Order extends Model
         'source',
         'panel_username',
         'panel_client_id',
+        'xmplus_inv_id',
 
     ];
 

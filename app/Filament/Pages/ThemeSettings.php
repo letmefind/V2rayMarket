@@ -92,6 +92,8 @@ class ThemeSettings extends Page implements HasForms
             }
         }
 
+        unset($settings['xmplus_invoice_db_password']);
+
         if (array_key_exists('plisio_enabled', $settings) && $settings['plisio_enabled'] !== null) {
             $settings['plisio_enabled'] = filter_var($settings['plisio_enabled'], FILTER_VALIDATE_BOOLEAN);
         }
@@ -103,6 +105,9 @@ class ThemeSettings extends Page implements HasForms
         }
         if (array_key_exists('xmplus_telegram_gateway_picker', $settings) && $settings['xmplus_telegram_gateway_picker'] !== null) {
             $settings['xmplus_telegram_gateway_picker'] = filter_var($settings['xmplus_telegram_gateway_picker'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (array_key_exists('xmplus_invoice_db_sync_enabled', $settings) && $settings['xmplus_invoice_db_sync_enabled'] !== null) {
+            $settings['xmplus_invoice_db_sync_enabled'] = filter_var($settings['xmplus_invoice_db_sync_enabled'], FILTER_VALIDATE_BOOLEAN);
         }
         if (array_key_exists('plisio_amount_multiplier', $settings) && $settings['plisio_amount_multiplier'] !== null && $settings['plisio_amount_multiplier'] !== '') {
             $settings['plisio_amount_multiplier'] = is_numeric($settings['plisio_amount_multiplier'])
@@ -179,6 +184,12 @@ class ThemeSettings extends Page implements HasForms
             'xmplus_send_register_code' => false,
             'xmplus_telegram_gateway_picker' => true,
             'xmplus_auto_pay_gateway_id' => null,
+            'xmplus_invoice_db_sync_enabled' => false,
+            'xmplus_invoice_db_host' => null,
+            'xmplus_invoice_db_port' => '3306',
+            'xmplus_invoice_db_database' => null,
+            'xmplus_invoice_db_username' => null,
+            'xmplus_invoice_db_table' => 'invoice',
         ], $settings));
     }
 
@@ -548,6 +559,31 @@ class ThemeSettings extends Page implements HasForms
                                         ->numeric()
                                         ->helperText('برای خریدهایی که پول در VPNMarket گرفته شده (کیف پول، Plisio، کارت/تتر بعد از تأیید ادمین): باید شناسهٔ عددی درگاهی باشد که با یک بار فراخوانی invoice/pay فاکتور را Paid کند — معمولاً «موجودی/اعتبار نماینده» در خود XMPlus، نه Stripe/PayPal مشتری. اگر چنین درگاهی در API شما نیست یا موجودی صفر است، فاکتور Pending می‌ماند و باید مثل اسکرین‌شات در پنل XMPlus روی Confirm بزنید؛ سپس در صورت نیاز سفارش را در VPNMarket دوباره «تایید و اجرا» کنید تا لینک همگام شود.'),
                                 ]),
+                            Section::make('همگام‌سازی جدول invoice در MySQL پنل XMPlus')
+                                ->description(new HtmlString(
+                                    '<p class="text-sm text-gray-600 dark:text-gray-400">Client API معمولاً دکمهٔ «Confirm» پنل را ندارد. اگر بعد از تأیید پرداخت در VPNMarket فاکتور در XMPlus با <code>status=0</code> می‌ماند، می‌توانید با یک اتصال MySQL <strong>محدود</strong> همان ردیف را به <code>status=1</code> بزنید (مثل نمونهٔ <code>invoice.sql</code>).</p>'
+                                    .'<p class="text-sm mt-2">امنیت: کاربر MySQL جدا بسازید که فقط <code>UPDATE</code> روی جدول <code>invoice</code> داشته باشد؛ نه کل دیتابیس.</p>'
+                                ))
+                                ->collapsed()
+                                ->schema([
+                                    Toggle::make('xmplus_invoice_db_sync_enabled')
+                                        ->label('بعد از تأیید پرداخت در VPNMarket، status فاکتور در DB پنل را ۱ کن')
+                                        ->helperText('فقط وقتی «پول در فروشگاه شما تأیید شده» (مثلاً تأیید ادمین تلگرام، Plisio، کیف پول) و مسیر provision با همان معنا اجرا می‌شود.'),
+                                    TextInput::make('xmplus_invoice_db_host')->label('هاست MySQL')->maxLength(191),
+                                    TextInput::make('xmplus_invoice_db_port')->label('پورت')->default('3306')->maxLength(8),
+                                    TextInput::make('xmplus_invoice_db_database')->label('نام دیتابیس')->maxLength(128),
+                                    TextInput::make('xmplus_invoice_db_username')->label('کاربر MySQL')->maxLength(128),
+                                    TextInput::make('xmplus_invoice_db_password')
+                                        ->label('رمز MySQL')
+                                        ->password()
+                                        ->revealable()
+                                        ->helperText('خالی بگذارید تا رمز قبلی در تنظیمات حفظ شود.'),
+                                    TextInput::make('xmplus_invoice_db_table')
+                                        ->label('نام جدول')
+                                        ->default('invoice')
+                                        ->maxLength(64)
+                                        ->helperText('ستون‌ها: inv_id، status، paid_date، paid_amount (مطابق XMPlus).'),
+                                ])->columns(2),
                         ]),
 
                     Tabs\Tab::make('سیستم دعوت از دوستان')
@@ -579,11 +615,19 @@ class ThemeSettings extends Page implements HasForms
         $formData = $this->form->getState();
 
         foreach ($formData as $key => $value) {
+            if ($key === 'xmplus_invoice_db_password' && ($value === '' || $value === null)) {
+                continue;
+            }
+
             // حذف تنظیمات خالی
             if ($value === '' || $value === null) {
                 \App\Models\Setting::where('key', $key)->delete();
                 Cache::forget("setting.{$key}");
                 continue;
+            }
+
+            if ($key === 'xmplus_invoice_db_sync_enabled') {
+                $value = filter_var($value, FILTER_VALIDATE_BOOLEAN) ? '1' : '0';
             }
 
             // 🔥 مهم: تبدیل xui_default_inbound_id به string ساده

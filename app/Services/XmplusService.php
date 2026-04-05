@@ -246,6 +246,21 @@ class XmplusService
     }
 
     /**
+     * تاریخچه فاکتورها — POST /api/client/invoices
+     *
+     * @see https://docs.xmplus.dev/api/client.html
+     *
+     * @return array<string, mixed>
+     */
+    public function listInvoices(string $email, string $passwd): array
+    {
+        return $this->postClient('/api/client/invoices', [
+            'email' => $email,
+            'passwd' => $passwd,
+        ], 'invoices_list');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function accountInfo(string $email, string $passwd, ?int $serviceid = null): array
