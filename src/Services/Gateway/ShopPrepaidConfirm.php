@@ -6,9 +6,8 @@
  * نصب: کپی در src/Services/Gateway/ روی سرور پنل، سپس از ادمین درگاه را اضافه کنید و
  * در VPNMarket شناسهٔ عددی را از POST /api/client/gateways قرار دهید.
  *
- * اگر در ادمین XMPlus فیلد handler_class خالی بماند، به‌صورت پیش‌فرض
- * App\Services\Gateway\ShopPrepaidConfirmHandler → ShopPrepaidConfirmKernel صدا زده می‌شود.
- * در ShopPrepaidConfirmKernel.php در صورت نیاز منطق را مطابق پنل خودتان تکمیل کنید.
+ * Handler و Kernel در همین فایل تعریف شده‌اند تا XMPlus (که اغلب فقط همین فایل را لود می‌کند)
+ * نیاز به فایل یا autoload اضافه نداشته باشد. در صورت نیاز منطق را در ShopPrepaidConfirmKernel::settle() تکمیل کنید.
  *
  * pay() برای UI پورتال: ret=2 یعنی پرداخت فوری و ریدایرکت به invoice/view (مثل Card2Card).
  * برای Client API فروشگاه: code=100 و بدون qrcode / data رشته‌ای پر — تا polling VPNMarket درست کار کند.
@@ -270,5 +269,82 @@ final class ShopPrepaidConfirm
         }
 
         return '';
+    }
+}
+
+/**
+ * پیش‌فرض وقتی handler_class در تنظیمات درگاه خالی است (همان فایل — بدون require جدا).
+ */
+final class ShopPrepaidConfirmHandler
+{
+    /**
+     * @param  array<string, mixed>  $order
+     * @param  array<string, mixed>  $config
+     */
+    public static function settle(array $order, array $config): void
+    {
+        ShopPrepaidConfirmKernel::settle($order, $config);
+    }
+}
+
+/**
+ * تلاش برای بستن فاکتور مثل Confirm ادمین؛ در صورت نیاز متد واقعی پنل را اینجا صدا بزنید.
+ */
+final class ShopPrepaidConfirmKernel
+{
+    /**
+     * @param  array<string, mixed>  $order
+     * @param  array<string, mixed>  $config
+     */
+    public static function settle(array $order, array $config): void
+    {
+        $invId = trim((string) ($order['order_id'] ?? $order['invid'] ?? $order['orderid'] ?? ''));
+        if ($invId === '') {
+            throw new RuntimeException('ShopPrepaidConfirmKernel: missing invoice id in $order (expected order_id).');
+        }
+
+        $invoiceFqcn = 'App\\Application\\Models\\Invoice';
+        if (! class_exists($invoiceFqcn)) {
+            throw new RuntimeException(
+                "ShopPrepaidConfirmKernel: class {$invoiceFqcn} not found. Edit ShopPrepaidConfirm.php and set \$invoiceFqcn to your panel's Invoice model."
+            );
+        }
+
+        $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
+        if ($invoice === null) {
+            throw new RuntimeException("ShopPrepaidConfirmKernel: no invoice for inv_id={$invId}.");
+        }
+
+        if ((int) ($invoice->status ?? 0) === 1) {
+            return;
+        }
+
+        $instanceMethods = [
+            'confirmByReseller',
+            'confirmByAdmin',
+            'setPaid',
+            'markPaid',
+            'complete',
+            'finalizePayment',
+            'payWithResellerBalance',
+            'paid',
+            'confirm',
+        ];
+
+        foreach ($instanceMethods as $method) {
+            if (! method_exists($invoice, $method)) {
+                continue;
+            }
+            $invoice->$method();
+            $fresh = $invoiceFqcn::where('inv_id', $invId)->first();
+            if ($fresh !== null && (int) ($fresh->status ?? 0) === 1) {
+                return;
+            }
+        }
+
+        throw new RuntimeException(
+            'ShopPrepaidConfirmKernel: invoice '.$invId.' is still not paid after trying common methods. '
+            .'Inspect your XMPlus Invoice model and admin «confirm payment» action, then add an explicit call in ShopPrepaidConfirmKernel::settle() in ShopPrepaidConfirm.php.'
+        );
     }
 }
