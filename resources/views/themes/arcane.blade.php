@@ -68,6 +68,7 @@
                 <div class="text-center mb-5" data-aos="fade-up">
                     <h2 class="section-title">{{ $settings->get('arcane_pricing_title') ?: 'انتخاب دسترسی' }}</h2>
                 </div>
+                @include('partials.xmplus-packages-catalog', ['xmplusCatalog' => $xmplusCatalog ?? []])
                 <div class="row justify-content-center">
                     @forelse($plans as $plan)
                         <div class="col-lg-4 mb-4" data-aos="fade-up" data-aos-delay="{{ $loop->iteration * 100 }}">

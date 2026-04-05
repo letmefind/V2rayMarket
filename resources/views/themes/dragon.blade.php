@@ -107,6 +107,7 @@
             <h2 class="section-title text-center mb-5" data-aos="fade-up">
                 {{ $settings->get('dragon_pricing_title') ?: 'پیمان خون' }}
             </h2>
+            @include('partials.xmplus-packages-catalog', ['xmplusCatalog' => $xmplusCatalog ?? []])
             <div class="row justify-content-center">
                 @isset($plans)
                     @foreach($plans as $plan)

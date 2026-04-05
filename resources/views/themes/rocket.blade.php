@@ -59,6 +59,8 @@
         <div class="container">
             <h2 class="section-title text-center mb-4">{{ setting('rocket_pricing_title', 'انتخاب مدت زمان اشتراک') }}</h2>
 
+            @include('partials.xmplus-packages-catalog', ['xmplusCatalog' => $xmplusCatalog ?? []])
+
             <div class="plan-filters">
                 <button class="filter-btn active" data-filter="all">همه پلن‌ها</button>
                 @php

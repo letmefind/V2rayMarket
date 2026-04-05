@@ -4,6 +4,7 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProfileController;
 use App\Models\Plan;
 use App\Models\Setting;
+use App\Support\XmplusCatalog;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -39,9 +40,12 @@ Route::get('/', function () {
         abort(404, "قالب '{$activeTheme}' یافت نشد.");
     }
 
+    $xmplusCatalog = XmplusCatalog::get($settings);
+
     return view("themes.{$activeTheme}", [
         'settings' => $settings,
-        'plans'    => $plans
+        'plans'    => $plans,
+        'xmplusCatalog' => $xmplusCatalog,
     ]);
 })->name('home');
 
@@ -92,7 +96,10 @@ Route::middleware(['auth'])->group(function () {
         $transactions = $user->orders()->with('plan')->latest()->get();
         $plans = Plan::where('is_active', true)->orderBy('price')->get();
         $tickets = $user->tickets()->latest()->get();
-        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions'));
+        $dashSettings = Setting::all()->pluck('value', 'key');
+        $xmplusCatalog = XmplusCatalog::get($dashSettings);
+
+        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions', 'xmplusCatalog'));
     })->name('dashboard');
 
     // Wallet

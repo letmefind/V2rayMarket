@@ -249,6 +249,7 @@
 
                     <div x-show="tab === 'new_service'" x-transition.opacity x-cloak>
                         <h2 class="text-2xl font-bold mb-6 text-gray-900 dark:text-white text-right">🚀 خرید سرویس جدید</h2>
+                        @include('partials.xmplus-packages-catalog', ['xmplusCatalog' => $xmplusCatalog ?? [], 'xmplusCatalogVariant' => 'tailwind'])
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                             @foreach ($plans as $plan)
                                 <div class="relative group p-0 rounded-2xl bg-white dark:bg-gray-800 shadow-lg hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 text-right overflow-hidden">

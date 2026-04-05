@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Support\AdminOrderCallback;
+use App\Support\XmplusCatalog;
 use App\Support\AdminTicketCallback;
 use App\Models\TelegramBotSetting;
 use App\Services\ManualCryptoService;
@@ -1737,6 +1738,16 @@ class WebhookController extends Controller
             $message .= "لطفاً مدت‌زمان سرویس مورد نظر را انتخاب کنید:\n\n";
             $message .= "👇 یکی از گزینه‌های زیر را بزنید:";
 
+            if (($this->settings->get('panel_type') ?? '') === 'xmplus') {
+                $xCat = XmplusCatalog::get($this->settings);
+                $xText = XmplusCatalog::formatPlainTextForTelegram($xCat);
+                if ($xText !== '') {
+                    $message = $xText."\n──────────\n\n".$message;
+                } elseif (! empty($xCat['error'])) {
+                    $message = "⚠️ (لیست پکیج‌های XMPlus موقتاً در دسترس نیست.)\n\n".$message;
+                }
+            }
+
             $keyboard = Keyboard::make()->inline();
 
             foreach ($durations as $durationDays) {
@@ -1807,6 +1818,9 @@ class WebhookController extends Controller
                 $message .= ($index + 1) . ". 💎 *" . $this->escape($plan->name) . "*\n";
                 $message .= "   📦 " . $this->escape($plan->volume_gb . ' گیگ') . "\n";
                 $message .= "   💳 " . $this->escape(number_format($plan->price) . ' تومان') . "\n";
+                if (($this->settings->get('panel_type') ?? '') === 'xmplus' && $plan->xmplus_package_id) {
+                    $message .= '   🔗 XMPlus pid: '.$plan->xmplus_package_id."\n";
+                }
             }
 
             $message .= "\n👇 پلن مورد نظر را انتخاب کنید:";
