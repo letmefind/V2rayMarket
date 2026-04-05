@@ -180,6 +180,31 @@ class XmplusProvisioningService
     }
 
     /**
+     * پاسخ invoice/pay یعنی مشتری باید جدا در XMPlus/درگاه پرداخت کند (PayPal، لینک https، …) —
+     * وقتی پول از قبل در VPNMarket گرفته شده، این حالت فاکتور را معمولاً Pending نگه می‌دارد مگر DB sync یا درگاه «موجودی نماینده».
+     *
+     * @param  array<string, mixed>  $pay
+     */
+    protected static function invoicePayLooksCustomerSideCheckout(array $pay): bool
+    {
+        if (! self::invoicePayLooksAsync($pay)) {
+            return false;
+        }
+        $gw = strtolower((string) ($pay['gateway'] ?? ''));
+        foreach (['paypal', 'stripe', 'wechat', 'alipay', 'card'] as $needle) {
+            if ($gw !== '' && str_contains($gw, $needle)) {
+                return true;
+            }
+        }
+        $d = $pay['data'] ?? null;
+        if (is_string($d) && $d !== '' && preg_match('#^https?://#i', $d) === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * آیا پاسخ invoice/pay از نظر API موفق بوده (قبل از polling).
      *
      * @param  array<string, mixed>  $pay
@@ -336,10 +361,24 @@ class XmplusProvisioningService
                 'gatewayid' => (int) $gatewayId,
                 'response_summary' => array_keys($pay),
             ]);
+            $customerCheckout = self::invoicePayLooksCustomerSideCheckout($pay);
+            if ($customerCheckout) {
+                $api->log('warning', 'XMPlus: invoice/pay برای تسویهٔ فروشگاه، درگاه «مشتری» برگرداند (مثلاً PayPal). فاکتور بدون پرداخت دوم در XMPlus Pending می‌ماند. شناسه درگاه خودکار را به درگاه موجودی/اعتبار نماینده عوض کنید یا همگام‌سازی MySQL invoice را فعال و درست کنید.', [
+                    'invid' => $invid,
+                    'gateway' => $pay['gateway'] ?? null,
+                    'gatewayid_setting' => (int) $gatewayId,
+                ]);
+                self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, true);
+            }
             $async = self::invoicePayLooksAsync($pay);
-            $maxAttempts = $async ? 72 : 18;
-            $sleepSeconds = $async ? 5 : 2;
-            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds);
+            if ($customerCheckout) {
+                $maxAttempts = 30;
+                $sleepSeconds = 2;
+            } else {
+                $maxAttempts = $async ? 72 : 18;
+                $sleepSeconds = $async ? 5 : 2;
+            }
+            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, $customerCheckout);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
 
@@ -642,7 +681,8 @@ class XmplusProvisioningService
         ?int $knownSid = null,
         bool $autoPayGatewayConfigured = false,
         int $maxAttempts = 18,
-        int $sleepSeconds = 2
+        int $sleepSeconds = 2,
+        bool $shopCollectedCustomerGateway = false
     ): array {
         $lastStatus = null;
 
@@ -695,6 +735,12 @@ class XmplusProvisioningService
 
         $statusLabel = (string) ($lastStatus ?? 'نامشخص');
         $totalWait = $maxAttempts * $sleepSeconds;
+        if ($statusLabel === 'Pending' && $autoPayGatewayConfigured && $shopCollectedCustomerGateway) {
+            throw new RuntimeException(
+                'XMPlus: پول این سفارش در فروشگاه گرفته شده، اما «شناسه درگاه پرداخت خودکار» فعلی همان درگاه پرداخت مشتری است (مثلاً PayPal): API لینک پرداخت دوم می‌دهد و فاکتور در XMPlus Pending می‌ماند. '.
+                'در Theme Settings شناسهٔ عددی درگاهی را بگذارید که با موجودی یا اعتبار نماینده در XMPlus فاکتور را آنی می‌بندد؛ یا همگام‌سازی MySQL جدول invoice را طوری تنظیم کنید که از سرور VPNMarket به دیتابیس واقعی پنل وصل شود و ردیف فاکتور Paid شود؛ سپس «تایید و اجرا» را دوباره بزنید.'
+            );
+        }
         if ($statusLabel === 'Pending' && $autoPayGatewayConfigured) {
             throw new RuntimeException(
                 'XMPlus: فاکتور «'.$invid.'» بعد از invoice/pay هنوز Pending مانده ('.$totalWait.' ثانیه انتظار). '.
