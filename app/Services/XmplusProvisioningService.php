@@ -18,6 +18,9 @@ use RuntimeException;
  */
 class XmplusProvisioningService
 {
+    /** اگر فاکتور Paid است و account/info هنوز services خالی است، بعد از این تعداد تلاش polling متوقف و پیام راهنما برگردانده می‌شود. */
+    private const POLL_EARLY_FALLBACK_WHEN_PAID_NO_SERVICES_AFTER = 12;
+
     public static function fromSettings(Collection $settings): XmplusService
     {
         $base = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
@@ -171,7 +174,7 @@ class XmplusProvisioningService
         $sleepSeconds = $async ? 5 : 2;
 
         $panelBasePoll = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
-        $pollFb = $panelBasePoll !== '' ? ['panel_base' => $panelBasePoll, 'order_id' => (int) ($ctx['order_id'] ?? 0)] : null;
+        $pollFb = ['panel_base' => $panelBasePoll, 'order_id' => (int) ($ctx['order_id'] ?? 0)];
         $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
         $sid = $poll['sid'];
 
@@ -428,7 +431,7 @@ class XmplusProvisioningService
                 $maxAttempts = $async ? 72 : 18;
                 $sleepSeconds = $async ? 5 : 2;
             }
-            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $order->id] : null;
+            $pollFb = ['panel_base' => $panelBase, 'order_id' => $order->id];
             $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, $customerCheckout, $pollFb);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
@@ -467,7 +470,7 @@ class XmplusProvisioningService
             $async = self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
             $sleepSeconds = $async ? 5 : 2;
-            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $order->id] : null;
+            $pollFb = ['panel_base' => $panelBase, 'order_id' => $order->id];
             $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
@@ -643,7 +646,7 @@ class XmplusProvisioningService
             $async = is_array($pay) && self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
             $sleepSeconds = $async ? 5 : 2;
-            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $renewalOrder->id] : null;
+            $pollFb = ['panel_base' => $panelBase, 'order_id' => $renewalOrder->id];
             $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
@@ -691,7 +694,7 @@ class XmplusProvisioningService
         }
 
         if ($invid !== '') {
-            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $renewalOrder->id] : null;
+            $pollFb = ['panel_base' => $panelBase, 'order_id' => $renewalOrder->id];
             $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, false, 18, 2, false, $pollFb);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
@@ -756,6 +759,8 @@ class XmplusProvisioningService
         ];
         if ($panel !== '') {
             $lines[] = '🌐 ورود به پنل کاربری: '.$panel;
+        } else {
+            $lines[] = 'برای نمایش لینک مستقیم ورود، «آدرس پایه پنل XMPlus» (xmplus_panel_url) را در تنظیمات قالب بگذارید.';
         }
         $lines[] = '📧 ایمیل پنل: '.$email;
         $lines[] = '📄 شناسه فاکتور (invid): '.$invid;
@@ -827,8 +832,9 @@ class XmplusProvisioningService
             $services = $accPayload['services'] ?? [];
 
             $paidNow = is_string($lastStatus) && strcasecmp($lastStatus, 'Paid') === 0;
+            // نباید از $i در سقف استفاده کرد — هر بار attemptLimit بالا می‌رفت و حلقه تقریباً بی‌پایان می‌شد.
             if ($paidNow && $services === []) {
-                $attemptLimit = max($attemptLimit, 40, $i + 22);
+                $attemptLimit = max($attemptLimit, 45);
             }
 
             $sublink = self::pickSublinkFromServices($services, $expectPid, $knownSid);
@@ -887,6 +893,22 @@ class XmplusProvisioningService
                 }
             }
 
+            if (
+                $paidNow
+                && $services === []
+                && is_array($paidWithoutSublinkFallbackContext)
+                && ($i + 1) >= self::POLL_EARLY_FALLBACK_WHEN_PAID_NO_SERVICES_AFTER
+            ) {
+                $notice = self::formatPaidInvoiceWithoutSublinkUserNotice($email, $invid, $paidWithoutSublinkFallbackContext);
+                $api->log('warning', 'XMPlus: پایان زودهنگام polling — Paid بدون سرویس در API', [
+                    'step' => 'poll',
+                    'attempt' => $i + 1,
+                    'invid' => $invid,
+                ]);
+
+                return ['sublink' => $notice, 'sid' => null];
+            }
+
             if ($lastStatus === 'Paid' && $knownSid !== null) {
                 try {
                     $s = $api->serviceInfo($email, $passwd, $knownSid);
@@ -930,10 +952,7 @@ class XmplusProvisioningService
         }
 
         if (strcasecmp($statusLabel, 'Paid') === 0) {
-            $fbPanel = is_array($paidWithoutSublinkFallbackContext)
-                ? trim((string) ($paidWithoutSublinkFallbackContext['panel_base'] ?? ''))
-                : '';
-            if ($fbPanel !== '') {
+            if (is_array($paidWithoutSublinkFallbackContext)) {
                 $notice = self::formatPaidInvoiceWithoutSublinkUserNotice($email, $invid, $paidWithoutSublinkFallbackContext);
                 $api->log('warning', 'XMPlus: فاکتور Paid اما بدون لینک اشتراک در API — تحویل پیام راهنما به کاربر', [
                     'invid' => $invid,
@@ -1508,7 +1527,7 @@ class XmplusProvisioningService
         $maxAttempts = 18;
         $sleepSeconds = 2;
         $pb = trim((string) ($ctx['panel_base'] ?? ''));
-        $pollFb = $pb !== '' ? ['panel_base' => $pb, 'order_id' => (int) ($ctx['order_id'] ?? 0)] : null;
+        $pollFb = ['panel_base' => $pb, 'order_id' => (int) ($ctx['order_id'] ?? 0)];
         $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
         $sid = $poll['sid'];
 
@@ -1540,7 +1559,7 @@ class XmplusProvisioningService
         }
 
         $pb = trim((string) ($ctx['panel_base'] ?? ''));
-        $pollFb = $pb !== '' ? ['panel_base' => $pb, 'order_id' => (int) ($ctx['order_id'] ?? 0)] : null;
+        $pollFb = ['panel_base' => $pb, 'order_id' => (int) ($ctx['order_id'] ?? 0)];
         $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, 72, 5, false, $pollFb);
         $sid = $poll['sid'];
 
