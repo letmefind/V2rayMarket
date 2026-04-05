@@ -326,15 +326,13 @@ final class ShopPrepaidConfirmOrder
     }
 
     /**
-     * inv_id از بدنهٔ سفارش.
+     * شناسهٔ عمومی فاکتور از آرایهٔ سفارش (همان publicId؛ شامل invioce_id مثل خروجی Client API).
      *
      * @param  array<string, mixed>  $order
      */
     public static function invoicePublicKey(array $order): string
     {
-        $v = trim((string) ($order['order_id'] ?? $order['invid'] ?? $order['orderid'] ?? ''));
-
-        return $v;
+        return self::publicId($order);
     }
 }
 
@@ -422,8 +420,8 @@ final class ShopPrepaidConfirmKernel
             $hint = ShopPrepaidConfirmOrder::invoicePublicKey($order);
 
             throw new RuntimeException(
-                'ShopPrepaidConfirmKernel: invoice not found (tried inv_id from order like Card2Card, and id PK). '
-                .'order_id/invid='.($hint !== '' ? $hint : '(empty)').'.'
+                'ShopPrepaidConfirmKernel: invoice not found (tried inv_id and invioce_id columns, then PK id). '
+                .'public id='.($hint !== '' ? $hint : '(empty)').'.'
             );
         }
 
@@ -435,11 +433,11 @@ final class ShopPrepaidConfirmKernel
         self::tryPayWithGatewayId($fqcn, $invId, $gatewayId);
 
         if (! self::rowIsPaid($invoice)) {
-            $invoice = $fqcn::where('inv_id', $invId)->first() ?? $invoice;
+            $invoice = self::firstInvoiceByPublicKey($fqcn, $invId) ?? $invoice;
             self::markPaidBestEffort($fqcn, $invId, $invoice, $order, $gatewayId);
         }
 
-        $invoice = $fqcn::where('inv_id', $invId)->first();
+        $invoice = self::firstInvoiceByPublicKey($fqcn, $invId);
         if ($invoice === null || ! self::rowIsPaid($invoice)) {
             throw new RuntimeException(
                 'ShopPrepaidConfirmKernel: could not mark invoice '.$invId.' as paid. '
@@ -577,8 +575,8 @@ final class ShopPrepaidConfirmKernel
     private static function loadInvoice(string $fqcn, array $order): ?object
     {
         $invId = ShopPrepaidConfirmOrder::invoicePublicKey($order);
-        if ($invId !== '' && method_exists($fqcn, 'where')) {
-            $row = $fqcn::where('inv_id', $invId)->first();
+        if ($invId !== '') {
+            $row = self::firstInvoiceByPublicKey($fqcn, $invId);
             if ($row !== null) {
                 return $row;
             }
@@ -593,6 +591,47 @@ final class ShopPrepaidConfirmKernel
         }
 
         return null;
+    }
+
+    /**
+     * بسیاری از نصب‌های XMPlus ستون عمومی فاکتور را invioce_id می‌نامند (غلط املایی API) نه inv_id.
+     *
+     * @param  class-string  $fqcn
+     */
+    private static function firstInvoiceByPublicKey(string $fqcn, string $publicId): ?object
+    {
+        if ($publicId === '' || ! method_exists($fqcn, 'where')) {
+            return null;
+        }
+        foreach (['inv_id', 'invioce_id'] as $col) {
+            try {
+                $row = $fqcn::where($col, $publicId)->first();
+                if ($row !== null) {
+                    return $row;
+                }
+            } catch (Throwable $e) {
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  class-string  $fqcn
+     */
+    private static function updateInvoiceRowByPublicKey(string $fqcn, string $publicId, array $attrs): void
+    {
+        if ($publicId === '' || ! method_exists($fqcn, 'where')) {
+            return;
+        }
+        foreach (['inv_id', 'invioce_id'] as $col) {
+            try {
+                if ($fqcn::where($col, $publicId)->limit(1)->update($attrs) > 0) {
+                    return;
+                }
+            } catch (Throwable $e) {
+            }
+        }
     }
 
     private static function invoiceInvIdFromModel(object $invoice): string
@@ -616,7 +655,7 @@ final class ShopPrepaidConfirmKernel
             return;
         }
         $methodNames = ['pay', 'checkout', 'completePay', 'gatewayPay', 'payWithGateway', 'executeGatewayPay'];
-        $inv = $fqcn::where('inv_id', $invId)->first();
+        $inv = self::firstInvoiceByPublicKey($fqcn, $invId);
         if ($inv === null || self::rowIsPaid($inv)) {
             return;
         }
@@ -632,7 +671,7 @@ final class ShopPrepaidConfirmKernel
                 $inv->{$m}($gatewayId);
             } catch (Throwable $e) {
             }
-            $inv = $fqcn::where('inv_id', $invId)->first();
+            $inv = self::firstInvoiceByPublicKey($fqcn, $invId);
             if ($inv !== null && self::rowIsPaid($inv)) {
                 return;
             }
@@ -700,7 +739,7 @@ final class ShopPrepaidConfirmKernel
      */
     private static function fulfillAfterPaid(string $fqcn, string $invId, array $order, ?int $gatewayId): void
     {
-        $invoice = $fqcn::where('inv_id', $invId)->first();
+        $invoice = self::firstInvoiceByPublicKey($fqcn, $invId);
         if ($invoice === null || ! self::rowIsPaid($invoice)) {
             return;
         }
@@ -729,7 +768,7 @@ final class ShopPrepaidConfirmKernel
     private static function tryMethodsOnInvoice(string $fqcn, string $invId, array $methods): void
     {
         foreach ($methods as $method) {
-            $current = $fqcn::where('inv_id', $invId)->first();
+            $current = self::firstInvoiceByPublicKey($fqcn, $invId);
             if ($current === null) {
                 return;
             }
@@ -772,7 +811,7 @@ final class ShopPrepaidConfirmKernel
                 continue;
             }
 
-            $working = $fqcn::where('inv_id', $invId)->first();
+            $working = self::firstInvoiceByPublicKey($fqcn, $invId);
             if ($working === null) {
                 return;
             }
@@ -788,7 +827,7 @@ final class ShopPrepaidConfirmKernel
      */
     private static function reloadPaid(string $fqcn, string $invId): bool
     {
-        $inv = $fqcn::where('inv_id', $invId)->first();
+        $inv = self::firstInvoiceByPublicKey($fqcn, $invId);
 
         return $inv !== null && self::rowIsPaid($inv);
     }
@@ -843,12 +882,7 @@ final class ShopPrepaidConfirmKernel
         } catch (Throwable $e) {
         }
 
-        try {
-            if (method_exists($fqcn, 'where')) {
-                $fqcn::where('inv_id', $invId)->limit(1)->update($attrs);
-            }
-        } catch (Throwable $e) {
-        }
+        self::updateInvoiceRowByPublicKey($fqcn, $invId, $attrs);
     }
 
     private static function modelHasColumn(object $invoice, string $key): bool
