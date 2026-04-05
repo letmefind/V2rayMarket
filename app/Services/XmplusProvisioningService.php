@@ -685,11 +685,14 @@ class XmplusProvisioningService
         bool $shopCollectedCustomerGateway = false
     ): array {
         $lastStatus = null;
+        $inv = [];
+        $attemptLimit = $maxAttempts;
 
-        for ($i = 0; $i < $maxAttempts; $i++) {
+        for ($i = 0; $i < $attemptLimit; $i++) {
+            $inv = [];
             try {
                 $view = $api->invoiceView($email, $passwd, $invid);
-                $inv = $view['invoice'] ?? [];
+                $inv = is_array($view['invoice'] ?? null) ? $view['invoice'] : [];
                 $lastStatus = $inv['status'] ?? null;
             } catch (\Throwable $e) {
                 $api->log('warning', 'XMPlus poll invoice_view خطا', ['attempt' => $i + 1, 'error' => $e->getMessage()]);
@@ -706,11 +709,65 @@ class XmplusProvisioningService
             $accPayload = self::extractAccountPayload($api->accountInfo($email, $passwd));
             $services = $accPayload['services'] ?? [];
 
+            $paidNow = is_string($lastStatus) && strcasecmp($lastStatus, 'Paid') === 0;
+            if ($paidNow && $services === []) {
+                $attemptLimit = max($attemptLimit, 40, $i + 22);
+            }
+
             $sublink = self::pickSublinkFromServices($services, $expectPid, $knownSid);
             if ($sublink !== null) {
                 $sid = self::pickSidFromServices($services, $expectPid, $knownSid);
 
                 return ['sublink' => $sublink, 'sid' => $sid];
+            }
+
+            if ($paidNow) {
+                $relaxed = self::pickSublinkFromServicesRelaxed($services, $expectPid);
+                if ($relaxed['sublink'] !== null && $relaxed['sublink'] !== '') {
+                    return ['sublink' => $relaxed['sublink'], 'sid' => $relaxed['sid']];
+                }
+
+                $sidFromInv = self::serviceIdFromInvoiceOrListRow($inv);
+                if ($sidFromInv !== null && $sidFromInv > 0) {
+                    try {
+                        $s = $api->serviceInfo($email, $passwd, $sidFromInv);
+                        $sl = self::sublinkFromServiceInfo($s);
+                        if ($sl !== null) {
+                            return ['sublink' => $sl, 'sid' => $sidFromInv];
+                        }
+                    } catch (\Throwable $e) {
+                        $api->log('debug', 'XMPlus poll service_info (sid از فاکتور)', ['error' => $e->getMessage(), 'sid' => $sidFromInv]);
+                    }
+                }
+
+                if ($services === [] || $i % 3 === 2) {
+                    try {
+                        $list = $api->listInvoices($email, $passwd);
+                        foreach ($list['invoices'] ?? [] as $row) {
+                            if (! is_array($row)) {
+                                continue;
+                            }
+                            $rowInv = (string) ($row['invioce_id'] ?? $row['invoice_id'] ?? '');
+                            if ($rowInv !== $invid) {
+                                continue;
+                            }
+                            $sidList = self::serviceIdFromInvoiceOrListRow($row);
+                            if ($sidList !== null && $sidList > 0) {
+                                try {
+                                    $s = $api->serviceInfo($email, $passwd, $sidList);
+                                    $sl = self::sublinkFromServiceInfo($s);
+                                    if ($sl !== null) {
+                                        return ['sublink' => $sl, 'sid' => $sidList];
+                                    }
+                                } catch (\Throwable $e) {
+                                    $api->log('debug', 'XMPlus poll service_info (sid از invoices)', ['error' => $e->getMessage(), 'sid' => $sidList]);
+                                }
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        $api->log('debug', 'XMPlus poll invoices_list', ['error' => $e->getMessage()]);
+                    }
+                }
             }
 
             if ($lastStatus === 'Paid' && $knownSid !== null) {
@@ -734,7 +791,7 @@ class XmplusProvisioningService
         }
 
         $statusLabel = (string) ($lastStatus ?? 'نامشخص');
-        $totalWait = $maxAttempts * $sleepSeconds;
+        $totalWait = $attemptLimit * $sleepSeconds;
         if ($statusLabel === 'Pending' && $autoPayGatewayConfigured && $shopCollectedCustomerGateway) {
             throw new RuntimeException(
                 'XMPlus: پول این سفارش در فروشگاه گرفته شده، اما «شناسه درگاه پرداخت خودکار» فعلی همان درگاه پرداخت مشتری است (مثلاً PayPal): API لینک پرداخت دوم می‌دهد و فاکتور در XMPlus Pending می‌ماند. '.
@@ -755,10 +812,69 @@ class XmplusProvisioningService
             );
         }
 
+        if (strcasecmp($statusLabel, 'Paid') === 0) {
+            throw new RuntimeException(
+                'XMPlus: فاکتور در API با وضعیت Paid است اما پس از '.$totalWait.' ثانیه هنوز لینک اشتراک از account/info / service/info دیده نشد. '.
+                'گاهی پنل XMPlus سرویس را با تأخیر می‌سازد یا تا زمان تأیید دستی در پنل معلق می‌ماند. چند دقیقه بعد در VPNMarket دوباره «تایید و اجرا» بزنید، یا در پنل XMPlus سرویس/اشتراک همان کاربر را بررسی کنید.'
+            );
+        }
+
         throw new RuntimeException(
             'XMPlus: پس از '.$totalWait.' ثانیه هنوز لینک اشتراک فعال نشد. وضعیت آخر فاکتور: '.$statusLabel.
             ' — اگر درگاه کریپتو/کارت است ابتدا پرداخت را در پنل یا QR تکمیل کنید؛ سپس از «سرویس‌های من» بررسی کنید یا با پشتیبانی تماس بگیرید.'
         );
+    }
+
+    /**
+     * وقتی فاکتور Paid است ولی سرویس هنوز در API به‌عنوان Active نیامده، هر سطری که sublink دارد قبول می‌شود.
+     *
+     * @param  array<int, mixed>  $services
+     * @return array{sublink: ?string, sid: ?int}
+     */
+    protected static function pickSublinkFromServicesRelaxed(array $services, int $expectPid): array
+    {
+        foreach ($services as $s) {
+            if (! is_array($s) || empty($s['sublink'])) {
+                continue;
+            }
+            if ((int) ($s['packageid'] ?? 0) === $expectPid) {
+                $sid = isset($s['sid']) ? (int) $s['sid'] : null;
+
+                return ['sublink' => (string) $s['sublink'], 'sid' => ($sid !== null && $sid > 0) ? $sid : null];
+            }
+        }
+        foreach ($services as $s) {
+            if (is_array($s) && ! empty($s['sublink'])) {
+                $sid = isset($s['sid']) ? (int) $s['sid'] : null;
+
+                return ['sublink' => (string) $s['sublink'], 'sid' => ($sid !== null && $sid > 0) ? $sid : null];
+            }
+        }
+
+        return ['sublink' => null, 'sid' => null];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    protected static function serviceIdFromInvoiceOrListRow(array $row): ?int
+    {
+        foreach (['serviceid', 'service_id', 'sid'] as $k) {
+            if (! array_key_exists($k, $row)) {
+                continue;
+            }
+            $v = $row[$k];
+            if ($v === null || $v === '') {
+                continue;
+            }
+            if (is_numeric($v)) {
+                $n = (int) $v;
+
+                return $n > 0 ? $n : null;
+            }
+        }
+
+        return null;
     }
 
     /**
