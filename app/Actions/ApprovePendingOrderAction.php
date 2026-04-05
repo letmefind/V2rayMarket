@@ -409,7 +409,8 @@ if ($panelType === 'marzban') {
             $plan,
             $order,
             $isRenewal,
-            $originalOrder
+            $originalOrder,
+            true
         );
         if (($result['phase'] ?? '') === 'await_gateway') {
             XmplusGatewayTelegram::sendGatewayPicker($order->fresh(['user']), $settings);

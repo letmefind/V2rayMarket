@@ -120,6 +120,16 @@ final class XmplusGatewayTelegram
             } catch (\Throwable $e) {
                 Log::warning('XmplusGatewayTelegram sendMessage data: '.$e->getMessage());
             }
+        } elseif (is_array($data) && (($data['object'] ?? '') === 'payment_intent' || isset($data['client_secret']))) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => '💳 این درگاه (کارت) نیاز به تکمیل پرداخت در صفحه امن دارد. لطفاً از پنل کاربری XMPlus همان فاکتور را باز کنید و پرداخت را تمام کنید؛ ربات تا تأیید فاکتور منتظر می‌ماند.',
+                    'parse_mode' => 'HTML',
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('XmplusGatewayTelegram sendMessage payment_intent: '.$e->getMessage());
+            }
         }
     }
 

@@ -66,13 +66,17 @@ class XmplusProvisioningService
      *   order_id?: int
      * }
      */
+    /**
+     * @param  bool  $shopPaymentAlreadyCollected  مشتری در VPNMarket پرداخت کرده (کیف پول، Plisio، تأیید ادمین، …) — فاکتور XMPlus فقط با «درگاه خودکار» (تسویهٔ فروشنده) بسته می‌شود، نه پرداخت دوم توسط مشتری.
+     */
     public static function provisionPurchase(
         Collection $settings,
         User $user,
         Plan $plan,
         Order $order,
         bool $isRenewal,
-        ?Order $originalOrder
+        ?Order $originalOrder,
+        bool $shopPaymentAlreadyCollected = false
     ): array {
         $api = self::fromSettings($settings);
         $pid = self::resolvePackageId($plan, $settings);
@@ -88,13 +92,14 @@ class XmplusProvisioningService
             'is_renewal' => $isRenewal,
             'pid' => $pid,
             'billing' => $billing,
+            'shop_payment_collected' => $shopPaymentAlreadyCollected,
         ]);
 
         if ($isRenewal) {
-            return self::doRenewal($api, $settings, $user, $plan, $order, $originalOrder, $pid, $panelBase);
+            return self::doRenewal($api, $settings, $user, $plan, $order, $originalOrder, $pid, $panelBase, $shopPaymentAlreadyCollected);
         }
 
-        return self::doNewPurchase($api, $settings, $user, $plan, $order, $pid, $billing, $aff, $panelBase);
+        return self::doNewPurchase($api, $settings, $user, $plan, $order, $pid, $billing, $aff, $panelBase, $shopPaymentAlreadyCollected);
     }
 
     /**
@@ -160,8 +165,17 @@ class XmplusProvisioningService
             return true;
         }
         $d = $pay['data'] ?? null;
+        if (is_string($d) && $d !== '') {
+            return true;
+        }
+        if (is_array($d)) {
+            // Stripe و مشابه: PaymentIntent تا زمان تکمیل کارت در حالت انتظار است
+            if (($d['object'] ?? '') === 'payment_intent' || isset($d['client_secret'])) {
+                return true;
+            }
+        }
 
-        return is_string($d) && $d !== '';
+        return false;
     }
 
     protected static function shouldOfferTelegramGatewayPicker(Collection $settings, User $user): bool
@@ -187,7 +201,8 @@ class XmplusProvisioningService
         int $pid,
         string $billing,
         string $aff,
-        string $panelBase
+        string $panelBase,
+        bool $shopPaymentAlreadyCollected = false
     ): array {
         $domain = trim((string) $settings->get('xmplus_email_domain', ''));
         if ($domain === '') {
@@ -245,7 +260,43 @@ class XmplusProvisioningService
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
+
+        if ($shopPaymentAlreadyCollected) {
+            if (! $autoPayConfigured) {
+                throw new RuntimeException(
+                    'XMPlus: مشتری در فروشگاه شما قبلاً پرداخت کرده؛ نباید دوباره در XMPlus پرداخت کند. '
+                    .'در تنظیمات تم، فیلد «شناسه درگاه برای پرداخت خودکار فاکتور» را با شناسهٔ عددی درگاهی پر کنید که فاکتور را با اعتبار/موجودی شما در پنل XMPlus می‌بندد (مثلاً موجودی نمایندگی)، نه درگاه کارت مشتری. '
+                    .'منوی انتخاب درگاه در تلگرام فقط برای حالت‌هایی است که هنوز در سایت پرداخت نشده باشد.'
+                );
+            }
+            $pay = [];
+            try {
+                $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                $api->log('info', 'XMPlus invoice/pay (تسویه پس از پرداخت فروشگاه)', ['step' => 'invoice_pay_shop_collected', 'response_summary' => is_array($pay) ? array_keys($pay) : 'n/a']);
+            } catch (\Throwable $e) {
+                $api->log('warning', 'XMPlus invoice/pay خطا (ادامه با polling)', [
+                    'step' => 'invoice_pay_error',
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            $async = is_array($pay) && self::invoicePayLooksAsync($pay);
+            $maxAttempts = $async ? 72 : 18;
+            $sleepSeconds = $async ? 5 : 2;
+            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds);
+            $sublink = $result['sublink'];
+            $sid = $result['sid'];
+
+            return [
+                'final_config' => $sublink,
+                'panel_username' => $email,
+                'panel_client_id' => $sid !== null ? (string) $sid : null,
+                'credentials_message' => $credentialsMessage,
+                'plain_password' => $credentialsMessage ? $passwdPlain : null,
+            ];
+        }
+
         if ($autoPayConfigured) {
+            $pay = [];
             try {
                 $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
                 $api->log('info', 'XMPlus invoice/pay فراخوانی شد', ['step' => 'invoice_pay', 'response_summary' => is_array($pay) ? array_keys($pay) : 'n/a']);
@@ -255,7 +306,10 @@ class XmplusProvisioningService
                     'error' => $e->getMessage(),
                 ]);
             }
-            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true);
+            $async = self::invoicePayLooksAsync($pay);
+            $maxAttempts = $async ? 72 : 18;
+            $sleepSeconds = $async ? 5 : 2;
+            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
 
@@ -334,7 +388,8 @@ class XmplusProvisioningService
         Order $renewalOrder,
         ?Order $originalOrder,
         int $pid,
-        string $panelBase
+        string $panelBase,
+        bool $shopPaymentAlreadyCollected = false
     ): array {
         if (! $originalOrder) {
             throw new InvalidArgumentException('XMPlus تمدید: سفارش اصلی نامعتبر است.');
@@ -361,13 +416,23 @@ class XmplusProvisioningService
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
 
+        if ($shopPaymentAlreadyCollected && $invid !== '' && ! $autoPayConfigured) {
+            throw new RuntimeException(
+                'XMPlus تمدید: مشتری در فروشگاه پرداخت کرده؛ برای بستن فاکتور تمدید در XMPlus باید «شناسه درگاه پرداخت خودکار فاکتور» (تسویه با اعتبار فروشنده) را در تنظیمات تم پر کنید.'
+            );
+        }
+
         if ($invid !== '' && $autoPayConfigured) {
+            $pay = [];
             try {
-                $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
             } catch (\Throwable $e) {
                 $api->log('warning', 'XMPlus تمدید: invoice/pay خطا', ['error' => $e->getMessage()]);
             }
-            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true);
+            $async = is_array($pay) && self::invoicePayLooksAsync($pay);
+            $maxAttempts = $async ? 72 : 18;
+            $sleepSeconds = $async ? 5 : 2;
+            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
 

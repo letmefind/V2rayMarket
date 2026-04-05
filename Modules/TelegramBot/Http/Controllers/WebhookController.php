@@ -1508,7 +1508,7 @@ class WebhookController extends Controller
                     'description' => "خرید سرویس {$plan->name}"
                 ]);
 
-                $provisionData = $this->provisionUserAccount($order, $plan);
+                $provisionData = $this->provisionUserAccount($order, $plan, true);
 
                 if ($provisionData && ($provisionData['phase'] ?? '') === 'await_gateway') {
                     $walletAwaitXmplusGateway = true;
@@ -2428,7 +2428,7 @@ class WebhookController extends Controller
         }
     }
 
-    protected function provisionUserAccount(Order $order, Plan $plan)
+    protected function provisionUserAccount(Order $order, Plan $plan, bool $shopPaymentAlreadyCollected = false)
     {
         $settings = $this->settings;
         $uniqueUsername = $order->panel_username ?? "user-{$order->user_id}-order-{$order->id}";
@@ -2763,7 +2763,8 @@ class WebhookController extends Controller
                     $plan,
                     $order,
                     $isRenewal,
-                    $originalOrder
+                    $originalOrder,
+                    $shopPaymentAlreadyCollected
                 );
                 if (($result['phase'] ?? '') === 'await_gateway') {
                     $configData['phase'] = 'await_gateway';
@@ -3010,7 +3011,7 @@ class WebhookController extends Controller
                 ]);
 
 
-                $provisionData = $this->renewUserAccount($originalOrder, $plan, $newRenewalOrder);
+                $provisionData = $this->renewUserAccount($originalOrder, $plan, $newRenewalOrder, true);
 
                 if (! $provisionData) {
                     throw new \Exception('تمدید در پنل با خطا مواجه شد.');
@@ -3176,7 +3177,7 @@ class WebhookController extends Controller
     /**
      * @return array{link: string, username: string}|array{phase: string}|null
      */
-    protected function renewUserAccount(Order $originalOrder, Plan $plan, ?Order $renewalOrder = null)
+    protected function renewUserAccount(Order $originalOrder, Plan $plan, ?Order $renewalOrder = null, bool $shopPaymentAlreadyCollected = false)
     {
         $settings = $this->settings;
         $user = $originalOrder->user;
@@ -3319,7 +3320,8 @@ class WebhookController extends Controller
                     $plan,
                     $orderForXmplus,
                     true,
-                    $originalOrder
+                    $originalOrder,
+                    $shopPaymentAlreadyCollected
                 );
                 if (($result['phase'] ?? '') === 'await_gateway') {
                     return ['phase' => 'await_gateway'];
