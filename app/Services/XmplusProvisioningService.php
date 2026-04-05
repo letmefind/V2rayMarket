@@ -79,28 +79,51 @@ class XmplusProvisioningService
         ?Order $originalOrder,
         bool $shopPaymentAlreadyCollected = false
     ): array {
-        $api = self::fromSettings($settings);
-        $pid = self::resolvePackageId($plan, $settings);
-        $billing = self::resolveBilling($plan);
-        $panelBase = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
-        $aff = (string) ($settings->get('xmplus_affiliate_code') ?? '');
+        $lock = Cache::lock('xmplus_provision_order:'.$order->id, 180);
+        if (! $lock->get()) {
+            throw new RuntimeException(
+                'XMPlus: این سفارش هم‌اکنون در حال پردازش است. چند ثانیه صبر کنید، لیست را رفرش کنید؛ فقط اگر سفارش هنوز «در انتظار» بود دوباره «تایید و اجرا» بزنید تا فاکتور تکراری در پنل ساخته نشود.'
+            );
+        }
+        try {
+            $api = self::fromSettings($settings);
+            $pid = self::resolvePackageId($plan, $settings);
+            $billing = self::resolveBilling($plan);
+            $panelBase = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
+            $aff = (string) ($settings->get('xmplus_affiliate_code') ?? '');
 
-        $api->log('info', 'XMPlus provisionPurchase شروع', [
-            'step' => 'provision_start',
-            'user_id' => $user->id,
-            'order_id' => $order->id,
-            'plan_id' => $plan->id,
-            'is_renewal' => $isRenewal,
-            'pid' => $pid,
-            'billing' => $billing,
-            'shop_payment_collected' => $shopPaymentAlreadyCollected,
-        ]);
+            $api->log('info', 'XMPlus provisionPurchase شروع', [
+                'step' => 'provision_start',
+                'user_id' => $user->id,
+                'order_id' => $order->id,
+                'plan_id' => $plan->id,
+                'is_renewal' => $isRenewal,
+                'pid' => $pid,
+                'billing' => $billing,
+                'shop_payment_collected' => $shopPaymentAlreadyCollected,
+            ]);
 
-        if ($isRenewal) {
-            return self::doRenewal($api, $settings, $user, $plan, $order, $originalOrder, $pid, $panelBase, $shopPaymentAlreadyCollected);
+            if ($isRenewal) {
+                return self::doRenewal($api, $settings, $user, $plan, $order, $originalOrder, $pid, $panelBase, $shopPaymentAlreadyCollected);
+            }
+
+            return self::doNewPurchase($api, $settings, $user, $plan, $order, $pid, $billing, $aff, $panelBase, $shopPaymentAlreadyCollected);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $invoiceView
+     */
+    protected static function invoiceViewResponseIsPaid(array $invoiceView): bool
+    {
+        $inv = $invoiceView['invoice'] ?? null;
+        if (! is_array($inv)) {
+            return false;
         }
 
-        return self::doNewPurchase($api, $settings, $user, $plan, $order, $pid, $billing, $aff, $panelBase, $shopPaymentAlreadyCollected);
+        return is_string($inv['status'] ?? null) && strcasecmp((string) $inv['status'], 'Paid') === 0;
     }
 
     /**
@@ -323,20 +346,32 @@ class XmplusProvisioningService
             $api->log('info', 'XMPlus استفاده از حساب موجود', ['step' => 'existing_user', 'email' => $email]);
         }
 
-        $inv = $api->invoiceCreate($email, $passwdPlain, $pid, $billing, '', 1);
-        if (! self::apiOk($inv)) {
-            throw new RuntimeException('XMPlus ساخت فاکتور ناموفق: '.json_encode($inv, JSON_UNESCAPED_UNICODE));
-        }
-        $invid = $inv['invid'] ?? data_get($inv, 'data.invid');
-        if (! is_string($invid) || $invid === '') {
-            $invid = is_scalar($inv['invid'] ?? null) ? (string) $inv['invid'] : '';
-        }
-        if ($invid === '') {
-            throw new RuntimeException('XMPlus: شناسه فاکتور (invid) در پاسخ invoice/create نیست.');
-        }
+        $invid = trim((string) ($order->xmplus_inv_id ?? ''));
+        $reuseInvoice = $invid !== '' && trim((string) ($order->config_details ?? '')) === '';
 
-        $order->forceFill(['xmplus_inv_id' => $invid])->save();
-        self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, $shopPaymentAlreadyCollected);
+        if (! $reuseInvoice) {
+            $inv = $api->invoiceCreate($email, $passwdPlain, $pid, $billing, '', 1);
+            if (! self::apiOk($inv)) {
+                throw new RuntimeException('XMPlus ساخت فاکتور ناموفق: '.json_encode($inv, JSON_UNESCAPED_UNICODE));
+            }
+            $invid = $inv['invid'] ?? data_get($inv, 'data.invid');
+            if (! is_string($invid) || $invid === '') {
+                $invid = is_scalar($inv['invid'] ?? null) ? (string) $inv['invid'] : '';
+            }
+            $invid = trim($invid);
+            if ($invid === '') {
+                throw new RuntimeException('XMPlus: شناسه فاکتور (invid) در پاسخ invoice/create نیست.');
+            }
+
+            $order->forceFill(['xmplus_inv_id' => $invid])->save();
+            self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, $shopPaymentAlreadyCollected);
+        } else {
+            $api->log('info', 'XMPlus بدون invoice/create جدید (ادامه با همان فاکتور)', [
+                'step' => 'reuse_invoice',
+                'invid' => $invid,
+                'order_id' => $order->id,
+            ]);
+        }
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
@@ -349,19 +384,32 @@ class XmplusProvisioningService
                     .'منوی انتخاب درگاه در تلگرام فقط برای حالت‌هایی است که هنوز در سایت پرداخت نشده باشد.'
                 );
             }
-            $pay = self::runInvoicePayStrictForShopCollected(
-                $api,
-                function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {
-                    return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
-                }
-            );
-            $api->log('info', 'XMPlus invoice/pay (تسویه پس از پرداخت فروشگاه)', [
-                'step' => 'invoice_pay_shop_collected',
-                'invid' => $invid,
-                'gatewayid' => (int) $gatewayId,
-                'response_summary' => array_keys($pay),
-            ]);
-            $customerCheckout = self::invoicePayLooksCustomerSideCheckout($pay);
+            $alreadyPaid = false;
+            try {
+                $viewPre = $api->invoiceView($email, $passwdPlain, $invid);
+                $alreadyPaid = self::invoiceViewResponseIsPaid($viewPre);
+            } catch (\Throwable $e) {
+                $api->log('warning', 'XMPlus invoice/view قبل از pay (فروشگاه)', ['error' => $e->getMessage(), 'invid' => $invid]);
+            }
+            if ($alreadyPaid) {
+                $pay = [];
+                $customerCheckout = false;
+                $api->log('info', 'XMPlus فاکتور از قبل Paid است؛ invoice/pay فراخوانی نشد', ['invid' => $invid, 'order_id' => $order->id]);
+            } else {
+                $pay = self::runInvoicePayStrictForShopCollected(
+                    $api,
+                    function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {
+                        return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                    }
+                );
+                $api->log('info', 'XMPlus invoice/pay (تسویه پس از پرداخت فروشگاه)', [
+                    'step' => 'invoice_pay_shop_collected',
+                    'invid' => $invid,
+                    'gatewayid' => (int) $gatewayId,
+                    'response_summary' => array_keys($pay),
+                ]);
+                $customerCheckout = self::invoicePayLooksCustomerSideCheckout($pay);
+            }
             if ($customerCheckout) {
                 $api->log('warning', 'XMPlus: invoice/pay برای تسویهٔ فروشگاه، درگاه «مشتری» برگرداند (مثلاً PayPal). فاکتور بدون پرداخت دوم در XMPlus Pending می‌ماند. شناسه درگاه خودکار را به درگاه موجودی/اعتبار نماینده عوض کنید یا همگام‌سازی MySQL invoice را فعال و درست کنید.', [
                     'invid' => $invid,
@@ -392,15 +440,26 @@ class XmplusProvisioningService
         }
 
         if ($autoPayConfigured) {
-            $pay = [];
+            $alreadyPaid = false;
             try {
-                $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
-                $api->log('info', 'XMPlus invoice/pay فراخوانی شد', ['step' => 'invoice_pay', 'response_summary' => is_array($pay) ? array_keys($pay) : 'n/a']);
+                $viewPre = $api->invoiceView($email, $passwdPlain, $invid);
+                $alreadyPaid = self::invoiceViewResponseIsPaid($viewPre);
             } catch (\Throwable $e) {
-                $api->log('warning', 'XMPlus invoice/pay خطا (ادامه با polling)', [
-                    'step' => 'invoice_pay_error',
-                    'error' => $e->getMessage(),
-                ]);
+                $api->log('warning', 'XMPlus invoice/view قبل از pay', ['error' => $e->getMessage(), 'invid' => $invid]);
+            }
+            $pay = [];
+            if (! $alreadyPaid) {
+                try {
+                    $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                    $api->log('info', 'XMPlus invoice/pay فراخوانی شد', ['step' => 'invoice_pay', 'response_summary' => is_array($pay) ? array_keys($pay) : 'n/a']);
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus invoice/pay خطا (ادامه با polling)', [
+                        'step' => 'invoice_pay_error',
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            } else {
+                $api->log('info', 'XMPlus فاکتور از قبل Paid؛ invoice/pay رد شد', ['invid' => $invid]);
             }
             $async = self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
@@ -520,16 +579,24 @@ class XmplusProvisioningService
         }
         $sid = (int) $sid;
 
-        $renew = $api->serviceRenew($email, $passwdPlain, $sid);
-        if (! self::apiOk($renew)) {
-            throw new RuntimeException('XMPlus تمدید ناموفق: '.json_encode($renew, JSON_UNESCAPED_UNICODE));
-        }
-        $invid = $renew['invid'] ?? null;
-        $invid = is_scalar($invid) ? (string) $invid : '';
+        $invid = trim((string) ($renewalOrder->xmplus_inv_id ?? ''));
+        if ($invid === '') {
+            $renew = $api->serviceRenew($email, $passwdPlain, $sid);
+            if (! self::apiOk($renew)) {
+                throw new RuntimeException('XMPlus تمدید ناموفق: '.json_encode($renew, JSON_UNESCAPED_UNICODE));
+            }
+            $invid = $renew['invid'] ?? null;
+            $invid = is_scalar($invid) ? trim((string) $invid) : '';
 
-        if ($invid !== '') {
-            $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
-            self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, $shopPaymentAlreadyCollected);
+            if ($invid !== '') {
+                $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
+                self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, $shopPaymentAlreadyCollected);
+            }
+        } else {
+            $api->log('info', 'XMPlus تمدید بدون serviceRenew جدید (همان فاکتور)', [
+                'invid' => $invid,
+                'order_id' => $renewalOrder->id,
+            ]);
         }
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
@@ -542,7 +609,17 @@ class XmplusProvisioningService
         }
 
         if ($invid !== '' && $autoPayConfigured) {
-            if ($shopPaymentAlreadyCollected) {
+            $alreadyPaid = false;
+            try {
+                $viewPre = $api->invoiceView($email, $passwdPlain, $invid);
+                $alreadyPaid = self::invoiceViewResponseIsPaid($viewPre);
+            } catch (\Throwable $e) {
+                $api->log('warning', 'XMPlus تمدید: invoice/view قبل از pay', ['error' => $e->getMessage(), 'invid' => $invid]);
+            }
+            if ($alreadyPaid) {
+                $pay = [];
+                $api->log('info', 'XMPlus تمدید: فاکتور از قبل Paid؛ invoice/pay رد شد', ['invid' => $invid]);
+            } elseif ($shopPaymentAlreadyCollected) {
                 $pay = self::runInvoicePayStrictForShopCollected(
                     $api,
                     function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {

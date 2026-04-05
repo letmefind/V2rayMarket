@@ -19,42 +19,48 @@ final class ApprovePendingOrderAction
 {
     public static function execute(Order $order): ApprovePendingOrderResult
     {
-        return DB::transaction(function () use ($order) {
-$settings = Setting::all()->pluck('value', 'key');
-$user = $order->user;
-$plan = $order->plan;
+        $settings = Setting::all()->pluck('value', 'key');
+        $user = $order->user;
+        $plan = $order->plan;
 
-if (!$plan) {
-    $order->update(['status' => 'paid']);
-    $user->increment('balance', $order->amount);
-    Transaction::create(['user_id' => $user->id, 'order_id' => $order->id, 'amount' => $order->amount, 'type' => 'deposit', 'status' => 'completed', 'description' => "شارژ کیف پول (تایید دستی فیش)"]);
-    $user->notifications()->create([
-        'type' => 'wallet_charged_approved',
-        'title' => 'کیف پول شما شارژ شد!',
-        'message' => "مبلغ " . number_format($order->amount) . " تومان با موفقیت به کیف پول شما اضافه شد.",
-        'link' => route('dashboard', ['tab' => 'order_history']),
-    ]);
+        if (! $plan) {
+            return DB::transaction(function () use ($order, $settings, $user) {
+                $order->update(['status' => 'paid']);
+                $user->increment('balance', $order->amount);
+                Transaction::create(['user_id' => $user->id, 'order_id' => $order->id, 'amount' => $order->amount, 'type' => 'deposit', 'status' => 'completed', 'description' => "شارژ کیف پول (تایید دستی فیش)"]);
+                $user->notifications()->create([
+                    'type' => 'wallet_charged_approved',
+                    'title' => 'کیف پول شما شارژ شد!',
+                    'message' => "مبلغ ".number_format($order->amount).' تومان با موفقیت به کیف پول شما اضافه شد.',
+                    'link' => route('dashboard', ['tab' => 'order_history']),
+                ]);
 
-    if ($user->telegram_chat_id) {
-        try {
-            $telegramMessage = "✅ کیف پول شما به مبلغ *" . number_format($order->amount) . " تومان* با موفقیت شارژ شد.\n\n";
-            $telegramMessage .= "موجودی جدید شما: *" . number_format($user->fresh()->balance) . " تومان*";
+                if ($user->telegram_chat_id) {
+                    try {
+                        $telegramMessage = '✅ کیف پول شما به مبلغ *'.number_format($order->amount)." تومان* با موفقیت شارژ شد.\n\n";
+                        $telegramMessage .= 'موجودی جدید شما: *'.number_format($user->fresh()->balance).' تومان*';
 
-            Telegram::setAccessToken($settings->get('telegram_bot_token'));
-            Telegram::sendMessage([
-                'chat_id' => $user->telegram_chat_id,
-                'text' => $telegramMessage,
-                'parse_mode' => 'Markdown'
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Failed to send wallet charge notification via Telegram: ' . $e->getMessage());
+                        Telegram::setAccessToken($settings->get('telegram_bot_token'));
+                        Telegram::sendMessage([
+                            'chat_id' => $user->telegram_chat_id,
+                            'text' => $telegramMessage,
+                            'parse_mode' => 'Markdown',
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error('Failed to send wallet charge notification via Telegram: '.$e->getMessage());
+                    }
+                }
+
+                return ApprovePendingOrderResult::ok('کیف پول کاربر با موفقیت شارژ شد.');
+            });
         }
-    }
 
-    return ApprovePendingOrderResult::ok('کیف پول کاربر با موفقیت شارژ شد.');
-}
+        if ($settings->get('panel_type') === 'xmplus') {
+            return self::approveXmplusPendingOrder($order, $settings, $user, $plan);
+        }
 
-$panelType = $settings->get('panel_type');
+        return DB::transaction(function () use ($order, $settings, $user, $plan) {
+            $panelType = $settings->get('panel_type');
 $success = false;
 $finalConfig = '';
 $extraOrderAttrs = [];
@@ -401,38 +407,6 @@ if ($panelType === 'marzban') {
             return ApprovePendingOrderResult::fail('خطا', 'خطا در ساخت کاربر در پنل سنایی: ' . $errorMsg);
         }
     }
-} elseif ($panelType === 'xmplus') {
-    try {
-        $result = XmplusProvisioningService::provisionPurchase(
-            $settings,
-            $user,
-            $plan,
-            $order,
-            $isRenewal,
-            $originalOrder,
-            true
-        );
-        if (($result['phase'] ?? '') === 'await_gateway') {
-            XmplusGatewayTelegram::sendGatewayPicker($order->fresh(['user']), $settings);
-
-            return ApprovePendingOrderResult::ok(
-                'فاکتور XMPlus ایجاد شد؛ درگاه‌های پرداخت برای کاربر در ربات ارسال شد.',
-                null,
-                'xmplus_gateway'
-            );
-        }
-        $finalConfig = $result['final_config'];
-        $success = true;
-        $extraOrderAttrs = array_filter([
-            'panel_username' => $result['panel_username'],
-            'panel_client_id' => $result['panel_client_id'],
-        ], fn ($v) => $v !== null && $v !== '');
-        $telegramAppend = $result['credentials_message'] ?? null;
-    } catch (\Throwable $e) {
-        Log::channel('xmplus')->error('ApprovePendingOrder XMPlus: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
-
-        return ApprovePendingOrderResult::fail('XMPlus', $e->getMessage());
-    }
 } else {
     $user->notifications()->create([
         'type' => 'panel_type_error_admin',
@@ -506,6 +480,114 @@ if ($success) {
 }
 
 return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛ پنل یا تنظیمات را بررسی کنید.');
+        });
+    }
+
+    private static function approveXmplusPendingOrder(Order $order, $settings, $user, $plan): ApprovePendingOrderResult
+    {
+        $isRenewal = (bool) $order->renews_order_id;
+        $originalOrder = $isRenewal ? Order::find($order->renews_order_id) : null;
+        if ($isRenewal && ! $originalOrder) {
+            return ApprovePendingOrderResult::fail('خطا', 'سفارش اصلی جهت تمدید یافت نشد.');
+        }
+
+        $pending = Order::query()->whereKey($order->id)->where('status', 'pending')->first();
+        if (! $pending) {
+            return ApprovePendingOrderResult::fail('توجه', 'این سفارش در وضعیت انتظار تأیید نیست.');
+        }
+
+        try {
+            $result = XmplusProvisioningService::provisionPurchase(
+                $settings,
+                $user,
+                $plan,
+                $pending,
+                $isRenewal,
+                $originalOrder,
+                true
+            );
+        } catch (\Throwable $e) {
+            Log::channel('xmplus')->error('ApprovePendingOrder XMPlus: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
+
+            return ApprovePendingOrderResult::fail('XMPlus', $e->getMessage());
+        }
+
+        if (($result['phase'] ?? '') === 'await_gateway') {
+            XmplusGatewayTelegram::sendGatewayPicker($pending->fresh(['user']), $settings);
+
+            return ApprovePendingOrderResult::ok(
+                'فاکتور XMPlus ایجاد شد؛ درگاه‌های پرداخت برای کاربر در ربات ارسال شد.',
+                null,
+                'xmplus_gateway'
+            );
+        }
+
+        $finalConfig = $result['final_config'];
+        $extraOrderAttrs = array_filter([
+            'panel_username' => $result['panel_username'],
+            'panel_client_id' => $result['panel_client_id'],
+        ], fn ($v) => $v !== null && $v !== '');
+        $telegramAppend = $result['credentials_message'] ?? null;
+
+        $newExpiresAt = $isRenewal
+            ? (new \DateTime($originalOrder->expires_at))->modify("+{$plan->duration_days} days")
+            : now()->addDays($plan->duration_days);
+
+        return DB::transaction(function () use ($order, $plan, $user, $settings, $finalConfig, $isRenewal, $originalOrder, $extraOrderAttrs, $telegramAppend, $newExpiresAt) {
+            $locked = Order::whereKey($order->id)->lockForUpdate()->first();
+            if (! $locked || $locked->status !== 'pending') {
+                return ApprovePendingOrderResult::fail('توجه', 'وضعیت سفارش قبلاً تغییر کرده است.');
+            }
+
+            if ($isRenewal) {
+                $renewPatch = array_merge([
+                    'config_details' => $finalConfig,
+                    'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
+                ], $extraOrderAttrs);
+                $originalOrder->update($renewPatch);
+
+                $user->update(['show_renewal_notification' => true]);
+
+                $user->notifications()->create([
+                    'type' => 'service_renewed_admin',
+                    'title' => 'سرویس شما تمدید شد!',
+                    'message' => "تمدید سرویس {$originalOrder->plan->name} توسط مدیر تایید و فعال شد. لطفاً لینک اشتراک خود را به‌روزرسانی کنید.",
+                    'link' => route('dashboard', ['tab' => 'my_services']),
+                ]);
+            } else {
+                $locked->update(array_merge([
+                    'config_details' => $finalConfig,
+                    'expires_at' => $newExpiresAt,
+                ], $extraOrderAttrs));
+                $user->notifications()->create([
+                    'type' => 'service_activated_admin',
+                    'title' => 'سرویس شما فعال شد!',
+                    'message' => "خرید سرویس {$plan->name} توسط مدیر تایید و فعال شد.",
+                    'link' => route('dashboard', ['tab' => 'my_services']),
+                ]);
+            }
+
+            $locked->update(['status' => 'paid']);
+            $description = ($isRenewal ? 'تمدید سرویس' : 'خرید سرویس')." {$plan->name}";
+            Transaction::create(['user_id' => $user->id, 'order_id' => $order->id, 'amount' => $plan->price, 'type' => 'purchase', 'status' => 'completed', 'description' => $description]);
+            OrderPaid::dispatch($locked);
+
+            if ($user->telegram_chat_id) {
+                try {
+                    $telegramMessage = $isRenewal
+                        ? "✅ سرویس شما (*{$plan->name}*) با موفقیت تمدید شد.\n\n❗️*نکته مهم:* لینک اشتراک شما تغییر کرده است. لطفاً لینک جدید زیر را کپی و در نرم‌افزار خود آپدیت کنید:\n\n`".$finalConfig.'`'
+                        : "✅ سرویس شما (*{$plan->name}*) با موفقیت فعال شد.\n\nاطلاعات کانفیگ شما:\n`".$finalConfig."`\n\nمی‌توانید لینک بالا را کپی کرده و در نرم‌افزار خود import کنید.";
+                    if ($telegramAppend) {
+                        $telegramMessage .= "\n\n".$telegramAppend;
+                    }
+                    Telegram::setAccessToken($settings->get('telegram_bot_token'));
+                    Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => $telegramMessage, 'parse_mode' => 'Markdown']);
+                } catch (\Exception $e) {
+                    Log::error('Failed to send Telegram notification: '.$e->getMessage());
+                }
+            }
+
+            return ApprovePendingOrderResult::ok('عملیات با موفقیت انجام شد.');
         });
     }
 }
