@@ -145,7 +145,14 @@ final class XmplusInvoiceDatabaseSyncService
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ];
         if (extension_loaded('pdo_mysql')) {
-            $pdoOpts[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 12;
+            try {
+                $connectTimeoutAttr = (new \ReflectionClassConstant(PDO::class, 'MYSQL_ATTR_CONNECT_TIMEOUT'))->getValue();
+                if (is_int($connectTimeoutAttr)) {
+                    $pdoOpts[$connectTimeoutAttr] = 12;
+                }
+            } catch (\ReflectionException) {
+                // بعضی بیلدهای PHP/PDO این ثابت را ندارند؛ بدون آن به timeout پیش‌فرض mysqlnd تکیه می‌کنیم.
+            }
         }
 
         return new PDO($dsn, $username, $password, $pdoOpts);
