@@ -132,6 +132,14 @@ final class XmplusInvoiceDatabaseSyncService
 
         $dsn = self::buildMysqlDsn($host, $port, $database);
 
+        Log::channel('xmplus')->info('XMPlus invoice DB: تلاش اتصال TCP به MySQL (مقادیر واقعی پس از sanitize)', [
+            'host_raw_setting' => $hostRaw !== '' ? $hostRaw : null,
+            'host_used_in_dsn' => $host,
+            'port' => $port,
+            'database' => $database,
+            'username' => $username,
+        ]);
+
         $pdoOpts = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,

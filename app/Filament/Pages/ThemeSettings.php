@@ -575,6 +575,7 @@ class ThemeSettings extends Page implements HasForms
                                     '<p class="text-sm text-gray-600 dark:text-gray-400">Client API معمولاً دکمهٔ «Confirm» پنل را ندارد. اگر بعد از تأیید پرداخت در VPNMarket فاکتور در XMPlus با <code>status=0</code> می‌ماند، می‌توانید با یک اتصال MySQL <strong>محدود</strong> همان ردیف را به <code>status=1</code> بزنید (مثل نمونهٔ <code>invoice.sql</code>).</p>'
                                     .'<p class="text-sm mt-2"><strong>مهم:</strong> MySQL لزوماً روی همان سرور پنل وب XMPlus نیست؛ اغلب روی سرور یا سرویس دیتابیس جداست. در فیلدها آدرس همان <strong>سروری را بگذارید که دیتابیس XMPlus روی آن است</strong> و از سرور VPNMarket به پورت MySQL آن (معمولاً ۳۳۰۶) دسترسی شبکه‌ای باز باشد (IP خصوصی، فایروال، تونل و …).</p>'
                                     .'<p class="text-sm mt-2">امنیت: کاربر MySQL جدا بسازید که فقط <code>UPDATE</code> روی جدول <code>invoice</code> داشته باشد؛ نه کل دیتابیس.</p>'
+                                    .'<p class="text-sm mt-2"><strong>دیباگ شبکه:</strong> اگر روی سرور <code>tcpdump dst host IP_دیتابیس</code> چیزی نمی‌بینید، حتماً <strong>همزمان</strong> «تست اتصال MySQL» را بزنید یا <code>php artisan xmplus:test-invoice-db</code> را اجرا کنید. اگر PHP داخل <strong>Docker</strong> است، بسته‌ها ممکن است از کانتینر خارج شوند؛ tcpdump را روی میزبان روی اینترفیس <code>docker0</code> یا داخل همان کانتینر اجرا کنید.</p>'
                                 ))
                                 ->collapsed()
                                 ->schema([
