@@ -9,7 +9,7 @@
  * Handler و Kernel در همین فایل تعریف شده‌اند تا XMPlus (که اغلب فقط همین فایل را لود می‌کند)
  * نیاز به فایل یا autoload اضافه نداشته باشد. در صورت نیاز منطق را در ShopPrepaidConfirmKernel::settle() تکمیل کنید.
  *
- * pay() برای UI پورتال: ret=2 یعنی پرداخت فوری و ریدایرکت به invoice/view (مثل Card2Card).
+ * pay() برای UI پورتال: ret=1 همراه code=100 یعنی پرداخت فوری (ret=2 در Client API گاهی به code=208 خطا تبدیل می‌شد).
  * برای Client API فروشگاه: code=100 و بدون qrcode / data رشته‌ای پر — تا polling VPNMarket درست کار کند.
  */
 
@@ -108,7 +108,8 @@ final class ShopPrepaidConfirm
 				},
 				success: (data) => {
 					layer.closeAll('loading');
-					if (data.ret == 2) {
+					var paidOk = (data.code == 100 || data.status == 'success' || data.status == 'Success');
+					if (data.ret == 2 || (data.ret == 1 && paidOk)) {
 						layer.msg(data.msg, {
 							time: 5000,
 							offset:  '100px'
@@ -161,15 +162,27 @@ final class ShopPrepaidConfirm
         }
 
         $orderid = $this->extractOrderPublicId($order);
+        $msg = Localization::get('PaymentSuccess') ?: 'Payment successful.';
+        $numericId = $this->extractInvoiceNumericId($order);
 
-        return [
-            'ret' => 2,
-            'msg' => Localization::get('PaymentSuccess') ?: 'Payment successful.',
+        /*
+         * Client API پنل XMPlus با ret=2 گاهی پاسخ را به status=error / code=208 تبدیل می‌کند.
+         * ret=1 معمولاً «پاسخ درگاه» است؛ با code=100 و data خالی، هم API و هم فروشگاه VPNMarket راضی می‌مانند.
+         */
+        $out = [
+            'ret' => 1,
+            'msg' => $msg,
             'status' => 'success',
             'code' => 100,
             'gateway' => 'ShopPrepaidConfirm',
             'orderid' => $orderid,
+            'data' => '',
         ];
+        if ($numericId !== null) {
+            $out['id'] = $numericId;
+        }
+
+        return $out;
     }
 
     /**
@@ -271,6 +284,27 @@ final class ShopPrepaidConfirm
         }
 
         return '';
+    }
+
+    /**
+     * شناسهٔ عددی ردیف فاکتور در DB (در صورت وجود در $order).
+     *
+     * @param  array<string, mixed>|object  $order
+     */
+    private function extractInvoiceNumericId($order): ?int
+    {
+        if (is_array($order) && isset($order['id']) && is_numeric($order['id'])) {
+            $n = (int) $order['id'];
+
+            return $n > 0 ? $n : null;
+        }
+        if (is_object($order) && isset($order->id) && is_numeric($order->id)) {
+            $n = (int) $order->id;
+
+            return $n > 0 ? $n : null;
+        }
+
+        return null;
     }
 }
 
