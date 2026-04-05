@@ -76,6 +76,7 @@ class ThemeSettings extends Page implements HasForms
             'manual_crypto_usdt_erc20_address',
             'manual_crypto_usdt_bep20_address',
             'manual_crypto_usdc_erc20_address',
+            'xmplus_client_api_key',
         ];
         foreach ($mustBeStringKeys as $sk) {
             if (! array_key_exists($sk, $settings) || $settings[$sk] === null) {
@@ -96,6 +97,9 @@ class ThemeSettings extends Page implements HasForms
         }
         if (array_key_exists('manual_crypto_enabled', $settings) && $settings['manual_crypto_enabled'] !== null) {
             $settings['manual_crypto_enabled'] = filter_var($settings['manual_crypto_enabled'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (array_key_exists('xmplus_send_register_code', $settings) && $settings['xmplus_send_register_code'] !== null) {
+            $settings['xmplus_send_register_code'] = filter_var($settings['xmplus_send_register_code'], FILTER_VALIDATE_BOOLEAN);
         }
         if (array_key_exists('plisio_amount_multiplier', $settings) && $settings['plisio_amount_multiplier'] !== null && $settings['plisio_amount_multiplier'] !== '') {
             $settings['plisio_amount_multiplier'] = is_numeric($settings['plisio_amount_multiplier'])
@@ -163,6 +167,14 @@ class ThemeSettings extends Page implements HasForms
             'manual_crypto_usdt_bep20_address' => null,
             'manual_crypto_usdc_erc20_address' => null,
             'manual_crypto_display_decimals' => 2,
+            'xmplus_panel_url' => null,
+            'xmplus_client_api_key' => null,
+            'xmplus_email_domain' => null,
+            'xmplus_default_package_id' => null,
+            'xmplus_affiliate_code' => null,
+            'xmplus_registration_code' => null,
+            'xmplus_send_register_code' => false,
+            'xmplus_auto_pay_gateway_id' => null,
         ], $settings));
     }
 
@@ -270,7 +282,11 @@ class ThemeSettings extends Page implements HasForms
                     ]),
 
                     Tabs\Tab::make('تنظیمات پنل V2Ray')->icon('heroicon-o-server-stack')->schema([
-                        Radio::make('panel_type')->label('نوع پنل')->options(['marzban' => 'مرزبان', 'xui' => 'تنظیمات پنل سنایی / X-UI / TX-UI'])->live()->required(),
+                        Radio::make('panel_type')->label('نوع پنل')->options([
+                            'marzban' => 'مرزبان',
+                            'xui' => 'تنظیمات پنل سنایی / X-UI / TX-UI',
+                            'xmplus' => 'XMPlus (Client API)',
+                        ])->live()->required(),
                         Section::make('تنظیمات پنل مرزبان')->visible(fn (Get $get) => $get('panel_type') === 'marzban')->schema([
                             TextInput::make('marzban_host')->label('آدرس پنل مرزبان')->required(),
                             TextInput::make('marzban_sudo_username')->label('نام کاربری ادمین')->required(),
@@ -326,7 +342,7 @@ class ThemeSettings extends Page implements HasForms
                                     ->searchable()
                                     ->preload()
                                     ->placeholder('ابتدا Sync از X-UI را بزنید و صفحه را رفرش کنید')
-                                    ->helperText(fn(Get $get) => $get('panel_type') === 'xui' ? 'این اینباند برای پرداخت‌های خودکار استفاده می‌شود' : ''),
+                                    ->helperText(fn (Get $get) => $get('panel_type') === 'xui' ? 'این اینباند برای پرداخت‌های خودکار استفاده می‌شود' : ''),
 
                                 Radio::make('xui_link_type')->label('نوع لینک تحویلی')->options(['single' => 'لینک تکی', 'subscription' => 'لینک سابسکریپشن'])->default('single')
                                     ->required(fn(Get $get): bool => $get('panel_type') === 'xui'),
@@ -483,6 +499,48 @@ class ThemeSettings extends Page implements HasForms
                                     ->helperText('💡 می‌توانید چندین کانال اضافه کنید. کاربر باید در تمام کانال‌ها عضو باشد.'),
                             ]),
                     ]),
+
+                    Tabs\Tab::make('پنل XMPlus (Client API)')
+                        ->icon('heroicon-o-globe-alt')
+                        ->schema([
+                            Section::make('اتصال و شناسه بسته')
+                                ->description(new HtmlString('مستندات رسمی: <a href="https://docs.xmplus.dev/api/client.html" target="_blank" rel="noopener" class="text-primary-600 underline">Client API</a>. لاگ درخواست/پاسخ در فایل <code class="text-xs">storage/logs/xmplus-*.log</code>.'))
+                                ->schema([
+                                    TextInput::make('xmplus_panel_url')
+                                        ->label('آدرس پایه پنل')
+                                        ->placeholder('https://panel.example.com')
+                                        ->helperText('بدون / انتهایی. همان آدرسی که مسیرهای /api/client/... روی آن در دسترس است.'),
+                                    TextInput::make('xmplus_client_api_key')
+                                        ->label('Client API Key')
+                                        ->password()
+                                        ->revealable()
+                                        ->helperText('طبق مستندات، مقدار md5 این کلید در هدر xmplus-authorization برای گرفتن توکن ارسال می‌شود؛ کلید خام را اینجا وارد کنید.'),
+                                    TextInput::make('xmplus_email_domain')
+                                        ->label('دامنه ایمیل برای کاربران تلگرام/سایت')
+                                        ->placeholder('orders.yourdomain.com')
+                                        ->helperText('برای ثبت‌نام در XMPlus ایمیل یکتا به صورت tg{id}.{random}@دامنه ساخته می‌شود.'),
+                                    TextInput::make('xmplus_default_package_id')
+                                        ->label('شناسه بسته پیش‌فرض (pid)')
+                                        ->numeric()
+                                        ->helperText('اگر برای پلن مقدار «شناسه بسته XMPlus» نگذارید از این عدد استفاده می‌شود.'),
+                                ]),
+                            Section::make('ثبت‌نام، فاکتور و پرداخت خودکار')
+                                ->schema([
+                                    TextInput::make('xmplus_affiliate_code')
+                                        ->label('کد affiliate (aff)')
+                                        ->maxLength(64),
+                                    TextInput::make('xmplus_registration_code')
+                                        ->label('کد تأیید ایمیل (ثابت، اختیاری)')
+                                        ->helperText('در API فیلد code؛ اگر پنل شما بدون ایمیل واقعی یا با کد ثابت ثبت‌نام می‌کند اینجا بگذارید.'),
+                                    Toggle::make('xmplus_send_register_code')
+                                        ->label('قبل از ثبت‌نام، /api/client/register/sendcode فراخوانی شود')
+                                        ->helperText('فقط وقتی فعال کنید که ایمیل واقعاً به صندوق برسد.'),
+                                    TextInput::make('xmplus_auto_pay_gateway_id')
+                                        ->label('شناسه درگاه برای پرداخت خودکار فاکتور')
+                                        ->numeric()
+                                        ->helperText('در صورت تنظیم، پس از invoice/create درخواست invoice/pay هم زده می‌شود (بستگی به نسخه/تنظیمات XMPlus دارد).'),
+                                ]),
+                        ]),
 
                     Tabs\Tab::make('سیستم دعوت از دوستان')
                         ->icon('heroicon-o-gift')

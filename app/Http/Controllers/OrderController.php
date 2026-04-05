@@ -13,6 +13,7 @@ use App\Models\Transaction;
 use App\Services\ManualCryptoService;
 use App\Services\MarzbanService;
 use App\Services\PlisioService;
+use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
 use App\Models\Notification;
 use Illuminate\Http\Request;
@@ -384,6 +385,7 @@ class OrderController extends Controller
                 $settings = Setting::all()->pluck('value', 'key');
                 $success = false;
                 $finalConfig = '';
+                $extraOrderAttrs = [];
                 $panelType = $settings->get('panel_type');
                 $isRenewal = (bool) $order->renews_order_id;
 
@@ -664,6 +666,21 @@ class OrderController extends Controller
                     if (!$success) {
                         throw new \Exception('خطا در ارتباط با سرور برای فعال‌سازی سرویس.');
                     }
+                } elseif ($panelType === 'xmplus') {
+                    $result = XmplusProvisioningService::provisionPurchase(
+                        $settings,
+                        $user,
+                        $plan,
+                        $order,
+                        $isRenewal,
+                        $originalOrder
+                    );
+                    $finalConfig = $result['final_config'];
+                    $success = true;
+                    $extraOrderAttrs = array_filter([
+                        'panel_username' => $result['panel_username'],
+                        'panel_client_id' => $result['panel_client_id'],
+                    ], fn ($v) => $v !== null && $v !== '');
                 } else {
                     throw new \Exception('نوع پنل در تنظیمات مشخص نشده است.');
                 }
@@ -672,10 +689,10 @@ class OrderController extends Controller
                 // ذخیره سفارشات
                 // ==========================================
                 if ($isRenewal) {
-                    $originalOrder->update([
+                    $originalOrder->update(array_merge([
                         'config_details' => $finalConfig,
-                        'expires_at' => $newExpiresAt->format('Y-m-d H:i:s')
-                    ]);
+                        'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
+                    ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
 
                     $user->update(['show_renewal_notification' => true]);
 
@@ -686,10 +703,10 @@ class OrderController extends Controller
                         'link' => route('dashboard', ['tab' => 'my_services']),
                     ]);
                 } else {
-                    $order->update([
+                    $order->update(array_merge([
                         'config_details' => $finalConfig,
-                        'expires_at' => $newExpiresAt
-                    ]);
+                        'expires_at' => $newExpiresAt,
+                    ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
 
                     $user->notifications()->create([
                         'type' => 'service_purchased',

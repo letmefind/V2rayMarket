@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\Setting;
 use App\Models\Transaction;
 use App\Services\MarzbanService;
+use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -124,6 +125,8 @@ class FulfillOrderAfterPaymentAction
         $settings = Setting::all()->pluck('value', 'key');
         $success = false;
         $finalConfig = '';
+        $extraOrderAttrs = [];
+        $telegramAppend = null;
         $panelType = $settings->get('panel_type');
         $isRenewal = (bool) $order->renews_order_id;
 
@@ -326,15 +329,31 @@ class FulfillOrderAfterPaymentAction
             if (! $success) {
                 throw new \RuntimeException('خطا در ارتباط با سرور برای فعال‌سازی سرویس.');
             }
+        } elseif ($panelType === 'xmplus') {
+            $result = XmplusProvisioningService::provisionPurchase(
+                $settings,
+                $user,
+                $plan,
+                $order,
+                $isRenewal,
+                $originalOrder
+            );
+            $finalConfig = $result['final_config'];
+            $success = true;
+            $extraOrderAttrs = array_filter([
+                'panel_username' => $result['panel_username'],
+                'panel_client_id' => $result['panel_client_id'],
+            ], fn ($v) => $v !== null && $v !== '');
+            $telegramAppend = $result['credentials_message'] ?? null;
         } else {
             throw new \RuntimeException('نوع پنل در تنظیمات مشخص نشده است.');
         }
 
         if ($isRenewal) {
-            $originalOrder->update([
+            $originalOrder->update(array_merge([
                 'config_details' => $finalConfig,
                 'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
-            ]);
+            ], $extraOrderAttrs));
             $user->update(['show_renewal_notification' => true]);
             $user->notifications()->create([
                 'type' => 'service_renewed',
@@ -343,10 +362,10 @@ class FulfillOrderAfterPaymentAction
                 'link' => route('dashboard', ['tab' => 'my_services']),
             ]);
         } else {
-            $order->update([
+            $order->update(array_merge([
                 'config_details' => $finalConfig,
                 'expires_at' => $newExpiresAt,
-            ]);
+            ], $extraOrderAttrs));
             $user->notifications()->create([
                 'type' => 'service_purchased',
                 'title' => 'سرویس شما فعال شد!',
@@ -372,10 +391,10 @@ class FulfillOrderAfterPaymentAction
 
         OrderPaid::dispatch($order);
 
-        $this->notifyTelegramPlan($user, $order, $plan, $finalConfig, $isRenewal, $settings);
+        $this->notifyTelegramPlan($user, $order, $plan, $finalConfig, $isRenewal, $settings, $telegramAppend);
     }
 
-    protected function notifyTelegramPlan($user, Order $order, $plan, string $finalConfig, bool $isRenewal, $settings): void
+    protected function notifyTelegramPlan($user, Order $order, $plan, string $finalConfig, bool $isRenewal, $settings, ?string $appendText = null): void
     {
         if (! $user->telegram_chat_id) {
             return;
@@ -387,9 +406,13 @@ class FulfillOrderAfterPaymentAction
         try {
             Telegram::setAccessToken($token);
             $label = $isRenewal ? 'تمدید شد' : 'فعال شد';
+            $text = "✅ سرویس «{$plan->name}» {$label}.\n\n{$finalConfig}";
+            if ($appendText) {
+                $text .= "\n\n".$appendText;
+            }
             Telegram::sendMessage([
                 'chat_id' => $user->telegram_chat_id,
-                'text' => "✅ سرویس «{$plan->name}» {$label}.\n\n{$finalConfig}",
+                'text' => $text,
             ]);
         } catch (\Throwable $e) {
             Log::warning('Telegram notify plan plisio: '.$e->getMessage());

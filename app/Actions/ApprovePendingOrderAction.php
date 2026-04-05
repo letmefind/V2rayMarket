@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Setting;
 use App\Models\Transaction;
 use App\Services\MarzbanService;
+use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -55,6 +56,8 @@ if (!$plan) {
 $panelType = $settings->get('panel_type');
 $success = false;
 $finalConfig = '';
+$extraOrderAttrs = [];
+$telegramAppend = null;
 $isRenewal = (bool)$order->renews_order_id;
 
 $originalOrder = $isRenewal ? Order::find($order->renews_order_id) : null;
@@ -397,6 +400,28 @@ if ($panelType === 'marzban') {
             return ApprovePendingOrderResult::fail('خطا', 'خطا در ساخت کاربر در پنل سنایی: ' . $errorMsg);
         }
     }
+} elseif ($panelType === 'xmplus') {
+    try {
+        $result = XmplusProvisioningService::provisionPurchase(
+            $settings,
+            $user,
+            $plan,
+            $order,
+            $isRenewal,
+            $originalOrder
+        );
+        $finalConfig = $result['final_config'];
+        $success = true;
+        $extraOrderAttrs = array_filter([
+            'panel_username' => $result['panel_username'],
+            'panel_client_id' => $result['panel_client_id'],
+        ], fn ($v) => $v !== null && $v !== '');
+        $telegramAppend = $result['credentials_message'] ?? null;
+    } catch (\Throwable $e) {
+        Log::channel('xmplus')->error('ApprovePendingOrder XMPlus: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
+
+        return ApprovePendingOrderResult::fail('XMPlus', $e->getMessage());
+    }
 } else {
     $user->notifications()->create([
         'type' => 'panel_type_error_admin',
@@ -408,12 +433,17 @@ if ($panelType === 'marzban') {
 }
 
 if ($success) {
-    if($isRenewal) {
-        $originalOrder->update([
+    if ($isRenewal) {
+        $renewPatch = [
             'config_details' => $finalConfig,
             'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
-            'panel_username' => $uniqueUsername
-        ]);
+        ];
+        if ($panelType === 'xmplus') {
+            $renewPatch = array_merge($renewPatch, $extraOrderAttrs);
+        } else {
+            $renewPatch['panel_username'] = $uniqueUsername;
+        }
+        $originalOrder->update($renewPatch);
 
         $user->update(['show_renewal_notification' => true]);
 
@@ -424,11 +454,16 @@ if ($success) {
             'link' => route('dashboard', ['tab' => 'my_services']),
         ]);
     } else {
-        $order->update([
+        $newPatch = [
             'config_details' => $finalConfig,
             'expires_at' => $newExpiresAt,
-            'panel_username' => $uniqueUsername
-        ]);
+        ];
+        if ($panelType === 'xmplus') {
+            $newPatch = array_merge($newPatch, $extraOrderAttrs);
+        } else {
+            $newPatch['panel_username'] = $uniqueUsername;
+        }
+        $order->update($newPatch);
         $user->notifications()->create([
             'type' => 'service_activated_admin',
             'title' => 'سرویس شما فعال شد!',
@@ -438,7 +473,7 @@ if ($success) {
     }
 
     $order->update(['status' => 'paid']);
-    $description = ($isRenewal ? "تمدید سرویس" : "خرید سرویس") . " {$plan->name}";
+    $description = ($isRenewal ? "تمدید سرویس" : "خرید سرویس")." {$plan->name}";
     Transaction::create(['user_id' => $user->id, 'order_id' => $order->id, 'amount' => $plan->price, 'type' => 'purchase', 'status' => 'completed', 'description' => $description]);
     OrderPaid::dispatch($order);
 
@@ -447,16 +482,19 @@ if ($success) {
             $telegramMessage = $isRenewal
                 ? "✅ سرویس شما (*{$plan->name}*) با موفقیت تمدید شد.\n\n❗️*نکته مهم:* لینک اشتراک شما تغییر کرده است. لطفاً لینک جدید زیر را کپی و در نرم‌افزار خود آپدیت کنید:\n\n`" . $finalConfig . "`"
                 : "✅ سرویس شما (*{$plan->name}*) با موفقیت فعال شد.\n\nاطلاعات کانفیگ شما:\n`" . $finalConfig . "`\n\nمی‌توانید لینک بالا را کپی کرده و در نرم‌افزار خود import کنید.";
+            if ($telegramAppend) {
+                $telegramMessage .= "\n\n".$telegramAppend;
+            }
             Telegram::setAccessToken($settings->get('telegram_bot_token'));
             Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => $telegramMessage, 'parse_mode' => 'Markdown']);
         } catch (\Exception $e) {
-            Log::error('Failed to send Telegram notification: ' . $e->getMessage());
+            Log::error('Failed to send Telegram notification: '.$e->getMessage());
         }
     }
     return ApprovePendingOrderResult::ok('عملیات با موفقیت انجام شد.');
 }
 
-    return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛ پنل یا تنظیمات را بررسی کنید.');
+return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛ پنل یا تنظیمات را بررسی کنید.');
         });
     }
 }

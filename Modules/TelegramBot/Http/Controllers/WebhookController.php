@@ -14,6 +14,7 @@ use App\Services\PlisioService;
 use App\Services\XUIService;
 use App\Models\User;
 use App\Services\MarzbanService;
+use App\Services\XmplusProvisioningService;
 use App\Models\Inbound;
 use Modules\Ticketing\Events\TicketCreated;
 use Modules\Ticketing\Events\TicketReplied;
@@ -1401,8 +1402,9 @@ class WebhookController extends Controller
             return;
         }
 
+        $walletCredNote = null;
         try {
-            DB::transaction(function () use ($user, $plan, &$order) {
+            DB::transaction(function () use ($user, $plan, &$order, &$walletCredNote) {
                 $user->decrement('balance', $order->amount);
 
                 $order->update([
@@ -1434,10 +1436,26 @@ class WebhookController extends Controller
                 $provisionData = $this->provisionUserAccount($order, $plan);
 
                 if ($provisionData && $provisionData['link']) {
-                    $order->update([
+                    $walletCredNote = $provisionData['credentials_message'] ?? null;
+                    $patch = [
                         'config_details' => $provisionData['link'],
-                        'panel_username' => $provisionData['username']
-                    ]);
+                        'panel_username' => $provisionData['username'],
+                    ];
+                    if (! empty($provisionData['panel_client_id'])) {
+                        $patch['panel_client_id'] = $provisionData['panel_client_id'];
+                    }
+                    $order->update($patch);
+
+                    if ($order->renews_order_id) {
+                        $orig = Order::find($order->renews_order_id);
+                        if ($orig) {
+                            $base = $orig->expires_at && Carbon::parse($orig->expires_at)->isFuture()
+                                ? Carbon::parse($orig->expires_at)
+                                : now();
+                            $newExp = $base->copy()->addDays($plan->duration_days);
+                            $orig->update(array_merge($patch, ['expires_at' => $newExp]));
+                        }
+                    }
                 } else {
                     throw new \Exception('Provisioning failed, config data is null.');
                 }
@@ -1446,7 +1464,11 @@ class WebhookController extends Controller
             $order->refresh();
             $link = $order->config_details;
 
-            $this->sendOrEditMessage($user->telegram_chat_id, "✅ خرید موفق!\n\nلینک کانفیگ:\n{$link}", Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']), Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start'])]), $messageId);
+            $successText = "✅ خرید موفق!\n\nلینک کانفیگ:\n{$link}";
+            if (! empty($walletCredNote)) {
+                $successText .= "\n\n".$walletCredNote;
+            }
+            $this->sendOrEditMessage($user->telegram_chat_id, $successText, Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']), Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start'])]), $messageId);
         } catch (\Exception $e) {
             Log::error('Wallet Payment Failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString(), 'plan_id' => $plan->id ?? null, 'user_id' => $user->id]);
             if ($order && $order->exists) {
@@ -2194,7 +2216,7 @@ class WebhookController extends Controller
     {
         $settings = $this->settings;
         $uniqueUsername = $order->panel_username ?? "user-{$order->user_id}-order-{$order->id}";
-        $configData = ['link' => null, 'username' => null];
+        $configData = ['link' => null, 'username' => null, 'credentials_message' => null, 'panel_client_id' => null];
 
         $isMultiServer = false;
         $panelType = $settings->get('panel_type') ?? 'marzban';
@@ -2516,6 +2538,21 @@ class WebhookController extends Controller
                     $errMsg = $response['msg'] ?? 'Unknown Error';
                     throw new \Exception("خطا در ساخت کاربر در پنل: " . $errMsg);
                 }
+            } elseif ($panelType === 'xmplus' && ! $isMultiServer) {
+                $isRenewal = (bool) $order->renews_order_id;
+                $originalOrder = $isRenewal ? Order::find($order->renews_order_id) : null;
+                $result = XmplusProvisioningService::provisionPurchase(
+                    $settings,
+                    $order->user,
+                    $plan,
+                    $order,
+                    $isRenewal,
+                    $originalOrder
+                );
+                $configData['link'] = $result['final_config'];
+                $configData['username'] = $result['panel_username'];
+                $configData['credentials_message'] = $result['credentials_message'] ?? null;
+                $configData['panel_client_id'] = $result['panel_client_id'] ?? null;
             }
         } catch (\Exception $e) {
             Log::error("Failed to provision account for Order {$order->id}: " . $e->getMessage());
@@ -3037,6 +3074,26 @@ class WebhookController extends Controller
                     $errorMsg = $response['msg'] ?? 'خطای نامشخص';
                     throw new \Exception("❌ خطا در بروزرسانی کلاینت: " . $errorMsg);
                 }
+            } elseif ($settings->get('panel_type') === 'xmplus') {
+                $result = XmplusProvisioningService::provisionPurchase(
+                    $settings,
+                    $user,
+                    $plan,
+                    $originalOrder,
+                    true,
+                    $originalOrder
+                );
+                $originalOrder->update([
+                    'expires_at' => $newExpiryDate,
+                    'config_details' => $result['final_config'],
+                    'panel_username' => $result['panel_username'],
+                    'panel_client_id' => $result['panel_client_id'] ?? $originalOrder->panel_client_id,
+                ]);
+
+                return [
+                    'link' => $result['final_config'],
+                    'username' => $result['panel_username'],
+                ];
             } else {
                 throw new \Exception("❌ نوع پنل پشتیبانی نمی‌شود: " . $settings->get('panel_type'));
             }
@@ -3719,6 +3776,8 @@ class WebhookController extends Controller
                 } else {
                     throw new \Exception($response['msg'] ?? 'خطا در ساخت کاربر در پنل X-UI');
                 }
+            } elseif ($panelType === 'xmplus') {
+                throw new \Exception('اکانت تست رایگان با پنل XMPlus پشتیبانی نمی‌شود؛ از خرید سرویس یا پنل marzban/xui برای تست استفاده کنید.');
             } else {
                 throw new \Exception('نوع پنل در تنظیمات مشخص نشده است.');
             }

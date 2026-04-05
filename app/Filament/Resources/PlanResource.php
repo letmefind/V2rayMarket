@@ -59,6 +59,26 @@ class PlanResource extends Resource
                     ->default(30)
                     ->helperText('مثال: 30 = ۱ ماهه، 90 = ۳ ماهه، 365 = ۱ ساله')
                     ->rules(['min:1']),
+
+                Forms\Components\Section::make('XMPlus (فقط وقتی نوع پنل xmplus است)')
+                    ->collapsed()
+                    ->schema([
+                        Forms\Components\TextInput::make('xmplus_package_id')
+                            ->label('شناسه بسته در XMPlus (pid)')
+                            ->numeric()
+                            ->helperText('طبق لیست بسته‌ها در پنل XMPlus؛ اگر خالی باشد از «شناسه بسته پیش‌فرض» در تب XMPlus استفاده می‌شود.'),
+                        Forms\Components\Select::make('xmplus_billing')
+                            ->label('دوره صورت‌حساب (billing)')
+                            ->options([
+                                'month' => 'month',
+                                'quater' => 'quater (همان املای API)',
+                                'semiannual' => 'semiannual',
+                                'annual' => 'annual',
+                                'topup_traffic' => 'topup_traffic',
+                            ])
+                            ->native(false)
+                            ->placeholder('خالی = از مدت پلن حدس زده می‌شود'),
+                    ]),
                 //========================================================
 
                 Forms\Components\Toggle::make('is_popular')

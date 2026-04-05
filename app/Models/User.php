@@ -31,6 +31,8 @@ class User extends Authenticatable implements FilamentUser
         'balance',
         'referrer_id',
         'referral_code',
+        'xmplus_client_email',
+        'xmplus_client_password',
     ];
 
     /**
@@ -53,6 +55,7 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'xmplus_client_password' => 'encrypted',
         ];
     }
 

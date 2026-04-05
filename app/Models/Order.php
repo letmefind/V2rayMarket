@@ -18,6 +18,7 @@ class Order extends Model
         'renews_order_id',
         'source',
         'panel_username',
+        'panel_client_id',
 
     ];
 
