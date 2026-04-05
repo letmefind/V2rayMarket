@@ -286,6 +286,53 @@ class XmplusService
     }
 
     /**
+     * لیست درگاه‌های پرداخت — POST /api/client/gateways
+     *
+     * @see https://docs.xmplus.dev/api/client.html#_12-gateway-lists
+     *
+     * @return array<int, array{id: int, name: string, gateway: string}>
+     */
+    public function listGateways(): array
+    {
+        $r = $this->postClient('/api/client/gateways', [], 'gateways_list');
+
+        return self::normalizeGatewaysPayload($r['gateways'] ?? $r['data'] ?? $r);
+    }
+
+    /**
+     * @return array<int, array{id: int, name: string, gateway: string}>
+     */
+    public static function normalizeGatewaysPayload(mixed $raw): array
+    {
+        if ($raw === null || $raw === [] || $raw === '') {
+            return [];
+        }
+        if (is_array($raw) && isset($raw['id'])) {
+            $raw = [$raw];
+        }
+        if (! is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (! is_array($item) || ! isset($item['id'])) {
+                continue;
+            }
+            $id = (int) $item['id'];
+            if ($id <= 0) {
+                continue;
+            }
+            $out[] = [
+                'id' => $id,
+                'name' => trim((string) ($item['name'] ?? $item['gateway'] ?? ('Gateway '.$id))),
+                'gateway' => (string) ($item['gateway'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * لیست پکیج‌های کامل — POST /api/client/packages
      *
      * @return array<int, array<string, mixed>>

@@ -98,7 +98,11 @@ class OrderResource extends Resource
                     ->action(function (Order $order) {
                         $result = ApprovePendingOrderAction::execute($order);
                         if ($result->success) {
-                            Notification::make()->title($result->title)->success()->send();
+                            Notification::make()
+                                ->title($result->title)
+                                ->body($result->deferralKind === 'xmplus_gateway' ? 'کاربر باید در ربات تلگرام یکی از درگاه‌های XMPlus را انتخاب کند.' : '')
+                                ->success()
+                                ->send();
                         } else {
                             Notification::make()->title($result->title)->body($result->body ?? '')->danger()->send();
                         }

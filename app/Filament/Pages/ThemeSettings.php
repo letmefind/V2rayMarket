@@ -101,6 +101,9 @@ class ThemeSettings extends Page implements HasForms
         if (array_key_exists('xmplus_send_register_code', $settings) && $settings['xmplus_send_register_code'] !== null) {
             $settings['xmplus_send_register_code'] = filter_var($settings['xmplus_send_register_code'], FILTER_VALIDATE_BOOLEAN);
         }
+        if (array_key_exists('xmplus_telegram_gateway_picker', $settings) && $settings['xmplus_telegram_gateway_picker'] !== null) {
+            $settings['xmplus_telegram_gateway_picker'] = filter_var($settings['xmplus_telegram_gateway_picker'], FILTER_VALIDATE_BOOLEAN);
+        }
         if (array_key_exists('plisio_amount_multiplier', $settings) && $settings['plisio_amount_multiplier'] !== null && $settings['plisio_amount_multiplier'] !== '') {
             $settings['plisio_amount_multiplier'] = is_numeric($settings['plisio_amount_multiplier'])
                 ? (float) $settings['plisio_amount_multiplier']
@@ -174,6 +177,7 @@ class ThemeSettings extends Page implements HasForms
             'xmplus_affiliate_code' => null,
             'xmplus_registration_code' => null,
             'xmplus_send_register_code' => false,
+            'xmplus_telegram_gateway_picker' => true,
             'xmplus_auto_pay_gateway_id' => null,
         ], $settings));
     }
@@ -535,10 +539,13 @@ class ThemeSettings extends Page implements HasForms
                                     Toggle::make('xmplus_send_register_code')
                                         ->label('قبل از ثبت‌نام، /api/client/register/sendcode فراخوانی شود')
                                         ->helperText('فقط وقتی فعال کنید که ایمیل واقعاً به صندوق برسد.'),
+                                    Toggle::make('xmplus_telegram_gateway_picker')
+                                        ->label('نمایش درگاه‌های XMPlus در ربات (دکمه اینلاین)')
+                                        ->helperText('اگر روشن باشد و «شناسه درگاه خودکار» خالی باشد، پس از ساخت فاکتور لیست درگاه‌ها از API /api/client/gateways برای کاربر در تلگرام فرستاده می‌شود (مثل انتخاب پکیج). اگر خاموش باشد و درگاه خودکار هم خالی باشد، تأیید سفارش خطا می‌دهد مگر کاربر chat_id تلگرام نداشته باشد.'),
                                     TextInput::make('xmplus_auto_pay_gateway_id')
                                         ->label('شناسه درگاه برای پرداخت خودکار فاکتور')
                                         ->numeric()
-                                        ->helperText('الزامی برای تکمیل خودکار سفارش: عدد شناسه درگاه در پنل XMPlus که از Client API پرداخت فاکتور را بپذیرد (مثلاً موجودی کیف پول یا درگاه «رایگان/دستی» اگر پنل اجازه دهد). بدون این مقدار فاکتور Pending می‌ماند و لینک اشتراک ساخته نمی‌شود.'),
+                                        ->helperText('در صورت پر بودن، همان درگاه برای invoice/pay استفاده می‌شود و منوی انتخاب درگاه در ربات نشان داده نمی‌شود. برای چند درگاه، این را خالی بگذارید و گزینهٔ بالا را روشن کنید.'),
                                 ]),
                         ]),
 

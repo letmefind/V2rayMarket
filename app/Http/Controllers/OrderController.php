@@ -15,6 +15,7 @@ use App\Services\MarzbanService;
 use App\Services\PlisioService;
 use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
+use App\Support\XmplusGatewayTelegram;
 use App\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -386,6 +387,7 @@ class OrderController extends Controller
                 $success = false;
                 $finalConfig = '';
                 $extraOrderAttrs = [];
+                $xmplusAwaitGateway = false;
                 $panelType = $settings->get('panel_type');
                 $isRenewal = (bool) $order->renews_order_id;
 
@@ -663,7 +665,7 @@ class OrderController extends Controller
                         }
                     }
 
-                    if (!$success) {
+                    if (! $success) {
                         throw new \Exception('خطا در ارتباط با سرور برای فعال‌سازی سرویس.');
                     }
                 } elseif ($panelType === 'xmplus') {
@@ -675,64 +677,107 @@ class OrderController extends Controller
                         $isRenewal,
                         $originalOrder
                     );
-                    $finalConfig = $result['final_config'];
-                    $success = true;
-                    $extraOrderAttrs = array_filter([
-                        'panel_username' => $result['panel_username'],
-                        'panel_client_id' => $result['panel_client_id'],
-                    ], fn ($v) => $v !== null && $v !== '');
+                    if (($result['phase'] ?? '') === 'await_gateway') {
+                        if (! $user->telegram_chat_id) {
+                            throw new \Exception('برای پرداخت فاکتور XMPlus باید حساب به ربات تلگرام متصل باشد یا در تنظیمات «شناسه درگاه پرداخت خودکار» را بگذارید.');
+                        }
+                        $xmplusAwaitGateway = true;
+                    } else {
+                        $finalConfig = $result['final_config'];
+                        $success = true;
+                        $extraOrderAttrs = array_filter([
+                            'panel_username' => $result['panel_username'],
+                            'panel_client_id' => $result['panel_client_id'],
+                        ], fn ($v) => $v !== null && $v !== '');
+                    }
                 } else {
                     throw new \Exception('نوع پنل در تنظیمات مشخص نشده است.');
                 }
 
-                // ==========================================
-                // ذخیره سفارشات
-                // ==========================================
-                if ($isRenewal) {
-                    $originalOrder->update(array_merge([
-                        'config_details' => $finalConfig,
-                        'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
-                    ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
+                if (! $success && ! $xmplusAwaitGateway) {
+                    throw new \Exception('خطا در ارتباط با سرور برای فعال‌سازی سرویس.');
+                }
 
-                    $user->update(['show_renewal_notification' => true]);
+                if ($xmplusAwaitGateway) {
+                    $order->update([
+                        'status' => 'paid',
+                        'payment_method' => 'wallet',
+                        'expires_at' => $newExpiresAt,
+                    ]);
+
+                    Transaction::create([
+                        'user_id' => $user->id,
+                        'order_id' => $order->id,
+                        'amount' => $finalPrice,
+                        'type' => 'purchase',
+                        'status' => 'completed',
+                        'description' => ($isRenewal ? 'تمدید سرویس' : 'خرید سرویس')." {$plan->name} از کیف پول (XMPlus — در انتظار درگاه)"
+                            .($discountAmount > 0 ? ' (تخفیف: '.number_format($discountAmount).' تومان)' : ''),
+                    ]);
+
+                    OrderPaid::dispatch($order);
+
+                    XmplusProvisioningService::markInvoiceContextWalletCharged($order->id);
+
+                    XmplusGatewayTelegram::sendGatewayPicker($order->fresh(['user']), $settings);
 
                     $user->notifications()->create([
-                        'type' => 'service_renewed',
-                        'title' => 'سرویس شما تمدید شد!',
-                        'message' => "سرویس {$originalOrder->plan->name} با موفقیت تمدید شد.",
+                        'type' => 'xmplus_gateway_pick',
+                        'title' => 'انتخاب درگاه XMPlus',
+                        'message' => 'برای تکمیل سفارش #'.$order->id.' در ربات تلگرام درگاه پرداخت را انتخاب کنید.',
                         'link' => route('dashboard', ['tab' => 'my_services']),
                     ]);
                 } else {
-                    $order->update(array_merge([
-                        'config_details' => $finalConfig,
-                        'expires_at' => $newExpiresAt,
-                    ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
+                    // ==========================================
+                    // ذخیره سفارشات
+                    // ==========================================
+                    if ($isRenewal) {
+                        $originalOrder->update(array_merge([
+                            'config_details' => $finalConfig,
+                            'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
+                        ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
 
-                    $user->notifications()->create([
-                        'type' => 'service_purchased',
-                        'title' => 'سرویس شما فعال شد!',
-                        'message' => "سرویس {$plan->name} با موفقیت خریداری و فعال شد.",
-                        'link' => route('dashboard', ['tab' => 'my_services']),
+                        $user->update(['show_renewal_notification' => true]);
+
+                        $user->notifications()->create([
+                            'type' => 'service_renewed',
+                            'title' => 'سرویس شما تمدید شد!',
+                            'message' => "سرویس {$originalOrder->plan->name} با موفقیت تمدید شد.",
+                            'link' => route('dashboard', ['tab' => 'my_services']),
+                        ]);
+                    } else {
+                        $order->update(array_merge([
+                            'config_details' => $finalConfig,
+                            'expires_at' => $newExpiresAt,
+                        ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
+
+                        $user->notifications()->create([
+                            'type' => 'service_purchased',
+                            'title' => 'سرویس شما فعال شد!',
+                            'message' => "سرویس {$plan->name} با موفقیت خریداری و فعال شد.",
+                            'link' => route('dashboard', ['tab' => 'my_services']),
+                        ]);
+                    }
+
+                    // آپدیت وضعیت سفارش
+                    $order->update([
+                        'status' => 'paid',
+                        'payment_method' => 'wallet',
                     ]);
+
+                    // تراکنش
+                    Transaction::create([
+                        'user_id' => $user->id,
+                        'order_id' => $order->id,
+                        'amount' => $finalPrice,
+                        'type' => 'purchase',
+                        'status' => 'completed',
+                        'description' => ($isRenewal ? 'تمدید سرویس' : 'خرید سرویس')." {$plan->name} از کیف پول"
+                            .($discountAmount > 0 ? ' (تخفیف: '.number_format($discountAmount).' تومان)' : ''),
+                    ]);
+
+                    OrderPaid::dispatch($order);
                 }
-
-                // آپدیت وضعیت سفارش
-                $order->update([
-                    'status' => 'paid',
-                    'payment_method' => 'wallet'
-                ]);
-
-                // تراکنش
-                Transaction::create([
-                    'user_id' => $user->id,
-                    'order_id' => $order->id,
-                    'amount' => $finalPrice,
-                    'type' => 'purchase',
-                    'status' => 'completed',
-                    'description' => ($isRenewal ? "تمدید سرویس" : "خرید سرویس") . " {$plan->name} از کیف پول" . ($discountAmount > 0 ? " (تخفیف: " . number_format($discountAmount) . " تومان)" : "")
-                ]);
-
-                OrderPaid::dispatch($order);
             });
         } catch (\Exception $e) {
             Log::error('Wallet Payment Failed: ' . $e->getMessage(), [

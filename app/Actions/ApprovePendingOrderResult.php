@@ -8,15 +8,16 @@ final class ApprovePendingOrderResult
         public bool $success,
         public string $title,
         public ?string $body = null,
+        public ?string $deferralKind = null,
     ) {}
 
-    public static function ok(string $title, ?string $body = null): self
+    public static function ok(string $title, ?string $body = null, ?string $deferralKind = null): self
     {
-        return new self(true, $title, $body);
+        return new self(true, $title, $body, $deferralKind);
     }
 
     public static function fail(string $title, ?string $body = null): self
     {
-        return new self(false, $title, $body);
+        return new self(false, $title, $body, null);
     }
 }

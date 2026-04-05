@@ -3,11 +3,13 @@
 namespace Modules\TelegramBot\Http\Controllers;
 
 use App\Actions\ApprovePendingOrderAction;
+use App\Actions\CompleteXmplusGatewayPaymentAction;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Support\AdminOrderCallback;
 use App\Support\XmplusCatalog;
+use App\Support\XmplusGatewayTelegram;
 use App\Support\AdminTicketCallback;
 use App\Models\TelegramBotSetting;
 use App\Services\ManualCryptoService;
@@ -509,9 +511,12 @@ class WebhookController extends Controller
 
         if ($result->success) {
             try {
+                $adminNote = $result->deferralKind === 'xmplus_gateway'
+                    ? "⏳ سفارش #{$orderId}: فاکتور XMPlus ساخته شد؛ درگاه‌های پرداخت برای مشتری در ربات ارسال شد."
+                    : "✅ سفارش #{$orderId} تأیید و اجرا شد.";
                 Telegram::sendMessage([
                     'chat_id' => $callbackQuery->getMessage()->getChat()->getId(),
-                    'text' => "✅ سفارش #{$orderId} تأیید و اجرا شد.",
+                    'text' => $adminNote,
                 ]);
             } catch (\Throwable $e) {
             }
@@ -794,6 +799,42 @@ class WebhookController extends Controller
                 'text' => 'برای خرید این پکیج، در پنل ادمین یک پلن فعال بسازید و در آن فیلد «شناسه پکیج XMPlus» را '.$pid.' قرار دهید.',
                 'show_alert' => true,
             ]);
+
+            return;
+        }
+
+        if (preg_match('/^xmpgw_(\d+)_(\d+)$/', $data, $xgw)) {
+            if ($user && ! $this->isUserMemberOfChannel($user)) {
+                $this->showChannelRequiredMessage($chatId, $messageId);
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'ابتدا باید در کانال عضو شوید!',
+                    'show_alert' => true,
+                ]);
+
+                return;
+            }
+            if (! $user) {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'ابتدا با /start وارد شوید.',
+                    'show_alert' => true,
+                ]);
+
+                return;
+            }
+            $gwOrderId = (int) $xgw[1];
+            $gwId = (int) $xgw[2];
+            $out = CompleteXmplusGatewayPaymentAction::execute($gwOrderId, $gwId, (string) $chatId);
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => Str::limit($out['message'] ?? '', 190),
+                    'show_alert' => ! ($out['ok'] ?? false),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('xmpgw answerCallbackQuery: '.$e->getMessage());
+            }
 
             return;
         }
@@ -1436,8 +1477,9 @@ class WebhookController extends Controller
         }
 
         $walletCredNote = null;
+        $walletAwaitXmplusGateway = false;
         try {
-            DB::transaction(function () use ($user, $plan, &$order, &$walletCredNote) {
+            DB::transaction(function () use ($user, $plan, &$order, &$walletCredNote, &$walletAwaitXmplusGateway) {
                 $user->decrement('balance', $order->amount);
 
                 $order->update([
@@ -1468,6 +1510,12 @@ class WebhookController extends Controller
 
                 $provisionData = $this->provisionUserAccount($order, $plan);
 
+                if ($provisionData && ($provisionData['phase'] ?? '') === 'await_gateway') {
+                    $walletAwaitXmplusGateway = true;
+
+                    return;
+                }
+
                 if ($provisionData && $provisionData['link']) {
                     $walletCredNote = $provisionData['credentials_message'] ?? null;
                     $patch = [
@@ -1495,6 +1543,22 @@ class WebhookController extends Controller
             });
 
             $order->refresh();
+
+            if ($walletAwaitXmplusGateway) {
+                XmplusGatewayTelegram::sendGatewayPicker($order->fresh(['user']), $this->settings);
+                $this->sendOrEditMessage(
+                    $user->telegram_chat_id,
+                    "✅ مبلغ از کیف پول کسر شد.\n\nبرای تکمیل فعال‌سازی در XMPlus، یکی از درگاه‌های پرداخت را در پیام بعدی انتخاب کنید.",
+                    Keyboard::make()->inline()->row([
+                        Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+                        Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start']),
+                    ]),
+                    $messageId
+                );
+
+                return;
+            }
+
             $link = $order->config_details;
 
             $successText = "✅ خرید موفق!\n\nلینک کانفیگ:\n{$link}";
@@ -2701,10 +2765,15 @@ class WebhookController extends Controller
                     $isRenewal,
                     $originalOrder
                 );
-                $configData['link'] = $result['final_config'];
-                $configData['username'] = $result['panel_username'];
-                $configData['credentials_message'] = $result['credentials_message'] ?? null;
-                $configData['panel_client_id'] = $result['panel_client_id'] ?? null;
+                if (($result['phase'] ?? '') === 'await_gateway') {
+                    $configData['phase'] = 'await_gateway';
+                    $configData['order_id'] = $order->id;
+                } else {
+                    $configData['link'] = $result['final_config'];
+                    $configData['username'] = $result['panel_username'];
+                    $configData['credentials_message'] = $result['credentials_message'] ?? null;
+                    $configData['panel_client_id'] = $result['panel_client_id'] ?? null;
+                }
             }
         } catch (\Exception $e) {
             Log::error("Failed to provision account for Order {$order->id}: " . $e->getMessage());
@@ -2941,15 +3010,28 @@ class WebhookController extends Controller
                 ]);
 
 
-                $provisionData = $this->renewUserAccount($originalOrder, $plan);
+                $provisionData = $this->renewUserAccount($originalOrder, $plan, $newRenewalOrder);
 
-                if (!$provisionData) {
+                if (! $provisionData) {
                     throw new \Exception('تمدید در پنل با خطا مواجه شد.');
                 }
 
-
             });
 
+            if (($provisionData['phase'] ?? '') === 'await_gateway') {
+                XmplusGatewayTelegram::sendGatewayPicker($newRenewalOrder->fresh(['user', 'plan']), $this->settings);
+                $confirmKb = Keyboard::make()->inline()->row([
+                    Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+                ]);
+                $this->sendOrEditMessage(
+                    $user->telegram_chat_id,
+                    '✅ مبلغ تمدید از کیف پول کسر شد. برای پرداخت فاکتور XMPlus، *پیام بعدی* (دکمه‌های درگاه) را ببینید.',
+                    $confirmKb,
+                    $messageId
+                );
+
+                return;
+            }
 
             $newExpiryDate = Carbon::parse($originalOrder->refresh()->expires_at);
             $daysText = $this->escape($plan->duration_days . ' روز');
@@ -3091,7 +3173,10 @@ class WebhookController extends Controller
         $this->sendOrEditMessage($user->telegram_chat_id, $msg, $keyboard, $messageId);
     }
 
-    protected function renewUserAccount(Order $originalOrder, Plan $plan)
+    /**
+     * @return array{link: string, username: string}|array{phase: string}|null
+     */
+    protected function renewUserAccount(Order $originalOrder, Plan $plan, ?Order $renewalOrder = null)
     {
         $settings = $this->settings;
         $user = $originalOrder->user;
@@ -3227,14 +3312,18 @@ class WebhookController extends Controller
                     throw new \Exception("❌ خطا در بروزرسانی کلاینت: " . $errorMsg);
                 }
             } elseif ($settings->get('panel_type') === 'xmplus') {
+                $orderForXmplus = $renewalOrder ?? $originalOrder;
                 $result = XmplusProvisioningService::provisionPurchase(
                     $settings,
                     $user,
                     $plan,
-                    $originalOrder,
+                    $orderForXmplus,
                     true,
                     $originalOrder
                 );
+                if (($result['phase'] ?? '') === 'await_gateway') {
+                    return ['phase' => 'await_gateway'];
+                }
                 $originalOrder->update([
                     'expires_at' => $newExpiryDate,
                     'config_details' => $result['final_config'],

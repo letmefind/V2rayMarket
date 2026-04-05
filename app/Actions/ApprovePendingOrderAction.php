@@ -10,6 +10,7 @@ use App\Models\Transaction;
 use App\Services\MarzbanService;
 use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
+use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Telegram\Bot\Laravel\Facades\Telegram;
@@ -410,6 +411,15 @@ if ($panelType === 'marzban') {
             $isRenewal,
             $originalOrder
         );
+        if (($result['phase'] ?? '') === 'await_gateway') {
+            XmplusGatewayTelegram::sendGatewayPicker($order->fresh(['user']), $settings);
+
+            return ApprovePendingOrderResult::ok(
+                'فاکتور XMPlus ایجاد شد؛ درگاه‌های پرداخت برای کاربر در ربات ارسال شد.',
+                null,
+                'xmplus_gateway'
+            );
+        }
         $finalConfig = $result['final_config'];
         $success = true;
         $extraOrderAttrs = array_filter([

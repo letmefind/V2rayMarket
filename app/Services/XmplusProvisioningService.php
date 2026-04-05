@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
+use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 use RuntimeException;
@@ -54,7 +56,15 @@ class XmplusProvisioningService
     }
 
     /**
-     * @return array{final_config: string, panel_username: string, panel_client_id: ?string, credentials_message: ?string, plain_password: ?string}
+     * @return array{
+     *   final_config?: string,
+     *   panel_username?: string,
+     *   panel_client_id?: ?string,
+     *   credentials_message?: ?string,
+     *   plain_password?: ?string,
+     *   phase?: string,
+     *   order_id?: int
+     * }
      */
     public static function provisionPurchase(
         Collection $settings,
@@ -81,20 +91,99 @@ class XmplusProvisioningService
         ]);
 
         if ($isRenewal) {
-            return self::doRenewal($api, $settings, $user, $plan, $originalOrder, $pid, $panelBase);
+            return self::doRenewal($api, $settings, $user, $plan, $order, $originalOrder, $pid, $panelBase);
         }
 
-        return self::doNewPurchase($api, $settings, $user, $plan, $pid, $billing, $aff, $panelBase);
+        return self::doNewPurchase($api, $settings, $user, $plan, $order, $pid, $billing, $aff, $panelBase);
     }
 
     /**
-     * @return array{final_config: string, panel_username: string, panel_client_id: ?string, credentials_message: ?string, plain_password: ?string}
+     * پس از انتخاب درگاه توسط کاربر در ربات: invoice/pay و polling تا sublink.
+     *
+     * @param  array<string, mixed>  $ctx
+     * @return array{final_config: string, panel_username: string, panel_client_id: ?string}
+     */
+    public static function payInvoiceWithGatewayAndPoll(
+        XmplusService $api,
+        array $ctx,
+        int $gatewayId,
+        Collection $settings,
+        ?string $telegramChatId
+    ): array {
+        $email = (string) ($ctx['email'] ?? '');
+        $passwd = (string) ($ctx['passwd'] ?? '');
+        $invid = (string) ($ctx['invid'] ?? '');
+        $pid = (int) ($ctx['pid'] ?? 0);
+        $knownSid = isset($ctx['known_sid']) ? (int) $ctx['known_sid'] : null;
+        if ($knownSid !== null && $knownSid <= 0) {
+            $knownSid = null;
+        }
+        if ($email === '' || $passwd === '' || $invid === '' || $pid <= 0) {
+            throw new RuntimeException('XMPlus: بافتار ناقص برای پرداخت فاکتور (کش منقضی یا نامعتبر).');
+        }
+
+        try {
+            $payResponse = $api->invoicePay($email, $passwd, $invid, $gatewayId);
+            $api->log('info', 'XMPlus invoice/pay (انتخاب کاربر)', ['step' => 'invoice_pay_user_gateway', 'gatewayid' => $gatewayId]);
+        } catch (\Throwable $e) {
+            throw new RuntimeException('XMPlus invoice/pay ناموفق: '.$e->getMessage(), 0, $e);
+        }
+
+        if (! is_array($payResponse)) {
+            $payResponse = [];
+        }
+
+        if ($telegramChatId !== null && $telegramChatId !== '') {
+            XmplusGatewayTelegram::sendInvoicePayInstructions($payResponse, $telegramChatId, $settings);
+        }
+
+        $async = self::invoicePayLooksAsync($payResponse);
+        $maxAttempts = $async ? 72 : 18;
+        $sleepSeconds = $async ? 5 : 2;
+
+        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds);
+        $sid = $poll['sid'];
+
+        return [
+            'final_config' => $poll['sublink'],
+            'panel_username' => $email,
+            'panel_client_id' => $sid !== null ? (string) $sid : null,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $pay
+     */
+    protected static function invoicePayLooksAsync(array $pay): bool
+    {
+        if (! empty($pay['qrcode']) && is_string($pay['qrcode'])) {
+            return true;
+        }
+        $d = $pay['data'] ?? null;
+
+        return is_string($d) && $d !== '';
+    }
+
+    protected static function shouldOfferTelegramGatewayPicker(Collection $settings, User $user): bool
+    {
+        if (! filter_var($settings->get('xmplus_telegram_gateway_picker', true), FILTER_VALIDATE_BOOLEAN)) {
+            return false;
+        }
+
+        $chat = $user->telegram_chat_id;
+
+        return $chat !== null && $chat !== '';
+    }
+
+    /**
+     * @return array{final_config: string, panel_username: string, panel_client_id: ?string, credentials_message: ?string, plain_password: ?string}|array{phase: string, order_id: int, credentials_message: ?string}
      */
     protected static function doNewPurchase(
         XmplusService $api,
         Collection $settings,
         User $user,
         Plan $plan,
+        Order $order,
         int $pid,
         string $billing,
         string $aff,
@@ -166,34 +255,83 @@ class XmplusProvisioningService
                     'error' => $e->getMessage(),
                 ]);
             }
-        } else {
-            $api->log('warning', 'XMPlus: xmplus_auto_pay_gateway_id خالی است — تا فاکتور در پنل پرداخت نشود سرویس Active نمی‌شود.', [
-                'step' => 'invoice_pay_skipped',
-                'invid' => $invid,
-            ]);
+            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true);
+            $sublink = $result['sublink'];
+            $sid = $result['sid'];
+
+            return [
+                'final_config' => $sublink,
+                'panel_username' => $email,
+                'panel_client_id' => $sid !== null ? (string) $sid : null,
+                'credentials_message' => $credentialsMessage,
+                'plain_password' => $credentialsMessage ? $passwdPlain : null,
+            ];
         }
 
-        $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, $autoPayConfigured);
-        $sublink = $result['sublink'];
-        $sid = $result['sid'];
+        if (self::shouldOfferTelegramGatewayPicker($settings, $user)) {
+            $gateways = $api->listGateways();
+            if ($gateways === []) {
+                throw new RuntimeException(
+                    'XMPlus: لیست درگاه‌ها از API خالی است. در پنل درگاه فعال کنید یا در تنظیمات فروشگاه «شناسه درگاه پرداخت خودکار فاکتور» را بگذارید.'
+                );
+            }
+            $options = [];
+            foreach ($gateways as $g) {
+                $options[] = ['id' => $g['id'], 'name' => $g['name']];
+            }
+            Cache::put(self::invoiceContextCacheKey($order->id), [
+                'email' => $email,
+                'passwd' => $passwdPlain,
+                'invid' => $invid,
+                'pid' => $pid,
+                'is_renewal' => false,
+                'original_order_id' => null,
+                'known_sid' => null,
+                'gateway_options' => $options,
+                'credentials_message' => $credentialsMessage,
+                'wallet_already_charged' => $order->status === 'paid',
+            ], now()->addHours(48));
 
-        return [
-            'final_config' => $sublink,
-            'panel_username' => $email,
-            'panel_client_id' => $sid !== null ? (string) $sid : null,
-            'credentials_message' => $credentialsMessage,
-            'plain_password' => $credentialsMessage ? $passwdPlain : null,
-        ];
+            return [
+                'phase' => 'await_gateway',
+                'order_id' => $order->id,
+                'credentials_message' => $credentialsMessage,
+            ];
+        }
+
+        throw new RuntimeException(
+            'XMPlus: نه «شناسه درگاه پرداخت خودکار» تنظیم شده و نه انتخاب درگاه در تلگرام فعال است، یا کاربر chat_id تلگرام ندارد. یکی از این‌ها را در تنظیمات XMPlus اصلاح کنید.'
+        );
+    }
+
+    public static function invoiceContextCacheKey(int $orderId): string
+    {
+        return 'xmplus_inv_ctx:'.$orderId;
     }
 
     /**
-     * @return array{final_config: string, panel_username: string, panel_client_id: ?string, credentials_message: ?string, plain_password: ?string}
+     * پس از ثبت پرداخت (کیف پول / Plisio و غیره) و قبل از تکمیل درگاه XMPlus، کش را به‌روز کن تا تراکنش دوباره ساخته نشود.
+     */
+    public static function markInvoiceContextWalletCharged(int $orderId): void
+    {
+        $key = self::invoiceContextCacheKey($orderId);
+        $ctx = Cache::get($key);
+        if (! is_array($ctx)) {
+            return;
+        }
+        $ctx['wallet_already_charged'] = true;
+        Cache::put($key, $ctx, now()->addHours(48));
+    }
+
+    /**
+     * @return array{final_config: string, panel_username: string, panel_client_id: ?string, credentials_message: ?string, plain_password: ?string}|array{phase: string, order_id: int, credentials_message: null}
      */
     protected static function doRenewal(
         XmplusService $api,
         Collection $settings,
         User $user,
         Plan $plan,
+        Order $renewalOrder,
         ?Order $originalOrder,
         int $pid,
         string $panelBase
@@ -222,18 +360,69 @@ class XmplusProvisioningService
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
+
         if ($invid !== '' && $autoPayConfigured) {
             try {
                 $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
             } catch (\Throwable $e) {
                 $api->log('warning', 'XMPlus تمدید: invoice/pay خطا', ['error' => $e->getMessage()]);
             }
+            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true);
+            $sublink = $poll['sublink'];
+            $outSid = $poll['sid'] ?? $sid;
+
+            return [
+                'final_config' => $sublink,
+                'panel_username' => $email,
+                'panel_client_id' => (string) $outSid,
+                'credentials_message' => null,
+                'plain_password' => null,
+            ];
+        }
+
+        if ($invid !== '' && self::shouldOfferTelegramGatewayPicker($settings, $user)) {
+            $gateways = $api->listGateways();
+            if ($gateways === []) {
+                throw new RuntimeException(
+                    'XMPlus تمدید: لیست درگاه‌ها خالی است؛ درگاه خودکار یا درگاه در پنل را تنظیم کنید.'
+                );
+            }
+            $options = [];
+            foreach ($gateways as $g) {
+                $options[] = ['id' => $g['id'], 'name' => $g['name']];
+            }
+            Cache::put(self::invoiceContextCacheKey($renewalOrder->id), [
+                'email' => $email,
+                'passwd' => $passwdPlain,
+                'invid' => $invid,
+                'pid' => $pid,
+                'is_renewal' => true,
+                'original_order_id' => $originalOrder->id,
+                'known_sid' => $sid,
+                'gateway_options' => $options,
+                'credentials_message' => null,
+                'wallet_already_charged' => $renewalOrder->status === 'paid',
+            ], now()->addHours(48));
+
+            return [
+                'phase' => 'await_gateway',
+                'order_id' => $renewalOrder->id,
+                'credentials_message' => null,
+            ];
         }
 
         if ($invid !== '') {
-            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, $autoPayConfigured);
+            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, false);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
+
+            return [
+                'final_config' => $sublink,
+                'panel_username' => $email,
+                'panel_client_id' => (string) $outSid,
+                'credentials_message' => null,
+                'plain_password' => null,
+            ];
         } else {
             $info = $api->serviceInfo($email, $passwdPlain, $sid);
             $sublink = self::sublinkFromServiceInfo($info);
@@ -297,12 +486,13 @@ class XmplusProvisioningService
         string $invid,
         int $expectPid,
         ?int $knownSid = null,
-        bool $autoPayGatewayConfigured = false
+        bool $autoPayGatewayConfigured = false,
+        int $maxAttempts = 18,
+        int $sleepSeconds = 2
     ): array {
         $lastStatus = null;
-        $attempts = 18;
 
-        for ($i = 0; $i < $attempts; $i++) {
+        for ($i = 0; $i < $maxAttempts; $i++) {
             try {
                 $view = $api->invoiceView($email, $passwd, $invid);
                 $inv = $view['invoice'] ?? [];
@@ -346,10 +536,11 @@ class XmplusProvisioningService
                 'attempt' => $i + 1,
                 'invoice_status' => $lastStatus,
             ]);
-            sleep(2);
+            sleep($sleepSeconds);
         }
 
         $statusLabel = (string) ($lastStatus ?? 'نامشخص');
+        $totalWait = $maxAttempts * $sleepSeconds;
         if ($statusLabel === 'Pending' && ! $autoPayGatewayConfigured) {
             throw new RuntimeException(
                 'XMPlus: فاکتور ساخته شد اما وضعیت آن Pending مانده و در تنظیمات فروشگاه «شناسه درگاه برای پرداخت خودکار فاکتور» (XMPlus) خالی است. '.
@@ -358,8 +549,8 @@ class XmplusProvisioningService
         }
 
         throw new RuntimeException(
-            'XMPlus: پس از '.($attempts * 2).' ثانیه هنوز لینک اشتراک فعال نشد. وضعیت آخر فاکتور: '.$statusLabel.
-            ' — اگر پرداخت خودکار فعال است شناسه درگاه و لاگ invoice/pay را بررسی کنید؛ در غیر این صورت فاکتور را در پنل XMPlus پرداخت کنید.'
+            'XMPlus: پس از '.$totalWait.' ثانیه هنوز لینک اشتراک فعال نشد. وضعیت آخر فاکتور: '.$statusLabel.
+            ' — اگر درگاه کریپتو/کارت است ابتدا پرداخت را در پنل یا QR تکمیل کنید؛ سپس از «سرویس‌های من» بررسی کنید یا با پشتیبانی تماس بگیرید.'
         );
     }
 

@@ -12,6 +12,7 @@ use App\Models\Transaction;
 use App\Services\MarzbanService;
 use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
+use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Telegram\Bot\Laravel\Facades\Telegram;
@@ -338,6 +339,43 @@ class FulfillOrderAfterPaymentAction
                 $isRenewal,
                 $originalOrder
             );
+            if (($result['phase'] ?? '') === 'await_gateway') {
+                if (! $user->telegram_chat_id) {
+                    throw new \RuntimeException('برای تکمیل پرداخت XMPlus باید حساب به ربات تلگرام متصل باشد یا در تنظیمات «شناسه درگاه پرداخت خودکار» را بگذارید.');
+                }
+
+                $order->update([
+                    'status' => 'paid',
+                    'payment_method' => $paymentMethod,
+                    'expires_at' => $newExpiresAt,
+                ]);
+
+                Transaction::create([
+                    'user_id' => $user->id,
+                    'order_id' => $order->id,
+                    'amount' => $finalPrice,
+                    'type' => 'purchase',
+                    'status' => 'completed',
+                    'description' => ($isRenewal ? 'تمدید سرویس' : 'خرید سرویس')." {$plan->name} ({$paymentMethod} — در انتظار درگاه XMPlus)"
+                        .($discountAmount > 0 ? ' (تخفیف: '.number_format($discountAmount).' تومان)' : ''),
+                ]);
+
+                XmplusProvisioningService::markInvoiceContextWalletCharged($order->id);
+
+                OrderPaid::dispatch($order);
+
+                XmplusGatewayTelegram::sendGatewayPicker($order->fresh(['user', 'plan']), $settings);
+
+                $user->notifications()->create([
+                    'type' => 'xmplus_gateway_pick',
+                    'title' => 'انتخاب درگاه XMPlus',
+                    'message' => 'برای تکمیل سفارش #'.$order->id.' در ربات تلگرام درگاه پرداخت را انتخاب کنید.',
+                    'link' => route('dashboard', ['tab' => 'my_services']),
+                ]);
+
+                return;
+            }
+
             $finalConfig = $result['final_config'];
             $success = true;
             $extraOrderAttrs = array_filter([
