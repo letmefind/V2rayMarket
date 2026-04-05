@@ -4,6 +4,9 @@ namespace App\Filament\Pages;
 
 use App\Models\Inbound;
 use App\Models\Setting;
+use App\Services\XmplusInvoiceDatabaseSyncService;
+use Filament\Forms\Components\Actions;
+use Filament\Forms\Components\Actions\Action as FormAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Radio;
@@ -590,8 +593,11 @@ class ThemeSettings extends Page implements HasForms
                                     TextInput::make('xmplus_invoice_db_database')
                                         ->label('نام دیتابیس')
                                         ->maxLength(128)
-                                        ->helperText('نام دیتابیس واقعی (مثلاً admin_xmplus) یا همان قالب cPanel مثل admin_web.admin_xmplus؛ اگر همان را در فیلد «کاربر MySQL» هم کپی کرده باشید، سیستم خودکار به کاربر admin_web و دیتابیس admin_xmplus تفکیک می‌کند.'),
-                                    TextInput::make('xmplus_invoice_db_username')->label('کاربر MySQL')->maxLength(128),
+                                        ->helperText('Hestia: اگر نام دیتابیس و کاربر در پنل دقیقاً یک رشته‌اند (مثلاً هر دو admin_web.admin_xmplus)، همان را در هر دو فیلد بگذارید — تفکیک خودکار انجام نمی‌شود. cPanel: اگر فقط نام دیتابیس به صورت prefix.name است و کاربر خالی یا همان پیشوند است، به‌صورت خودکار جدا می‌شود.'),
+                                    TextInput::make('xmplus_invoice_db_username')
+                                        ->label('کاربر MySQL')
+                                        ->maxLength(128)
+                                        ->helperText('در Hestia اغلب همان نام دیتابیس است.'),
                                     TextInput::make('xmplus_invoice_db_password')
                                         ->label('رمز MySQL')
                                         ->password()
@@ -602,6 +608,12 @@ class ThemeSettings extends Page implements HasForms
                                         ->default('invoice')
                                         ->maxLength(64)
                                         ->helperText('ستون‌ها: inv_id، status، paid_date، paid_amount (مطابق XMPlus).'),
+                                    Actions::make([
+                                        FormAction::make('test_xmplus_invoice_mysql')
+                                            ->label('تست اتصال MySQL')
+                                            ->color('gray')
+                                            ->action(fn () => $this->testXmplusInvoiceMysqlConnection()),
+                                    ])->columnSpanFull(),
                                 ])->columns(2),
                         ]),
 
@@ -626,6 +638,40 @@ class ThemeSettings extends Page implements HasForms
 
                 ])->columnSpanFull(),
         ])->statePath('data');
+    }
+
+    public function testXmplusInvoiceMysqlConnection(): void
+    {
+        $data = $this->form->getState();
+        $password = $data['xmplus_invoice_db_password'] ?? null;
+        if ($password === null || $password === '') {
+            $password = Setting::where('key', 'xmplus_invoice_db_password')->value('value') ?? '';
+        }
+
+        $settings = collect([
+            'xmplus_invoice_db_host' => $data['xmplus_invoice_db_host'] ?? '',
+            'xmplus_invoice_db_port' => $data['xmplus_invoice_db_port'] ?? '3306',
+            'xmplus_invoice_db_database' => $data['xmplus_invoice_db_database'] ?? '',
+            'xmplus_invoice_db_username' => $data['xmplus_invoice_db_username'] ?? '',
+            'xmplus_invoice_db_password' => (string) $password,
+            'xmplus_invoice_db_table' => $data['xmplus_invoice_db_table'] ?? 'invoice',
+        ]);
+
+        $result = XmplusInvoiceDatabaseSyncService::testConnection($settings);
+
+        if ($result['ok']) {
+            Notification::make()
+                ->title('اتصال MySQL موفق')
+                ->body($result['message'])
+                ->success()
+                ->send();
+        } else {
+            Notification::make()
+                ->title('اتصال MySQL ناموفق')
+                ->body($result['message'])
+                ->danger()
+                ->send();
+        }
     }
 
     public function submit(): void

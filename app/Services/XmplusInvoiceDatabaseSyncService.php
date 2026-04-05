@@ -24,6 +24,35 @@ final class XmplusInvoiceDatabaseSyncService
     }
 
     /**
+     * تست اتصال از همان منطق markInvoicePaid (بدون UPDATE).
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public static function testConnection(Collection $settings): array
+    {
+        try {
+            $pdo = self::createPdoConnection($settings);
+            $version = (string) $pdo->query('SELECT VERSION()')->fetchColumn();
+            $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
+            $like = $pdo->quote($table);
+            $hasTable = (int) $pdo->query('SHOW TABLES LIKE '.$like)->rowCount() > 0;
+            $tableNote = $hasTable
+                ? 'جدول «'.$table.'» پیدا شد.'
+                : 'هشدار: جدول «'.$table.'» در این دیتابیس دیده نشد؛ نام جدول را در تنظیمات بررسی کنید.';
+
+            return [
+                'ok' => true,
+                'message' => 'اتصال برقرار است. نسخهٔ سرور: '.$version.'. '.$tableNote,
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'ok' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
      * status را از ۰ به ۱ می‌برد (مطابق اسکیمای نمونهٔ invoice.sql).
      *
      * @throws RuntimeException|PDOException
@@ -39,45 +68,11 @@ final class XmplusInvoiceDatabaseSyncService
             return 0;
         }
 
-        $hostRaw = trim((string) $settings->get('xmplus_invoice_db_host', ''));
-        $port = (int) ($settings->get('xmplus_invoice_db_port', 3306) ?: 3306);
-        if (preg_match('#^https?://#i', $hostRaw) === 1) {
-            $parsed = parse_url($hostRaw);
-            if (is_array($parsed) && ! empty($parsed['port']) && (int) $parsed['port'] > 0) {
-                $port = (int) $parsed['port'];
-            }
-        }
-        $host = self::sanitizeMysqlHost($hostRaw);
-        [$database, $username] = self::resolveMysqlDatabaseAndUsername(
-            trim((string) $settings->get('xmplus_invoice_db_database', '')),
-            trim((string) $settings->get('xmplus_invoice_db_username', ''))
-        );
-        $password = (string) ($settings->get('xmplus_invoice_db_password') ?? '');
+        $pdo = self::createPdoConnection($settings);
         $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
-
-        if ($host === '' || $database === '' || $username === '') {
-            throw new RuntimeException('XMPlus DB sync: host / database / username ناقص است.');
-        }
-
-        if (in_array(strtolower($host), ['http', 'https', 'tcp'], true)) {
-            throw new RuntimeException(
-                'XMPlus DB sync: مقدار هاست MySQL نامعتبر است («'.$host.'»). در فیلد هاست فقط نام میزبان یا IP سرور دیتابیس بگذارید، نه آدرس وب پنل.'
-            );
-        }
 
         $paidDate = now()->format('Y-m-d H:i');
         $paidAmount = self::resolvePaidAmountString($order);
-
-        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, $port, $database);
-
-        $pdoOpts = [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ];
-        if (extension_loaded('pdo_mysql')) {
-            $pdoOpts[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 12;
-        }
-        $pdo = new PDO($dsn, $username, $password, $pdoOpts);
 
         $sql = "UPDATE `{$table}` SET `status` = 1, `paid_date` = :paid_date, `paid_amount` = :paid_amount WHERE `inv_id` = :inv_id AND `status` = 0";
         $stmt = $pdo->prepare($sql);
@@ -103,6 +98,61 @@ final class XmplusInvoiceDatabaseSyncService
         }
 
         return $affected;
+    }
+
+    /**
+     * @throws RuntimeException|PDOException
+     */
+    protected static function createPdoConnection(Collection $settings): PDO
+    {
+        $hostRaw = trim((string) $settings->get('xmplus_invoice_db_host', ''));
+        $port = (int) ($settings->get('xmplus_invoice_db_port', 3306) ?: 3306);
+        if (preg_match('#^https?://#i', $hostRaw) === 1) {
+            $parsed = parse_url($hostRaw);
+            if (is_array($parsed) && ! empty($parsed['port']) && (int) $parsed['port'] > 0) {
+                $port = (int) $parsed['port'];
+            }
+        }
+        $host = self::sanitizeMysqlHost($hostRaw);
+        [$database, $username] = self::resolveMysqlDatabaseAndUsername(
+            trim((string) $settings->get('xmplus_invoice_db_database', '')),
+            trim((string) $settings->get('xmplus_invoice_db_username', ''))
+        );
+        $password = (string) ($settings->get('xmplus_invoice_db_password') ?? '');
+
+        if ($host === '' || $database === '' || $username === '') {
+            throw new RuntimeException('XMPlus DB sync: host / database / username ناقص است.');
+        }
+
+        if (in_array(strtolower($host), ['http', 'https', 'tcp'], true)) {
+            throw new RuntimeException(
+                'XMPlus DB sync: مقدار هاست MySQL نامعتبر است («'.$host.'»). در فیلد هاست فقط نام میزبان یا IP سرور دیتابیس بگذارید، نه آدرس وب پنل.'
+            );
+        }
+
+        $dsn = self::buildMysqlDsn($host, $port, $database);
+
+        $pdoOpts = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ];
+        if (extension_loaded('pdo_mysql')) {
+            $pdoOpts[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 12;
+        }
+
+        return new PDO($dsn, $username, $password, $pdoOpts);
+    }
+
+    /**
+     * نام دیتابیس با نقطه (مثل Hestia) در DSN باید در صورت نیاز encode شود.
+     */
+    protected static function buildMysqlDsn(string $host, int $port, string $database): string
+    {
+        $dbForDsn = preg_match('/^[a-zA-Z0-9_]+$/', $database) === 1
+            ? $database
+            : rawurlencode($database);
+
+        return sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, $port, $dbForDsn);
     }
 
     /**
@@ -141,8 +191,8 @@ final class XmplusInvoiceDatabaseSyncService
     }
 
     /**
-     * نام دیتابیس cPanel اغلب به صورت prefix_dbname (مثلاً admin_web.admin_xmplus) است؛
-     * اگر همان رشته را در هر دو فیلد کپی کرده‌اید یا کاربر همان پیشوند است، به‌صورت خودکار تفکیک می‌شود.
+     * اگر نام دیتابیس و کاربر دقیقاً یکسان باشند (مثلاً هر دو admin_web.admin_xmplus در Hestia)،
+     * همان رشته بدون تفکیک استفاده می‌شود. در غیر این صورت اگر قالب user.suffix باشد و کاربر خالی یا همان پیشوند، تفکیک cPanel انجام می‌شود.
      *
      * @return array{0: string, 1: string} database, username
      *
@@ -157,14 +207,21 @@ final class XmplusInvoiceDatabaseSyncService
             return ['', $usernameRaw];
         }
 
+        // Hestia / نام یکسان در هر دو فیلد: بدون تفکیک
+        if ($usernameRaw !== '' && strcasecmp($usernameRaw, $databaseRaw) === 0) {
+            self::assertLiteralMysqlIdentifier($databaseRaw, 'database');
+            self::assertLiteralMysqlIdentifier($usernameRaw, 'username');
+
+            return [$databaseRaw, $usernameRaw];
+        }
+
         if (preg_match('/^([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)$/', $databaseRaw, $m) === 1) {
             $prefix = $m[1];
             $suffix = $m[2];
-            $sameAsDb = strcasecmp($usernameRaw, $databaseRaw) === 0;
             $userEmpty = $usernameRaw === '';
             $userMatchesPrefix = strcasecmp($usernameRaw, $prefix) === 0;
 
-            if ($userEmpty || $sameAsDb || $userMatchesPrefix) {
+            if ($userEmpty || $userMatchesPrefix) {
                 Log::channel('xmplus')->info('XMPlus DB sync: قالب user_database (cPanel) به کاربر و دیتابیس تفکیک شد', [
                     'mysql_user' => $prefix,
                     'mysql_database' => $suffix,
@@ -174,16 +231,27 @@ final class XmplusInvoiceDatabaseSyncService
             }
 
             throw new RuntimeException(
-                'XMPlus DB sync: نام دیتابیس «'.$databaseRaw.'» شبیه قالب cPanel (پیشوند.نام‌دیتابیس) است اما «کاربر MySQL» ('.$usernameRaw.') با پیشوند یکی نیست. '
-                .'یا همان «'.$databaseRaw.'» را در هر دو فیلد بگذارید تا خودکار تفکیک شود، یا کاربر را «'.$prefix.'» و نام دیتابیس را «'.$suffix.'» جداگانه وارد کنید.'
+                'XMPlus DB sync: نام دیتابیس «'.$databaseRaw.'» شبیه قالب cPanel است اما «کاربر MySQL» ('.$usernameRaw.') با پیشوند «'.$prefix.'» یکی نیست. '
+                .'اگر در Hestia نام کاربر و دیتابیس یکی است، همان رشته را در هر دو فیلد بگذارید؛ در غیر این صورت کاربر را «'.$prefix.'» و دیتابیس را «'.$suffix.'» وارد کنید.'
             );
         }
 
-        if (str_contains($databaseRaw, '.') || str_contains($databaseRaw, '/') || str_contains($databaseRaw, ' ')) {
+        if (str_contains($databaseRaw, '/') || str_contains($databaseRaw, ' ')) {
             throw new RuntimeException(
-                'XMPlus DB sync: نام دیتابیس نامعتبر است («'.$databaseRaw.'»). فقط نام یک دیتابیس (مثلاً admin_xmplus) یا قالب user.name مثل cPanel بگذارید.'
+                'XMPlus DB sync: نام دیتابیس نامعتبر است («'.$databaseRaw.'»).'
             );
         }
+
+        if (str_contains($databaseRaw, '.')) {
+            self::assertLiteralMysqlIdentifier($databaseRaw, 'database');
+            if ($usernameRaw === '') {
+                throw new RuntimeException('XMPlus DB sync: نام کاربر MySQL را پر کنید.');
+            }
+            self::assertLiteralMysqlIdentifier($usernameRaw, 'username');
+
+            return [$databaseRaw, $usernameRaw];
+        }
+
         if (preg_match('/^[a-zA-Z0-9_]+$/', $databaseRaw) !== 1) {
             throw new RuntimeException(
                 'XMPlus DB sync: نام دیتابیس فقط باید حروف، اعداد و زیرخط باشد.'
@@ -191,6 +259,18 @@ final class XmplusInvoiceDatabaseSyncService
         }
 
         return [$databaseRaw, $usernameRaw];
+    }
+
+    /**
+     * @throws RuntimeException
+     */
+    protected static function assertLiteralMysqlIdentifier(string $value, string $label): void
+    {
+        if (preg_match('/^[-0-9A-Za-z._@]+$/', $value) !== 1) {
+            throw new RuntimeException(
+                'XMPlus DB sync: مقدار '.$label.' نامعتبر است؛ فقط حروف، اعداد، نقطه، زیرخط، @ و - مجاز است.'
+            );
+        }
     }
 
     protected static function sanitizeTableName(string $name): string
