@@ -16,6 +16,8 @@
 namespace App\Services\Gateway;
 
 use App\Utility\Localization;
+use ReflectionClass;
+use ReflectionMethod;
 use RuntimeException;
 use Throwable;
 
@@ -315,7 +317,7 @@ final class ShopPrepaidConfirmKernel
             throw new RuntimeException("ShopPrepaidConfirmKernel: no invoice for inv_id={$invId}.");
         }
 
-        if ((int) ($invoice->status ?? 0) === 1) {
+        if (self::invoiceRowLooksPaid($invoice)) {
             return;
         }
 
@@ -329,22 +331,179 @@ final class ShopPrepaidConfirmKernel
             'payWithResellerBalance',
             'paid',
             'confirm',
+            'pay',
+            'checkout',
+            'executePay',
+            'payInvoice',
+            'activateService',
+            'provisionService',
         ];
 
         foreach ($instanceMethods as $method) {
             if (! method_exists($invoice, $method)) {
                 continue;
             }
-            $invoice->$method();
-            $fresh = $invoiceFqcn::where('inv_id', $invId)->first();
-            if ($fresh !== null && (int) ($fresh->status ?? 0) === 1) {
+            try {
+                $invoice->$method();
+            } catch (Throwable $e) {
+                continue;
+            }
+            $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
+            if ($invoice !== null && self::invoiceRowLooksPaid($invoice)) {
                 return;
             }
         }
 
+        self::tryReflectionParameterlessPayMethods($invoiceFqcn, $invId);
+
+        $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
+        if ($invoice !== null && self::invoiceRowLooksPaid($invoice)) {
+            return;
+        }
+
+        self::tryForcePaidAttributes($invoiceFqcn, $invoice, $invId, $order);
+
+        $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
+        if ($invoice !== null && self::invoiceRowLooksPaid($invoice)) {
+            return;
+        }
+
         throw new RuntimeException(
-            'ShopPrepaidConfirmKernel: invoice '.$invId.' is still not paid after trying common methods. '
-            .'Inspect your XMPlus Invoice model and admin «confirm payment» action, then add an explicit call in ShopPrepaidConfirmKernel::settle() in ShopPrepaidConfirm.php.'
+            'ShopPrepaidConfirmKernel: invoice '.$invId.' could not be marked paid automatically. '
+            .'On the XMPlus server open App/Application/Models/Invoice.php and the admin route/controller that confirms payment; '
+            .'add one explicit call to that logic at the end of ShopPrepaidConfirmKernel::settle() in ShopPrepaidConfirm.php.'
         );
+    }
+
+    /**
+     * @param  object  $invoice
+     */
+    private static function invoiceRowLooksPaid($invoice): bool
+    {
+        $st = $invoice->status ?? null;
+        if ($st === 1 || $st === '1' || $st === true) {
+            return true;
+        }
+        if (is_string($st) && strcasecmp($st, 'paid') === 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  class-string  $invoiceFqcn
+     */
+    private static function tryReflectionParameterlessPayMethods(string $invoiceFqcn, string $invId): void
+    {
+        try {
+            $ref = new ReflectionClass($invoiceFqcn);
+        } catch (Throwable $e) {
+            return;
+        }
+
+        foreach ($ref->getMethods(ReflectionMethod::IS_PUBLIC) as $rm) {
+            if ($rm->isStatic() || $rm->getNumberOfRequiredParameters() > 0) {
+                continue;
+            }
+            if ($rm->getDeclaringClass()->getName() !== $invoiceFqcn) {
+                continue;
+            }
+            $name = $rm->getName();
+            if (strpos($name, '__') === 0) {
+                continue;
+            }
+            if (preg_match('/^(get|set|is|has|to|new|create|delete|find|all|where|query)/i', $name) === 1) {
+                continue;
+            }
+            if (preg_match('/confirm|complete|paid|pay|approve|finalize|settle|activate|provision|checkout|execute/i', $name) !== 1) {
+                continue;
+            }
+
+            $working = $invoiceFqcn::where('inv_id', $invId)->first();
+            if ($working === null) {
+                return;
+            }
+
+            try {
+                $working->$name();
+            } catch (Throwable $e) {
+                continue;
+            }
+
+            $fresh = $invoiceFqcn::where('inv_id', $invId)->first();
+            if ($fresh !== null && self::invoiceRowLooksPaid($fresh)) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * آخرین تلاش: مثل به‌روزرسانی ردیف در ادمین (ممکن است در برخی نصب‌ها Observer سرویس بسازد).
+     *
+     * @param  class-string  $invoiceFqcn
+     * @param  array<string, mixed>  $order
+     */
+    private static function tryForcePaidAttributes(string $invoiceFqcn, object $invoice, string $invId, array $order): void
+    {
+        $attrs = ['status' => 1];
+        $now = date('Y-m-d H:i:s');
+
+        $dateCols = ['paid_date', 'paid_at', 'pay_time', 'paid_time'];
+        foreach ($dateCols as $col) {
+            if (self::modelHasAttributeKey($invoice, $col)) {
+                $attrs[$col] = $now;
+                break;
+            }
+        }
+
+        $amount = $order['total_amount'] ?? $order['total'] ?? null;
+        if ($amount !== null && $amount !== '') {
+            $amountCols = ['paid_amount', 'amount_paid', 'pay_amount'];
+            foreach ($amountCols as $col) {
+                if (self::modelHasAttributeKey($invoice, $col)) {
+                    $attrs[$col] = $amount;
+                    break;
+                }
+            }
+        }
+
+        try {
+            if (method_exists($invoice, 'forceFill')) {
+                $invoice->forceFill($attrs)->save();
+            } else {
+                foreach ($attrs as $k => $v) {
+                    $invoice->{$k} = $v;
+                }
+                if (method_exists($invoice, 'save')) {
+                    $invoice->save();
+                }
+            }
+        } catch (Throwable $e) {
+            // try query builder update (نادیده گرفتن fillable)
+        }
+
+        try {
+            if (method_exists($invoiceFqcn, 'where')) {
+                $invoiceFqcn::where('inv_id', $invId)->limit(1)->update($attrs);
+            }
+        } catch (Throwable $e) {
+            // ignore
+        }
+    }
+
+    /**
+     * @param  object  $invoice
+     */
+    private static function modelHasAttributeKey(object $invoice, string $key): bool
+    {
+        if (method_exists($invoice, 'getAttributes')) {
+            /** @var array<string, mixed> $a */
+            $a = $invoice->getAttributes();
+
+            return array_key_exists($key, $a);
+        }
+
+        return property_exists($invoice, $key);
     }
 }
