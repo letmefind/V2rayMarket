@@ -209,7 +209,7 @@ class XmplusProvisioningService
 
     /**
      * پاسخ invoice/pay یعنی مشتری باید جدا در XMPlus/درگاه پرداخت کند (PayPal، لینک https، …) —
-     * وقتی پول از قبل در VPNMarket گرفته شده، این حالت فاکتور را معمولاً Pending نگه می‌دارد مگر DB sync یا درگاه «موجودی نماینده».
+     * وقتی پول از قبل در فروشگاه گرفته شده، باید درگاه «موجودی/اعتبار نماینده» استفاده شود؛ به‌روزرسانی دستی DB فاکتور را Paid نشان می‌دهد بدون ساخت سرویس.
      *
      * @param  array<string, mixed>  $pay
      */
@@ -443,23 +443,23 @@ class XmplusProvisioningService
                 $customerCheckout = self::invoicePayLooksCustomerSideCheckout($pay);
             }
             if ($customerCheckout) {
-                $api->log('warning', 'XMPlus: invoice/pay برای تسویهٔ فروشگاه، درگاه «مشتری» برگرداند (مثلاً PayPal). فاکتور بدون پرداخت دوم در XMPlus Pending می‌ماند. شناسه درگاه خودکار را به درگاه موجودی/اعتبار نماینده عوض کنید یا همگام‌سازی MySQL invoice را فعال و درست کنید.', [
+                $api->log('warning', 'XMPlus: invoice/pay برای تسویهٔ فروشگاه، درگاه سمت مشتری برگرداند (مثلاً لینک PayPal). همگام‌سازی MySQL انجام نمی‌شود — آن کار فقط ردیف را Paid می‌کرد بدون ساخت سرویس در پنل.', [
                     'invid' => $invid,
                     'gateway' => $pay['gateway'] ?? null,
                     'gatewayid_setting' => (int) $gatewayId,
                 ]);
-                self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, true);
+                throw new RuntimeException(
+                    'XMPlus: شناسه درگاه خودکار فاکتور در تنظیمات تم الان '.(int) $gatewayId.' است؛ پاسخ invoice/pay درگاه سمت مشتری است ('.(string) ($pay['gateway'] ?? '?').') '
+                    .'و لینک پرداخت خارجی می‌دهد. وقتی مشتری در فروشگاه قبلاً پرداخت کرده، در XMPlus باید درگاهی انتخاب شود که با یک بار API فاکتور واقعاً بسته و سرویس ساخته شود (مثلاً کسر از موجودی/اعتبار نماینده)، نه PayPal یا درگاه مشابه. '
+                    .'در Client API لینک اشتراک پس از ساخت سرویس در account/info یا service/info برمی‌گردد؛ اگر فقط ردیف فاکتور Paid شود بدون تکمیل پرداخت در پنل، services خالی می‌ماند. '
+                    .'شناسهٔ درگاه درست را از POST /api/client/gateways بگیرید، در Theme Settings ذخیره کنید و دوباره تأیید سفارش را اجرا کنید.'
+                );
             }
             $async = self::invoicePayLooksAsync($pay);
-            if ($customerCheckout) {
-                $maxAttempts = 30;
-                $sleepSeconds = 2;
-            } else {
-                $maxAttempts = $async ? 72 : 18;
-                $sleepSeconds = $async ? 5 : 2;
-            }
+            $maxAttempts = $async ? 72 : 18;
+            $sleepSeconds = $async ? 5 : 2;
             $pollFb = ['panel_base' => $panelBase, 'order_id' => $order->id];
-            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, $customerCheckout, $pollFb);
+            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
 
@@ -670,6 +670,18 @@ class XmplusProvisioningService
                         return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
                     }
                 );
+                if (is_array($pay) && self::invoicePayLooksCustomerSideCheckout($pay)) {
+                    $api->log('warning', 'XMPlus تمدید: invoice/pay درگاه سمت مشتری؛ همگام‌سازی MySQL انجام نمی‌شود.', [
+                        'invid' => $invid,
+                        'gateway' => $pay['gateway'] ?? null,
+                        'gatewayid_setting' => (int) $gatewayId,
+                    ]);
+                    throw new RuntimeException(
+                        'XMPlus تمدید: شناسه درگاه خودکار ('.(int) $gatewayId.') درگاه سمت مشتری است ('.(string) ($pay['gateway'] ?? '?').'). '
+                        .'برای تسویه پس از پرداخت فروشگاه باید در Theme Settings درگاه موجودی/اعتبار نماینده در XMPlus را بگذارید، نه PayPal یا لینک پرداخت خارجی. '
+                        .'سپس دوباره تأیید تمدید را اجرا کنید.'
+                    );
+                }
             } else {
                 $pay = [];
                 try {
@@ -1003,8 +1015,8 @@ class XmplusProvisioningService
         $totalWait = $attemptLimit * $sleepSeconds;
         if ($statusLabel === 'Pending' && $autoPayGatewayConfigured && $shopCollectedCustomerGateway) {
             throw new RuntimeException(
-                'XMPlus: پول این سفارش در فروشگاه گرفته شده، اما «شناسه درگاه پرداخت خودکار» فعلی همان درگاه پرداخت مشتری است (مثلاً PayPal): API لینک پرداخت دوم می‌دهد و فاکتور در XMPlus Pending می‌ماند. '.
-                'در Theme Settings شناسهٔ عددی درگاهی را بگذارید که با موجودی یا اعتبار نماینده در XMPlus فاکتور را آنی می‌بندد؛ یا همگام‌سازی MySQL جدول invoice را طوری تنظیم کنید که از سرور VPNMarket به دیتابیس واقعی پنل وصل شود و ردیف فاکتور Paid شود؛ سپس «تایید و اجرا» را دوباره بزنید.'
+                'XMPlus: پول این سفارش در فروشگاه گرفته شده، اما «شناسه درگاه پرداخت خودکار» فعلی درگاه سمت مشتری است: API لینک پرداخت دوم می‌دهد و فاکتور در XMPlus Pending می‌ماند. '.
+                'در Theme Settings شناسهٔ عددی درگاهی را بگذارید که با موجودی یا اعتبار نماینده در XMPlus فاکتور را از طریق API آنی ببندد؛ سپس «تایید و اجرا» را دوباره بزنید.'
             );
         }
         if ($statusLabel === 'Pending' && $autoPayGatewayConfigured) {
