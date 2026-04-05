@@ -587,7 +587,10 @@ class ThemeSettings extends Page implements HasForms
                                         ->default('3306')
                                         ->maxLength(8)
                                         ->helperText('پورت MySQL روی همان میزبان دیتابیس (پیش‌فرض 3306).'),
-                                    TextInput::make('xmplus_invoice_db_database')->label('نام دیتابیس')->maxLength(128),
+                                    TextInput::make('xmplus_invoice_db_database')
+                                        ->label('نام دیتابیس')
+                                        ->maxLength(128)
+                                        ->helperText('فقط نام یک دیتابیس (مثلاً admin_xmplus). نه آدرس وب، نه قالب user.database و نه database.table — نام کاربر MySQL را جدا در فیلد بعدی بگذارید.'),
                                     TextInput::make('xmplus_invoice_db_username')->label('کاربر MySQL')->maxLength(128),
                                     TextInput::make('xmplus_invoice_db_password')
                                         ->label('رمز MySQL')

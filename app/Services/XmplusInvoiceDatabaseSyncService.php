@@ -48,7 +48,7 @@ final class XmplusInvoiceDatabaseSyncService
             }
         }
         $host = self::sanitizeMysqlHost($hostRaw);
-        $database = trim((string) $settings->get('xmplus_invoice_db_database', ''));
+        $database = self::sanitizeMysqlDatabaseName(trim((string) $settings->get('xmplus_invoice_db_database', '')));
         $username = trim((string) $settings->get('xmplus_invoice_db_username', ''));
         $password = (string) ($settings->get('xmplus_invoice_db_password') ?? '');
         $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
@@ -68,10 +68,14 @@ final class XmplusInvoiceDatabaseSyncService
 
         $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, $port, $database);
 
-        $pdo = new PDO($dsn, $username, $password, [
+        $pdoOpts = [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]);
+        ];
+        if (extension_loaded('pdo_mysql')) {
+            $pdoOpts[PDO::MYSQL_ATTR_CONNECT_TIMEOUT] = 12;
+        }
+        $pdo = new PDO($dsn, $username, $password, $pdoOpts);
 
         $sql = "UPDATE `{$table}` SET `status` = 1, `paid_date` = :paid_date, `paid_amount` = :paid_amount WHERE `inv_id` = :inv_id AND `status` = 0";
         $stmt = $pdo->prepare($sql);
@@ -132,6 +136,32 @@ final class XmplusInvoiceDatabaseSyncService
         }
 
         return trim($raw);
+    }
+
+    /**
+     * فقط نام یک دیتابیس MySQL؛ نه «user.db» و نه «schema.table».
+     *
+     * @throws RuntimeException
+     */
+    protected static function sanitizeMysqlDatabaseName(string $raw): string
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return '';
+        }
+        if (str_contains($raw, '.') || str_contains($raw, '/') || str_contains($raw, ' ')) {
+            throw new RuntimeException(
+                'XMPlus DB sync: نام دیتابیس نامعتبر است («'.$raw.'»). فقط نام یک دیتابیس را بگذارید (مثلاً admin_xmplus). '
+                .'نام کاربر را در فیلد «کاربر MySQL» و نام جدول را در فیلد «نام جدول» جداگانه وارد کنید؛ قالب database.table اینجا مجاز نیست.'
+            );
+        }
+        if (preg_match('/^[a-zA-Z0-9_]+$/', $raw) !== 1) {
+            throw new RuntimeException(
+                'XMPlus DB sync: نام دیتابیس فقط باید حروف، اعداد و زیرخط باشد.'
+            );
+        }
+
+        return $raw;
     }
 
     protected static function sanitizeTableName(string $name): string
