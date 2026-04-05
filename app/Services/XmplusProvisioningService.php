@@ -178,6 +178,57 @@ class XmplusProvisioningService
         return false;
     }
 
+    /**
+     * آیا پاسخ invoice/pay از نظر API موفق بوده (قبل از polling).
+     *
+     * @param  array<string, mixed>  $pay
+     */
+    protected static function invoicePayResponseLooksSuccessful(array $pay): bool
+    {
+        if ($pay === []) {
+            return false;
+        }
+        if (isset($pay['code']) && (int) $pay['code'] !== 100) {
+            return false;
+        }
+        $st = strtolower((string) ($pay['status'] ?? ''));
+        if (in_array($st, ['fail', 'failed', 'error'], true)) {
+            return false;
+        }
+        if ((int) ($pay['code'] ?? 0) === 100) {
+            return true;
+        }
+        if (in_array($st, ['success', 'sucess'], true)) {
+            return true;
+        }
+
+        return isset($pay['orderid']) || array_key_exists('data', $pay);
+    }
+
+    /**
+     * @param  callable(): array<string, mixed>  $invoicePay
+     * @return array<string, mixed>
+     */
+    protected static function runInvoicePayStrictForShopCollected(XmplusService $api, callable $invoicePay): array
+    {
+        try {
+            $pay = $invoicePay();
+        } catch (\Throwable $e) {
+            throw new RuntimeException(
+                'XMPlus invoice/pay خطا داد؛ فاکتور در پنل باز می‌ماند. درگاه «شناسه پرداخت خودکار فاکتور» و Client API را بررسی کنید. پیام: '.$e->getMessage(),
+                0,
+                $e
+            );
+        }
+        if (! self::invoicePayResponseLooksSuccessful($pay)) {
+            throw new RuntimeException(
+                'XMPlus invoice/pay پاسخ موفق شناخته نشد؛ فاکتور احتمالاً Pending مانده. پاسخ خام: '.json_encode($pay, JSON_UNESCAPED_UNICODE)
+            );
+        }
+
+        return $pay;
+    }
+
     protected static function shouldOfferTelegramGatewayPicker(Collection $settings, User $user): bool
     {
         if (! filter_var($settings->get('xmplus_telegram_gateway_picker', true), FILTER_VALIDATE_BOOLEAN)) {
@@ -269,17 +320,19 @@ class XmplusProvisioningService
                     .'منوی انتخاب درگاه در تلگرام فقط برای حالت‌هایی است که هنوز در سایت پرداخت نشده باشد.'
                 );
             }
-            $pay = [];
-            try {
-                $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
-                $api->log('info', 'XMPlus invoice/pay (تسویه پس از پرداخت فروشگاه)', ['step' => 'invoice_pay_shop_collected', 'response_summary' => is_array($pay) ? array_keys($pay) : 'n/a']);
-            } catch (\Throwable $e) {
-                $api->log('warning', 'XMPlus invoice/pay خطا (ادامه با polling)', [
-                    'step' => 'invoice_pay_error',
-                    'error' => $e->getMessage(),
-                ]);
-            }
-            $async = is_array($pay) && self::invoicePayLooksAsync($pay);
+            $pay = self::runInvoicePayStrictForShopCollected(
+                $api,
+                function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {
+                    return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                }
+            );
+            $api->log('info', 'XMPlus invoice/pay (تسویه پس از پرداخت فروشگاه)', [
+                'step' => 'invoice_pay_shop_collected',
+                'invid' => $invid,
+                'gatewayid' => (int) $gatewayId,
+                'response_summary' => array_keys($pay),
+            ]);
+            $async = self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
             $sleepSeconds = $async ? 5 : 2;
             $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds);
@@ -423,11 +476,20 @@ class XmplusProvisioningService
         }
 
         if ($invid !== '' && $autoPayConfigured) {
-            $pay = [];
-            try {
-                $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
-            } catch (\Throwable $e) {
-                $api->log('warning', 'XMPlus تمدید: invoice/pay خطا', ['error' => $e->getMessage()]);
+            if ($shopPaymentAlreadyCollected) {
+                $pay = self::runInvoicePayStrictForShopCollected(
+                    $api,
+                    function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {
+                        return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                    }
+                );
+            } else {
+                $pay = [];
+                try {
+                    $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus تمدید: invoice/pay خطا', ['error' => $e->getMessage()]);
+                }
             }
             $async = is_array($pay) && self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
@@ -606,6 +668,13 @@ class XmplusProvisioningService
 
         $statusLabel = (string) ($lastStatus ?? 'نامشخص');
         $totalWait = $maxAttempts * $sleepSeconds;
+        if ($statusLabel === 'Pending' && $autoPayGatewayConfigured) {
+            throw new RuntimeException(
+                'XMPlus: فاکتور «'.$invid.'» بعد از invoice/pay هنوز Pending مانده ('.$totalWait.' ثانیه انتظار). '.
+                'درگاه «پرداخت خودکار» احتمالاً فاکتور را نمی‌بندد (مثلاً Stripe تا تکمیل کارت Pending می‌ماند)، یا موجودی/اعتبار نماینده در XMPlus کافی نیست، یا پنل خطای درگاه برمی‌گرداند. '.
+                'در XMPlus همان فاکتور را دستی تسویه کنید، یا در Theme Settings شناسه درگاهی بگذارید که با اعتبار شما آنی Paid شود؛ سپس در VPNMarket دوباره «تایید و اجرا» بزنید.'
+            );
+        }
         if ($statusLabel === 'Pending' && ! $autoPayGatewayConfigured) {
             throw new RuntimeException(
                 'XMPlus: فاکتور ساخته شد اما وضعیت آن Pending مانده و در تنظیمات فروشگاه «شناسه درگاه برای پرداخت خودکار فاکتور» (XMPlus) خالی است. '.
