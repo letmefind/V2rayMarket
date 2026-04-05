@@ -234,6 +234,18 @@ class XmplusProvisioningService
     }
 
     /**
+     * درگاه Card2Card پنل: invoice/pay معمولاً QR می‌دهد و فاکتور تا تأیید در XMPlus Pending می‌ماند.
+     *
+     * @param  array<string, mixed>  $pay
+     */
+    protected static function invoicePayGatewayIsCard2Card(array $pay): bool
+    {
+        $g = strtolower(trim((string) ($pay['gateway'] ?? '')));
+
+        return $g === 'card2card' || str_contains($g, 'card2card');
+    }
+
+    /**
      * آیا پاسخ invoice/pay از نظر API موفق بوده (قبل از polling).
      *
      * @param  array<string, mixed>  $pay
@@ -456,10 +468,21 @@ class XmplusProvisioningService
                     .'شناسهٔ درگاه درست را از POST /api/client/gateways بگیرید، در Theme Settings ذخیره کنید و دوباره تأیید سفارش را اجرا کنید.'
                 );
             }
+            if (is_array($pay) && self::invoicePayGatewayIsCard2Card($pay)) {
+                $api->log('info', 'XMPlus: Card2Card پس از پرداخت فروشگاه — همگام‌سازی DB فاکتور در صورت فعال بودن تنظیمات', [
+                    'invid' => $invid,
+                    'order_id' => $order->id,
+                ]);
+                self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, true);
+            }
             $async = self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
             $sleepSeconds = $async ? 5 : 2;
-            $pollFb = ['panel_base' => $panelBase, 'order_id' => $order->id];
+            $pollFb = [
+                'panel_base' => $panelBase,
+                'order_id' => $order->id,
+                'shop_collected_card2card' => is_array($pay) && self::invoicePayGatewayIsCard2Card($pay),
+            ];
             $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
@@ -683,6 +706,9 @@ class XmplusProvisioningService
                         .'سپس دوباره تأیید تمدید را اجرا کنید.'
                     );
                 }
+                if (is_array($pay) && self::invoicePayGatewayIsCard2Card($pay)) {
+                    self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, true);
+                }
             } else {
                 $pay = [];
                 try {
@@ -694,7 +720,11 @@ class XmplusProvisioningService
             $async = is_array($pay) && self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
             $sleepSeconds = $async ? 5 : 2;
-            $pollFb = ['panel_base' => $panelBase, 'order_id' => $renewalOrder->id];
+            $pollFb = [
+                'panel_base' => $panelBase,
+                'order_id' => $renewalOrder->id,
+                'shop_collected_card2card' => $shopPaymentAlreadyCollected && is_array($pay) && self::invoicePayGatewayIsCard2Card($pay),
+            ];
             $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
@@ -902,6 +932,20 @@ class XmplusProvisioningService
                 throw new RuntimeException(
                     'XMPlus: فاکتور ساخته شد اما وضعیت آن Pending است و «شناسه درگاه برای پرداخت خودکار فاکتور» در تنظیمات XMPlus خالی است. '.
                     'بدون invoice/pay فاکتور پرداخت نمی‌شود و سرویس فعال نمی‌شود. در پنل XMPlus شناسه عددی درگاهی که از Client API پرداخت را می‌پذیرد را در Theme Settings وارد کنید، یا فاکتور را در پنل دستی پرداخت کنید و بعد سفارش را دوباره تأیید کنید.'
+                );
+            }
+
+            if (
+                $lastStatus === 'Pending'
+                && is_array($paidWithoutSublinkFallbackContext)
+                && ! empty($paidWithoutSublinkFallbackContext['shop_collected_card2card'])
+                && $autoPayGatewayConfigured
+                && ($i + 1) >= 6
+            ) {
+                throw new RuntimeException(
+                    'XMPlus: فاکتور «'.$invid.'» با درگاه Card2Card هنوز Pending است. این درگاه تا وقتی در **پنل مدیریت XMPlus** همان فاکتور را تأیید/تسویه نکنید، Paid نمی‌شود. '.
+                    'چون پول در فروشگاه قبلاً گرفته شده، یا همان فاکتور را در ادمین XMPlus ببندید، یا در تنظیمات تم «همگام‌سازی MySQL فاکتور XMPlus» را فعال و درست کنید تا پس از invoice/pay ردیف فاکتور به Paid برسد، یا از درگاه **موجودی/اعتبار نماینده** استفاده کنید که بدون این مرحله فاکتور بسته شود. '.
+                    'بعد از Paid شدن در پنل، در VPNMarket دوباره «تأیید و اجرا» بزنید.'
                 );
             }
 
