@@ -10,10 +10,11 @@ use PDOException;
 use RuntimeException;
 
 /**
- * به‌روزرسانی مستقیم ردیف فاکتور در دیتابیس پنل XMPlus (جدول invoice، فیلد status)
- * وقتی Client API فاکتور را Paid نمی‌کند ولی شما در VPNMarket پرداخت را تأیید کرده‌اید.
+ * به‌روزرسانی مستقیم ردیف فاکتور در دیتابیس متصل به XMPlus (جدول invoice، فیلد status).
+ * سرور MySQL ممکن است روی ماشین جدا از پنل وب XMPlus باشد؛ فقط باید از سروری که VPNMarket روی آن اجرا می‌شود
+ * به همان میزبان/پورت MySQL (فایروال، شبکهٔ خصوصی، SSH tunnel و غیره) دسترسی TCP برقرار شود.
  *
- * امنیت: یک کاربر MySQL جدا با GRANT فقط UPDATE (و در صورت نیاز SELECT) روی همان جدول بسازید.
+ * امنیت: کاربر MySQL جدا با GRANT فقط UPDATE (و در صورت نیاز SELECT) روی همان جدول بسازید.
  */
 final class XmplusInvoiceDatabaseSyncService
 {

@@ -562,6 +562,7 @@ class ThemeSettings extends Page implements HasForms
                             Section::make('همگام‌سازی جدول invoice در MySQL پنل XMPlus')
                                 ->description(new HtmlString(
                                     '<p class="text-sm text-gray-600 dark:text-gray-400">Client API معمولاً دکمهٔ «Confirm» پنل را ندارد. اگر بعد از تأیید پرداخت در VPNMarket فاکتور در XMPlus با <code>status=0</code> می‌ماند، می‌توانید با یک اتصال MySQL <strong>محدود</strong> همان ردیف را به <code>status=1</code> بزنید (مثل نمونهٔ <code>invoice.sql</code>).</p>'
+                                    .'<p class="text-sm mt-2"><strong>مهم:</strong> MySQL لزوماً روی همان سرور پنل وب XMPlus نیست؛ اغلب روی سرور یا سرویس دیتابیس جداست. در فیلدها آدرس همان <strong>سروری را بگذارید که دیتابیس XMPlus روی آن است</strong> و از سرور VPNMarket به پورت MySQL آن (معمولاً ۳۳۰۶) دسترسی شبکه‌ای باز باشد (IP خصوصی، فایروال، تونل و …).</p>'
                                     .'<p class="text-sm mt-2">امنیت: کاربر MySQL جدا بسازید که فقط <code>UPDATE</code> روی جدول <code>invoice</code> داشته باشد؛ نه کل دیتابیس.</p>'
                                 ))
                                 ->collapsed()
@@ -572,8 +573,12 @@ class ThemeSettings extends Page implements HasForms
                                     TextInput::make('xmplus_invoice_db_host')
                                         ->label('هاست MySQL')
                                         ->maxLength(191)
-                                        ->helperText('فقط نام میزبان یا IP سرور MySQL (مثال: 127.0.0.1، localhost، db.example.com). آدرس https پنل را اینجا نگذارید مگر MySQL روی همان دامنه در دسترس باشد؛ در غیر این صورت از IP داخلی یا هاستی که فایروال به VPNMarket اجازه می‌دهد استفاده کنید.'),
-                                    TextInput::make('xmplus_invoice_db_port')->label('پورت')->default('3306')->maxLength(8),
+                                        ->helperText('میزبان واقعی دیتابیس (ممکن است سروری جدا از XMPlus باشد): نام یا IP که از سرور VPNMarket به پورت MySQL آن reach است. نه URL پنل؛ مثال: db.internal، 10.0.1.5، یا هاست ارائه‌دهندهٔ DB.'),
+                                    TextInput::make('xmplus_invoice_db_port')
+                                        ->label('پورت')
+                                        ->default('3306')
+                                        ->maxLength(8)
+                                        ->helperText('پورت MySQL روی همان میزبان دیتابیس (پیش‌فرض 3306).'),
                                     TextInput::make('xmplus_invoice_db_database')->label('نام دیتابیس')->maxLength(128),
                                     TextInput::make('xmplus_invoice_db_username')->label('کاربر MySQL')->maxLength(128),
                                     TextInput::make('xmplus_invoice_db_password')
