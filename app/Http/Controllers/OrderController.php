@@ -37,6 +37,12 @@ class OrderController extends Controller
             'discount_code_id' => null,
         ]);
 
+        $dashSettings = Setting::all()->pluck('value', 'key');
+        $xmEnsure = XmplusProvisioningService::ensurePendingShopInvoice($order->fresh(['plan', 'user']), $dashSettings);
+        if (! $xmEnsure['ok']) {
+            Log::channel('xmplus')->warning('ensurePendingShopInvoice (order.store): '.($xmEnsure['error'] ?? ''), ['order_id' => $order->id]);
+        }
+
         Auth::user()->notifications()->create([
             'type' => 'new_order_created',
             'title' => 'سفارش جدید شما ثبت شد!',
@@ -61,6 +67,14 @@ class OrderController extends Controller
         }
 
         $dashSettings = Setting::all()->pluck('value', 'key');
+        if ($order->status === 'pending' && $order->plan_id && ($dashSettings->get('panel_type') ?? '') === 'xmplus') {
+            $xmEnsure = XmplusProvisioningService::ensurePendingShopInvoice($order->loadMissing(['plan', 'user']), $dashSettings);
+            if (! $xmEnsure['ok']) {
+                Log::channel('xmplus')->warning('ensurePendingShopInvoice (order.show): '.($xmEnsure['error'] ?? ''), ['order_id' => $order->id]);
+            }
+            $order->refresh();
+        }
+
         $xmplusWalletDisplay = XmplusProvisioningService::fetchXmplusWalletDisplay(Auth::user(), $dashSettings);
 
         $useXmplusWebGateways = XmplusProvisioningService::shouldUseXmplusGatewaysForWebCheckout($dashSettings, $order);
@@ -96,6 +110,14 @@ class OrderController extends Controller
         $block = $this->redirectIfXmplusWebBlocksShopPayment($order);
         if ($block !== null) {
             return $block;
+        }
+
+        $settingsForXm = Setting::all()->pluck('value', 'key');
+        if (($settingsForXm->get('panel_type') ?? '') === 'xmplus' && $order->plan_id && $order->status === 'pending') {
+            $xmEns = XmplusProvisioningService::ensurePendingShopInvoice($order->fresh(['plan', 'user']), $settingsForXm);
+            if (! $xmEns['ok']) {
+                Log::channel('xmplus')->warning('ensurePendingShopInvoice (processCardPayment): '.($xmEns['error'] ?? ''), ['order_id' => $order->id]);
+            }
         }
 
         $order->update(['payment_method' => 'card']);
@@ -177,6 +199,12 @@ class OrderController extends Controller
         $newOrder->discount_code_id = null;
         $newOrder->amount = $order->plan->price; // مبلغ اصلی بدون تخفیف
         $newOrder->save();
+
+        $dashSettings = Setting::all()->pluck('value', 'key');
+        $xmRenew = XmplusProvisioningService::ensurePendingShopInvoice($newOrder->fresh(['plan', 'user']), $dashSettings);
+        if (! $xmRenew['ok']) {
+            Log::channel('xmplus')->warning('ensurePendingShopInvoice (order.renew): '.($xmRenew['error'] ?? ''), ['order_id' => $newOrder->id]);
+        }
 
         Auth::user()->notifications()->create([
             'type' => 'renewal_order_created',
@@ -821,6 +849,14 @@ class OrderController extends Controller
             return $block;
         }
 
+        $settingsForXm = Setting::all()->pluck('value', 'key');
+        if (($settingsForXm->get('panel_type') ?? '') === 'xmplus' && $order->plan_id && $order->status === 'pending') {
+            $xmEns = XmplusProvisioningService::ensurePendingShopInvoice($order->fresh(['plan', 'user']), $settingsForXm);
+            if (! $xmEns['ok']) {
+                Log::channel('xmplus')->warning('ensurePendingShopInvoice (processCryptoPayment): '.($xmEns['error'] ?? ''), ['order_id' => $order->id]);
+            }
+        }
+
         $plisio = PlisioService::fromDatabase();
         if (! $plisio->isEnabled()) {
             return redirect()->back()->with('error', 'درگاه پرداخت Plisio فعال نیست. از پنل ادمین آن را فعال و API Key را ذخیره کنید.');
@@ -871,6 +907,12 @@ class OrderController extends Controller
             return $block;
         }
         $settings = Setting::all()->pluck('value', 'key');
+        if (($settings->get('panel_type') ?? '') === 'xmplus' && $order->plan_id && $order->status === 'pending') {
+            $xmEns = XmplusProvisioningService::ensurePendingShopInvoice($order->loadMissing(['plan', 'user']), $settings);
+            if (! $xmEns['ok']) {
+                Log::channel('xmplus')->warning('ensurePendingShopInvoice (showManualCrypto): '.($xmEns['error'] ?? ''), ['order_id' => $order->id]);
+            }
+        }
         if (! ManualCryptoService::isEnabled($settings)) {
             return redirect()->route('order.show', $order)->with('error', 'پرداخت USDT/USDC دستی در حال حاضر غیرفعال است.');
         }
@@ -921,6 +963,12 @@ class OrderController extends Controller
             return $block;
         }
         $settings = Setting::all()->pluck('value', 'key');
+        if (($settings->get('panel_type') ?? '') === 'xmplus' && $order->plan_id && $order->status === 'pending') {
+            $xmEns = XmplusProvisioningService::ensurePendingShopInvoice($order->loadMissing(['plan', 'user']), $settings);
+            if (! $xmEns['ok']) {
+                Log::channel('xmplus')->warning('ensurePendingShopInvoice (pickManualCryptoNetwork): '.($xmEns['error'] ?? ''), ['order_id' => $order->id]);
+            }
+        }
         if (! ManualCryptoService::isEnabled($settings)) {
             return redirect()->route('order.show', $order)->with('error', 'پرداخت USDT/USDC دستی غیرفعال است.');
         }

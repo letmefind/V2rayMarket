@@ -51,6 +51,23 @@ class WebhookController extends Controller
         return ($this->settings->get('panel_type') ?? '') === 'xmplus';
     }
 
+    /**
+     * فاکتور XMPlus را در پنل با وضعیت Pending می‌سازد تا بعداً با پرداخت آنلاین یا تأیید ادمین همان invid بسته شود.
+     */
+    protected function ensureXmplusInvoiceForPendingPlanOrder(Order $order): void
+    {
+        if (! $this->isXmplusPanel() || $order->status !== 'pending' || ! $order->plan_id) {
+            return;
+        }
+        if (! $this->settings) {
+            $this->settings = Setting::all()->pluck('value', 'key');
+        }
+        $r = XmplusProvisioningService::ensurePendingShopInvoice($order->loadMissing(['plan', 'user']), $this->settings);
+        if (! $r['ok']) {
+            Log::channel('xmplus')->warning('ensurePendingShopInvoice (telegram): '.$r['error'], ['order_id' => $order->id]);
+        }
+    }
+
     public function sendBroadcastMessage(string $chatId, string $message): bool
     {
         try {
@@ -1345,8 +1362,10 @@ class WebhookController extends Controller
             'panel_username' => $username
         ]);
 
+        $this->ensureXmplusInvoiceForPendingPlanOrder($order);
+
         $user->update(['bot_state' => null]);
-        $this->showInvoice($user, $order, $messageId);
+        $this->showInvoice($user, $order->fresh(['plan']), $messageId);
     }
 
     protected function showInvoice($user, Order $order, $messageId = null)
@@ -1620,6 +1639,7 @@ class WebhookController extends Controller
             $this->sendOrEditMainMenu($chatId, "❌ سفارش یافت نشد.", $messageId);
             return;
         }
+        $this->ensureXmplusInvoiceForPendingPlanOrder($order);
         $user = $order->user;
         $user->update(['bot_state' => 'waiting_receipt_' . $orderId]);
 
@@ -1652,6 +1672,7 @@ class WebhookController extends Controller
 
             return;
         }
+        $this->ensureXmplusInvoiceForPendingPlanOrder($order);
         $networks = ManualCryptoService::availableNetworks($this->settings);
         if ($networks === []) {
             $this->sendOrEditMessage(
@@ -1828,6 +1849,7 @@ class WebhookController extends Controller
         ]);
         $newRenewalOrder->renews_order_id = $originalOrder->id;
         $newRenewalOrder->save();
+        $this->ensureXmplusInvoiceForPendingPlanOrder($newRenewalOrder);
         $this->sendManualCryptoNetworkPicker($user->telegram_chat_id, $newRenewalOrder->id, $messageId);
     }
 
@@ -3217,6 +3239,7 @@ class WebhookController extends Controller
         $newRenewalOrder->renews_order_id = $originalOrder->id;
         $newRenewalOrder->save();
 
+        $this->ensureXmplusInvoiceForPendingPlanOrder($newRenewalOrder);
         $this->sendCardPaymentInfo($user->telegram_chat_id, $newRenewalOrder->id, $messageId);
     }
 
@@ -3241,6 +3264,7 @@ class WebhookController extends Controller
         $newRenewalOrder->renews_order_id = $originalOrder->id;
         $newRenewalOrder->save();
 
+        $this->ensureXmplusInvoiceForPendingPlanOrder($newRenewalOrder);
         $this->startPlisioPayment($user, $newRenewalOrder->id, $messageId);
     }
 
@@ -3257,6 +3281,8 @@ class WebhookController extends Controller
 
             return;
         }
+
+        $this->ensureXmplusInvoiceForPendingPlanOrder($order);
 
         $plisio = new PlisioService($this->settings);
         if (! $plisio->isEnabled()) {

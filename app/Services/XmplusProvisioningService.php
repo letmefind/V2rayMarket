@@ -1328,6 +1328,75 @@ class XmplusProvisioningService
     }
 
     /**
+     * بلافاصله پس از ثبت سفارش در VPNMarket، فاکتور Pending در XMPlus می‌سازد (یا همان فاکتور معتبر را نگه می‌دارد).
+     * سپس با پرداخت آنلاین یا تأیید ادمین، همان invid با invoice/pay بسته می‌شود و سرویس ساخته می‌شود.
+     *
+     * @return array{ok: bool, error: ?string}
+     */
+    public static function ensurePendingShopInvoice(Order $order, Collection $settings): array
+    {
+        if (($settings->get('panel_type') ?? '') !== 'xmplus') {
+            return ['ok' => true, 'error' => null];
+        }
+        if ($order->status !== 'pending' || ! $order->plan_id) {
+            return ['ok' => true, 'error' => null];
+        }
+
+        $order->loadMissing(['plan', 'user']);
+        if (! $order->plan || ! $order->user) {
+            return ['ok' => false, 'error' => 'پلن یا کاربر سفارش یافت نشد.'];
+        }
+
+        $lock = Cache::lock('xmplus_ensure_inv:'.$order->id, 60);
+        if (! $lock->get()) {
+            return ['ok' => true, 'error' => null];
+        }
+
+        try {
+            try {
+                $api = self::fromSettings($settings);
+            } catch (InvalidArgumentException $e) {
+                return ['ok' => false, 'error' => $e->getMessage()];
+            }
+
+            $panelBase = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
+            $pid = self::resolvePackageId($order->plan, $settings);
+            $billing = self::resolveBilling($order->plan);
+            $aff = (string) ($settings->get('xmplus_affiliate_code') ?? '');
+
+            if ($order->renews_order_id) {
+                $originalOrder = Order::find($order->renews_order_id);
+                if (! $originalOrder) {
+                    return ['ok' => false, 'error' => 'سفارش اصلی برای تمدید یافت نشد.'];
+                }
+                self::webCheckoutEnsureRenewalInvoice($api, $order->user, $order, $originalOrder);
+            } else {
+                self::webCheckoutEnsureNewPurchaseInvoice(
+                    $api,
+                    $settings,
+                    $order->user,
+                    $order->plan,
+                    $order,
+                    $pid,
+                    $billing,
+                    $aff,
+                    $panelBase
+                );
+            }
+
+            return ['ok' => true, 'error' => null];
+        } catch (\Throwable $e) {
+            Log::channel('xmplus')->warning('ensurePendingShopInvoice: '.$e->getMessage(), [
+                'order_id' => $order->id,
+            ]);
+
+            return ['ok' => false, 'error' => $e->getMessage()];
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
      * فاکتور XMPlus (در صورت نیاز) + کش انتخاب درگاه برای صفحهٔ پرداخت وب.
      *
      * @return array{ok: bool, error: ?string, gateways: array<int, array{id: int, name: string, gateway: string}>}
@@ -1431,7 +1500,8 @@ class XmplusProvisioningService
         int $pid,
         string $billing,
         string $aff,
-        string $panelBase
+        string $panelBase,
+        bool $allowXmplusStaleCredentialReset = true
     ): array {
         $domain = trim((string) $settings->get('xmplus_email_domain', ''));
         if ($domain === '') {
@@ -1490,6 +1560,30 @@ class XmplusProvisioningService
 
         $inv = $api->invoiceCreate($email, $passwdPlain, $pid, $billing, '', 1);
         if (! self::apiOk($inv)) {
+            if (
+                $allowXmplusStaleCredentialReset
+                && self::apiIsEmailNotFoundOnClient($inv)
+                && is_string($user->xmplus_client_email)
+                && $user->xmplus_client_email !== ''
+            ) {
+                $user->forceFill([
+                    'xmplus_client_email' => null,
+                    'xmplus_client_password' => null,
+                ])->save();
+
+                return self::webCheckoutEnsureNewPurchaseInvoice(
+                    $api,
+                    $settings,
+                    $user->fresh(),
+                    $plan,
+                    $order->fresh(),
+                    $pid,
+                    $billing,
+                    $aff,
+                    $panelBase,
+                    false
+                );
+            }
             throw new RuntimeException('XMPlus ساخت فاکتور ناموفق: '.json_encode($inv, JSON_UNESCAPED_UNICODE));
         }
         $invid = $inv['invid'] ?? data_get($inv, 'data.invid');
