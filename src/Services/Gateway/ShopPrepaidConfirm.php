@@ -6,8 +6,9 @@
  * نصب: کپی در src/Services/Gateway/ روی سرور پنل، سپس از ادمین درگاه را اضافه کنید و
  * در VPNMarket شناسهٔ عددی را از POST /api/client/gateways قرار دهید.
  *
- * منطق تسویه (کسر موجودی، Paid فاکتور، ساخت سرویس) را در Handler استاتیک قرار دهید
- * یا همان کدی که درگاه Balance / تأیید دستی ادمین استفاده می‌کند.
+ * اگر در ادمین XMPlus فیلد handler_class خالی بماند، به‌صورت پیش‌فرض
+ * App\Services\Gateway\ShopPrepaidConfirmHandler → ShopPrepaidConfirmKernel صدا زده می‌شود.
+ * در ShopPrepaidConfirmKernel.php در صورت نیاز منطق را مطابق پنل خودتان تکمیل کنید.
  *
  * pay() برای UI پورتال: ret=2 یعنی پرداخت فوری و ریدایرکت به invoice/view (مثل Card2Card).
  * برای Client API فروشگاه: code=100 و بدون qrcode / data رشته‌ای پر — تا polling VPNMarket درست کار کند.
@@ -52,8 +53,8 @@ final class ShopPrepaidConfirm
             'handler_class' => '<div class="row mb-3">
 								<label for="handler_class" class="col-sm-3 col-form-label form-label">Handler class (FQCN)</label>
 								<div class="col-sm-8">
-									<input type="text" class="form-control shadow-lg" id="handler_class" name="config[handler_class]" value="'.$handlerClass.'" placeholder="App\\Services\\Gateway\\ShopPrepaidConfirmHandler">
-									<small class="text-muted">متد استاتیک تسویه؛ مثال بالا را با کلاس خودتان عوض کنید.</small>
+									<input type="text" class="form-control shadow-lg" id="handler_class" name="config[handler_class]" value="'.$handlerClass.'" placeholder="(optional) App\\Services\\Gateway\\ShopPrepaidConfirmHandler">
+									<small class="text-muted">اختیاری: اگر خالی بماند، پیش‌فرض ShopPrepaidConfirmHandler → ShopPrepaidConfirmKernel است. برای کلاس سفارشی، FQCN را بگذارید.</small>
 								</div>
 							</div>',
 
@@ -186,9 +187,7 @@ final class ShopPrepaidConfirm
     {
         $class = trim((string) ($this->config['handler_class'] ?? ''));
         if ($class === '') {
-            throw new RuntimeException(
-                'ShopPrepaidConfirm: config[handler_class] is empty. Set the FQCN in gateway settings.'
-            );
+            $class = ShopPrepaidConfirmHandler::class;
         }
         if (! class_exists($class)) {
             throw new RuntimeException("ShopPrepaidConfirm: class not found: {$class}");
