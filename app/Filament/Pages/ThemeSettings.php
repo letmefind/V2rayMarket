@@ -590,7 +590,7 @@ class ThemeSettings extends Page implements HasForms
                                     TextInput::make('xmplus_invoice_db_database')
                                         ->label('نام دیتابیس')
                                         ->maxLength(128)
-                                        ->helperText('فقط نام یک دیتابیس (مثلاً admin_xmplus). نه آدرس وب، نه قالب user.database و نه database.table — نام کاربر MySQL را جدا در فیلد بعدی بگذارید.'),
+                                        ->helperText('نام دیتابیس واقعی (مثلاً admin_xmplus) یا همان قالب cPanel مثل admin_web.admin_xmplus؛ اگر همان را در فیلد «کاربر MySQL» هم کپی کرده باشید، سیستم خودکار به کاربر admin_web و دیتابیس admin_xmplus تفکیک می‌کند.'),
                                     TextInput::make('xmplus_invoice_db_username')->label('کاربر MySQL')->maxLength(128),
                                     TextInput::make('xmplus_invoice_db_password')
                                         ->label('رمز MySQL')

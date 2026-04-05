@@ -48,8 +48,10 @@ final class XmplusInvoiceDatabaseSyncService
             }
         }
         $host = self::sanitizeMysqlHost($hostRaw);
-        $database = self::sanitizeMysqlDatabaseName(trim((string) $settings->get('xmplus_invoice_db_database', '')));
-        $username = trim((string) $settings->get('xmplus_invoice_db_username', ''));
+        [$database, $username] = self::resolveMysqlDatabaseAndUsername(
+            trim((string) $settings->get('xmplus_invoice_db_database', '')),
+            trim((string) $settings->get('xmplus_invoice_db_username', ''))
+        );
         $password = (string) ($settings->get('xmplus_invoice_db_password') ?? '');
         $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
 
@@ -139,29 +141,56 @@ final class XmplusInvoiceDatabaseSyncService
     }
 
     /**
-     * فقط نام یک دیتابیس MySQL؛ نه «user.db» و نه «schema.table».
+     * نام دیتابیس cPanel اغلب به صورت prefix_dbname (مثلاً admin_web.admin_xmplus) است؛
+     * اگر همان رشته را در هر دو فیلد کپی کرده‌اید یا کاربر همان پیشوند است، به‌صورت خودکار تفکیک می‌شود.
+     *
+     * @return array{0: string, 1: string} database, username
      *
      * @throws RuntimeException
      */
-    protected static function sanitizeMysqlDatabaseName(string $raw): string
+    protected static function resolveMysqlDatabaseAndUsername(string $databaseRaw, string $usernameRaw): array
     {
-        $raw = trim($raw);
-        if ($raw === '') {
-            return '';
+        $databaseRaw = trim($databaseRaw);
+        $usernameRaw = trim($usernameRaw);
+
+        if ($databaseRaw === '') {
+            return ['', $usernameRaw];
         }
-        if (str_contains($raw, '.') || str_contains($raw, '/') || str_contains($raw, ' ')) {
+
+        if (preg_match('/^([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)$/', $databaseRaw, $m) === 1) {
+            $prefix = $m[1];
+            $suffix = $m[2];
+            $sameAsDb = strcasecmp($usernameRaw, $databaseRaw) === 0;
+            $userEmpty = $usernameRaw === '';
+            $userMatchesPrefix = strcasecmp($usernameRaw, $prefix) === 0;
+
+            if ($userEmpty || $sameAsDb || $userMatchesPrefix) {
+                Log::channel('xmplus')->info('XMPlus DB sync: قالب user_database (cPanel) به کاربر و دیتابیس تفکیک شد', [
+                    'mysql_user' => $prefix,
+                    'mysql_database' => $suffix,
+                ]);
+
+                return [$suffix, $prefix];
+            }
+
             throw new RuntimeException(
-                'XMPlus DB sync: نام دیتابیس نامعتبر است («'.$raw.'»). فقط نام یک دیتابیس را بگذارید (مثلاً admin_xmplus). '
-                .'نام کاربر را در فیلد «کاربر MySQL» و نام جدول را در فیلد «نام جدول» جداگانه وارد کنید؛ قالب database.table اینجا مجاز نیست.'
+                'XMPlus DB sync: نام دیتابیس «'.$databaseRaw.'» شبیه قالب cPanel (پیشوند.نام‌دیتابیس) است اما «کاربر MySQL» ('.$usernameRaw.') با پیشوند یکی نیست. '
+                .'یا همان «'.$databaseRaw.'» را در هر دو فیلد بگذارید تا خودکار تفکیک شود، یا کاربر را «'.$prefix.'» و نام دیتابیس را «'.$suffix.'» جداگانه وارد کنید.'
             );
         }
-        if (preg_match('/^[a-zA-Z0-9_]+$/', $raw) !== 1) {
+
+        if (str_contains($databaseRaw, '.') || str_contains($databaseRaw, '/') || str_contains($databaseRaw, ' ')) {
+            throw new RuntimeException(
+                'XMPlus DB sync: نام دیتابیس نامعتبر است («'.$databaseRaw.'»). فقط نام یک دیتابیس (مثلاً admin_xmplus) یا قالب user.name مثل cPanel بگذارید.'
+            );
+        }
+        if (preg_match('/^[a-zA-Z0-9_]+$/', $databaseRaw) !== 1) {
             throw new RuntimeException(
                 'XMPlus DB sync: نام دیتابیس فقط باید حروف، اعداد و زیرخط باشد.'
             );
         }
 
-        return $raw;
+        return [$databaseRaw, $usernameRaw];
     }
 
     protected static function sanitizeTableName(string $name): string
