@@ -518,7 +518,7 @@ class ThemeSettings extends Page implements HasForms
                                     TextInput::make('xmplus_email_domain')
                                         ->label('دامنه ایمیل برای کاربران تلگرام/سایت')
                                         ->placeholder('orders.yourdomain.com')
-                                        ->helperText('برای ثبت‌نام در XMPlus ایمیل یکتا به صورت tg{id}.{random}@دامنه ساخته می‌شود.'),
+                                        ->helperText('برای هر کاربر سایت یک بار ایمیل پایدار tg{شناسه_کاربر}@دامنه در XMPlus ثبت می‌شود؛ خریدهای بعدی همان حساب را مصرف می‌کنند.'),
                                     TextInput::make('xmplus_default_package_id')
                                         ->label('شناسه بسته پیش‌فرض (pid)')
                                         ->numeric()
@@ -538,7 +538,7 @@ class ThemeSettings extends Page implements HasForms
                                     TextInput::make('xmplus_auto_pay_gateway_id')
                                         ->label('شناسه درگاه برای پرداخت خودکار فاکتور')
                                         ->numeric()
-                                        ->helperText('در صورت تنظیم، پس از invoice/create درخواست invoice/pay هم زده می‌شود (بستگی به نسخه/تنظیمات XMPlus دارد).'),
+                                        ->helperText('الزامی برای تکمیل خودکار سفارش: عدد شناسه درگاه در پنل XMPlus که از Client API پرداخت فاکتور را بپذیرد (مثلاً موجودی کیف پول یا درگاه «رایگان/دستی» اگر پنل اجازه دهد). بدون این مقدار فاکتور Pending می‌ماند و لینک اشتراک ساخته نمی‌شود.'),
                                 ]),
                         ]),
 

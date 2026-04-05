@@ -111,7 +111,8 @@ class XmplusProvisioningService
         $credentialsMessage = null;
 
         if (! is_string($email) || $email === '') {
-            $email = 'tg'.$user->id.'.'.Str::lower(Str::random(10)).'@'.$domain;
+            // یک ایمیل پایدار به‌ازای هر کاربر سایت (همان telegram user id در دیتابیس)؛ همهٔ خریدهای بعدی همان حساب XMPlus را استفاده می‌کنند.
+            $email = 'tg'.$user->id.'@'.$domain;
             $passwdPlain = Str::password(16, symbols: false);
             $name = self::xmplusDisplayName($user);
 
@@ -154,7 +155,8 @@ class XmplusProvisioningService
         }
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
-        if ($gatewayId !== null && $gatewayId !== '' && is_numeric($gatewayId)) {
+        $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
+        if ($autoPayConfigured) {
             try {
                 $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
                 $api->log('info', 'XMPlus invoice/pay فراخوانی شد', ['step' => 'invoice_pay', 'response_summary' => is_array($pay) ? array_keys($pay) : 'n/a']);
@@ -164,9 +166,14 @@ class XmplusProvisioningService
                     'error' => $e->getMessage(),
                 ]);
             }
+        } else {
+            $api->log('warning', 'XMPlus: xmplus_auto_pay_gateway_id خالی است — تا فاکتور در پنل پرداخت نشود سرویس Active نمی‌شود.', [
+                'step' => 'invoice_pay_skipped',
+                'invid' => $invid,
+            ]);
         }
 
-        $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid);
+        $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, $autoPayConfigured);
         $sublink = $result['sublink'];
         $sid = $result['sid'];
 
@@ -214,7 +221,8 @@ class XmplusProvisioningService
         $invid = is_scalar($invid) ? (string) $invid : '';
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
-        if ($invid !== '' && $gatewayId !== null && $gatewayId !== '' && is_numeric($gatewayId)) {
+        $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
+        if ($invid !== '' && $autoPayConfigured) {
             try {
                 $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
             } catch (\Throwable $e) {
@@ -223,7 +231,7 @@ class XmplusProvisioningService
         }
 
         if ($invid !== '') {
-            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid);
+            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, $autoPayConfigured);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
         } else {
@@ -288,7 +296,8 @@ class XmplusProvisioningService
         string $passwd,
         string $invid,
         int $expectPid,
-        ?int $knownSid = null
+        ?int $knownSid = null,
+        bool $autoPayGatewayConfigured = false
     ): array {
         $lastStatus = null;
         $attempts = 18;
@@ -301,6 +310,13 @@ class XmplusProvisioningService
             } catch (\Throwable $e) {
                 $api->log('warning', 'XMPlus poll invoice_view خطا', ['attempt' => $i + 1, 'error' => $e->getMessage()]);
                 $lastStatus = null;
+            }
+
+            if ($i === 0 && ! $autoPayGatewayConfigured && $lastStatus === 'Pending') {
+                throw new RuntimeException(
+                    'XMPlus: فاکتور ساخته شد اما وضعیت آن Pending است و «شناسه درگاه برای پرداخت خودکار فاکتور» در تنظیمات XMPlus خالی است. '.
+                    'بدون invoice/pay فاکتور پرداخت نمی‌شود و سرویس فعال نمی‌شود. در پنل XMPlus شناسه عددی درگاهی که از Client API پرداخت را می‌پذیرد را در Theme Settings وارد کنید، یا فاکتور را در پنل دستی پرداخت کنید و بعد سفارش را دوباره تأیید کنید.'
+                );
             }
 
             $accPayload = self::extractAccountPayload($api->accountInfo($email, $passwd));
@@ -333,9 +349,17 @@ class XmplusProvisioningService
             sleep(2);
         }
 
+        $statusLabel = (string) ($lastStatus ?? 'نامشخص');
+        if ($statusLabel === 'Pending' && ! $autoPayGatewayConfigured) {
+            throw new RuntimeException(
+                'XMPlus: فاکتور ساخته شد اما وضعیت آن Pending مانده و در تنظیمات فروشگاه «شناسه درگاه برای پرداخت خودکار فاکتور» (XMPlus) خالی است. '.
+                'بدون فراخوانی invoice/pay فاکتور در پنل پرداخت نمی‌شود و سرویس فعال نمی‌شود. در پنل XMPlus شناسه عددی درگاهی که از API پرداخت آنی می‌پذیرد (مثلاً موجودی/درگاه داخلی) را در Theme Settings بگذارید، یا همان فاکتور را دستی در پنل پرداخت کنید و سپس سفارش را دوباره تأیید کنید.'
+            );
+        }
+
         throw new RuntimeException(
-            'XMPlus: پس از '.($attempts * 2).' ثانیه هنوز لینک اشتراک فعال نشد. وضعیت آخر فاکتور: '.($lastStatus ?? 'نامشخص').
-            ' — اگر پکیج در XMPlus رایگان نیست، باید فاکتور در پنل پرداخت شود یا از «شناسه درگاه پرداخت خودکار» استفاده کنید.'
+            'XMPlus: پس از '.($attempts * 2).' ثانیه هنوز لینک اشتراک فعال نشد. وضعیت آخر فاکتور: '.$statusLabel.
+            ' — اگر پرداخت خودکار فعال است شناسه درگاه و لاگ invoice/pay را بررسی کنید؛ در غیر این صورت فاکتور را در پنل XMPlus پرداخت کنید.'
         );
     }
 
