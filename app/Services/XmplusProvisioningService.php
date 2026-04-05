@@ -307,7 +307,8 @@ class XmplusProvisioningService
         string $billing,
         string $aff,
         string $panelBase,
-        bool $shopPaymentAlreadyCollected = false
+        bool $shopPaymentAlreadyCollected = false,
+        bool $allowXmplusStaleCredentialReset = true
     ): array {
         $domain = trim((string) $settings->get('xmplus_email_domain', ''));
         if ($domain === '') {
@@ -351,12 +352,32 @@ class XmplusProvisioningService
             $api->log('info', 'XMPlus استفاده از حساب موجود', ['step' => 'existing_user', 'email' => $email]);
         }
 
+        $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
+        $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
+
         $invid = trim((string) ($order->xmplus_inv_id ?? ''));
         $reuseInvoice = $invid !== '' && trim((string) ($order->config_details ?? '')) === '';
 
         if (! $reuseInvoice) {
             $inv = $api->invoiceCreate($email, $passwdPlain, $pid, $billing, '', 1);
             if (! self::apiOk($inv)) {
+                if (
+                    $allowXmplusStaleCredentialReset
+                    && self::apiIsEmailNotFoundOnClient($inv)
+                    && is_string($user->xmplus_client_email)
+                    && $user->xmplus_client_email !== ''
+                ) {
+                    $api->log('warning', 'XMPlus invoice/create: ایمیل ذخیره‌شده در پنل وجود ندارد — پاک‌سازی creds و ثبت‌نام مجدد', [
+                        'email' => $user->xmplus_client_email,
+                        'order_id' => $order->id,
+                    ]);
+                    $user->forceFill([
+                        'xmplus_client_email' => null,
+                        'xmplus_client_password' => null,
+                    ])->save();
+
+                    return self::doNewPurchase($api, $settings, $user->fresh(), $plan, $order, $pid, $billing, $aff, $panelBase, $shopPaymentAlreadyCollected, false);
+                }
                 throw new RuntimeException('XMPlus ساخت فاکتور ناموفق: '.json_encode($inv, JSON_UNESCAPED_UNICODE));
             }
             $invid = $inv['invid'] ?? data_get($inv, 'data.invid');
@@ -369,7 +390,16 @@ class XmplusProvisioningService
             }
 
             $order->forceFill(['xmplus_inv_id' => $invid])->save();
-            self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, $shopPaymentAlreadyCollected);
+            // اگر همین‌جا MySQL را Paid کنیم، invoice/view زود «Paid» می‌شود و invoice/pay رد می‌شود؛ در XMPlus معمولاً سرویس فقط پس از مسیر واقعی پرداخت/بستن فاکتور ساخته می‌شود (سپس sublink در account/info).
+            $deferDbSyncUntilAfterResellerPay = $shopPaymentAlreadyCollected && $autoPayConfigured;
+            if (! $deferDbSyncUntilAfterResellerPay) {
+                self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, $shopPaymentAlreadyCollected);
+            } else {
+                $api->log('info', 'XMPlus: همگام‌سازی DB فاکتور به‌تعویق افتاد تا ابتدا invoice/pay با درگاه نمایندگی اجرا شود', [
+                    'invid' => $invid,
+                    'order_id' => $order->id,
+                ]);
+            }
         } else {
             $api->log('info', 'XMPlus بدون invoice/create جدید (ادامه با همان فاکتور)', [
                 'step' => 'reuse_invoice',
@@ -377,9 +407,6 @@ class XmplusProvisioningService
                 'order_id' => $order->id,
             ]);
         }
-
-        $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
-        $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
 
         if ($shopPaymentAlreadyCollected) {
             if (! $autoPayConfigured) {
@@ -588,6 +615,9 @@ class XmplusProvisioningService
         }
         $sid = (int) $sid;
 
+        $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
+        $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
+
         $invid = trim((string) ($renewalOrder->xmplus_inv_id ?? ''));
         if ($invid === '') {
             $renew = $api->serviceRenew($email, $passwdPlain, $sid);
@@ -599,7 +629,15 @@ class XmplusProvisioningService
 
             if ($invid !== '') {
                 $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
-                self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, $shopPaymentAlreadyCollected);
+                $deferRenewalDbSync = $shopPaymentAlreadyCollected && $autoPayConfigured;
+                if (! $deferRenewalDbSync) {
+                    self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, $shopPaymentAlreadyCollected);
+                } else {
+                    $api->log('info', 'XMPlus تمدید: همگام‌سازی DB فاکتور به‌تعویق افتاد تا ابتدا invoice/pay اجرا شود', [
+                        'invid' => $invid,
+                        'order_id' => $renewalOrder->id,
+                    ]);
+                }
             }
         } else {
             $api->log('info', 'XMPlus تمدید بدون serviceRenew جدید (همان فاکتور)', [
@@ -607,9 +645,6 @@ class XmplusProvisioningService
                 'order_id' => $renewalOrder->id,
             ]);
         }
-
-        $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
-        $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
 
         if ($shopPaymentAlreadyCollected && $invid !== '' && ! $autoPayConfigured) {
             throw new RuntimeException(
@@ -756,6 +791,8 @@ class XmplusProvisioningService
             '',
             'احتمالاً سرویس در پنل هنوز ساخته نشده، نیاز به تأیید دستی دارد، یا نسخهٔ پنل با Client API هم‌خوان نیست.',
             '',
+            'اگر فاکتور فقط با ویرایش مستقیم دیتابیس به Paid رسیده (بدون invoice/pay)، XMPlus معمولاً سرویس و لینک نمی‌سازد؛ باید از مسیر پنل یا invoice/pay با درگاه نمایندگی تسویه شود.',
+            '',
         ];
         if ($panel !== '') {
             $lines[] = '🌐 ورود به پنل کاربری: '.$panel;
@@ -791,6 +828,24 @@ class XmplusProvisioningService
     }
 
     /**
+     * XMPlus Client API معمولاً 208 برمی‌گرداند وقتی ایمیل در پنل نیست (حساب حذف شده و VPNMarket هنوز creds قدیمی دارد).
+     *
+     * @param  array<string, mixed>  $row
+     */
+    protected static function apiIsEmailNotFoundOnClient(array $row): bool
+    {
+        if ((int) ($row['code'] ?? 0) === 208) {
+            return true;
+        }
+        $st = strtolower((string) ($row['status'] ?? ''));
+        if ($st === 'error' && stripos((string) ($row['message'] ?? ''), 'does not exist') !== false) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * @return array{sublink: string, sid: ?int}
      */
     protected static function pollForSublink(
@@ -812,10 +867,19 @@ class XmplusProvisioningService
 
         for ($i = 0; $i < $attemptLimit; $i++) {
             $inv = [];
+            $view = null;
             try {
                 $view = $api->invoiceView($email, $passwd, $invid);
+                if (is_array($view) && self::apiIsEmailNotFoundOnClient($view)) {
+                    throw new RuntimeException(
+                        'XMPlus polling متوقف شد: '.trim((string) ($view['message'] ?? 'خطای API')).' (کد '.(string) ($view['code'] ?? '?').'). '.
+                        'اگر حساب در پنل حذف شده، در VPNMarket برای این کاربر ایمیل/رمز XMPlus را پاک کنید و سفارش را دوباره تأیید کنید.'
+                    );
+                }
                 $inv = is_array($view['invoice'] ?? null) ? $view['invoice'] : [];
                 $lastStatus = $inv['status'] ?? null;
+            } catch (RuntimeException $e) {
+                throw $e;
             } catch (\Throwable $e) {
                 $api->log('warning', 'XMPlus poll invoice_view خطا', ['attempt' => $i + 1, 'error' => $e->getMessage()]);
                 $lastStatus = null;
@@ -828,7 +892,13 @@ class XmplusProvisioningService
                 );
             }
 
-            $accPayload = self::extractAccountPayload($api->accountInfo($email, $passwd));
+            $accRaw = $api->accountInfo($email, $passwd);
+            if (self::apiIsEmailNotFoundOnClient($accRaw)) {
+                throw new RuntimeException(
+                    'XMPlus account/info در polling خطا داد: '.trim((string) ($accRaw['message'] ?? '')).' — احتمالاً ایمیل/رمز با پنل هم‌خوان نیست یا حساب حذف شده است.'
+                );
+            }
+            $accPayload = self::extractAccountPayload($accRaw);
             $services = $accPayload['services'] ?? [];
 
             $paidNow = is_string($lastStatus) && strcasecmp($lastStatus, 'Paid') === 0;
