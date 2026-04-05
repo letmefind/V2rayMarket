@@ -261,7 +261,8 @@ final class ShopPrepaidConfirmOrder
      */
     public static function publicId($order): string
     {
-        $keys = ['order_id', 'invioce_id', 'invoice_id', 'invid', 'orderid', 'trade_no', 'id'];
+        // inv_id قبل از id تا اگر هر دو در آرایه بود، کلید عمومی رشته‌ای انتخاب شود نه PK عددی جدول.
+        $keys = ['order_id', 'inv_id', 'invioce_id', 'invoice_id', 'invid', 'orderid', 'trade_no', 'id'];
 
         if (is_array($order)) {
             foreach ($keys as $key) {
@@ -598,14 +599,35 @@ final class ShopPrepaidConfirmKernel
      *
      * @param  class-string  $fqcn
      */
+    /**
+     * کوئری پایه بدون Global Scope (برخی پنل‌ها scope روی user/status می‌گذارند و API درگاه ردیف را نمی‌بیند).
+     *
+     * @param  class-string  $fqcn
+     */
+    private static function invoiceQueryWithoutScopes(string $fqcn): object
+    {
+        if (is_subclass_of($fqcn, \Illuminate\Database\Eloquent\Model::class, true) && method_exists($fqcn, 'withoutGlobalScopes')) {
+            return $fqcn::withoutGlobalScopes();
+        }
+
+        return $fqcn::query();
+    }
+
+    /**
+     * XMPlus: خروجی API معمولاً invioce_id است؛ در DB گاهی فقط همان ستون پر است و inv_id خالی است.
+     * نام‌های invioceid / trade_no برای فورک‌های قدیمی‌تر امتحان می‌شود.
+     *
+     * @param  class-string  $fqcn
+     */
     private static function firstInvoiceByPublicKey(string $fqcn, string $publicId): ?object
     {
-        if ($publicId === '' || ! method_exists($fqcn, 'where')) {
+        if ($publicId === '' || ! method_exists($fqcn, 'query')) {
             return null;
         }
-        foreach (['inv_id', 'invioce_id'] as $col) {
+        $columns = ['invioce_id', 'inv_id', 'invioceid', 'invoice_id', 'trade_no', 'token'];
+        foreach ($columns as $col) {
             try {
-                $row = $fqcn::where($col, $publicId)->first();
+                $row = self::invoiceQueryWithoutScopes($fqcn)->where($col, $publicId)->first();
                 if ($row !== null) {
                     return $row;
                 }
@@ -621,12 +643,14 @@ final class ShopPrepaidConfirmKernel
      */
     private static function updateInvoiceRowByPublicKey(string $fqcn, string $publicId, array $attrs): void
     {
-        if ($publicId === '' || ! method_exists($fqcn, 'where')) {
+        if ($publicId === '' || ! method_exists($fqcn, 'query')) {
             return;
         }
-        foreach (['inv_id', 'invioce_id'] as $col) {
+        $columns = ['invioce_id', 'inv_id', 'invioceid', 'invoice_id', 'trade_no', 'token'];
+        foreach ($columns as $col) {
             try {
-                if ($fqcn::where($col, $publicId)->limit(1)->update($attrs) > 0) {
+                $n = self::invoiceQueryWithoutScopes($fqcn)->where($col, $publicId)->limit(1)->update($attrs);
+                if ($n > 0) {
                     return;
                 }
             } catch (Throwable $e) {

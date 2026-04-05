@@ -105,15 +105,24 @@ final class XmplusInvoiceDatabaseSyncService
         $paidDate = now()->format('Y-m-d H:i');
         $paidAmount = self::resolvePaidAmountString($order);
 
-        $sql = "UPDATE `{$table}` SET `status` = 1, `paid_date` = :paid_date, `paid_amount` = :paid_amount WHERE `inv_id` = :inv_id AND `status` = 0";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([
-            'paid_date' => $paidDate,
-            'paid_amount' => $paidAmount,
-            'inv_id' => $invId,
-        ]);
-
-        $affected = $stmt->rowCount();
+        $affected = 0;
+        foreach (['inv_id', 'invioce_id'] as $col) {
+            try {
+                $sql = "UPDATE `{$table}` SET `status` = 1, `paid_date` = :paid_date, `paid_amount` = :paid_amount WHERE `{$col}` = :inv_match AND `status` = 0";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([
+                    'paid_date' => $paidDate,
+                    'paid_amount' => $paidAmount,
+                    'inv_match' => $invId,
+                ]);
+                $affected = $stmt->rowCount();
+                if ($affected > 0) {
+                    break;
+                }
+            } catch (\Throwable $e) {
+                // ستون در برخی نصب‌ها وجود ندارد
+            }
+        }
 
         $ctx = [
             'inv_id' => $invId,
