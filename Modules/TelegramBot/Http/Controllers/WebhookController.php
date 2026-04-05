@@ -761,8 +761,40 @@ class WebhookController extends Controller
         }
 
         if (Str::startsWith($data, 'show_duration_')) {
-            $durationDays = (int)Str::after($data, 'show_duration_');
+            if (($this->settings->get('panel_type') ?? '') === 'xmplus') {
+                try {
+                    Telegram::answerCallbackQuery(['callback_query_id' => $callbackQuery->getId()]);
+                } catch (\Exception $e) {
+                    Log::warning('answerCallbackQuery (xmplus show_duration): '.$e->getMessage());
+                }
+                $activePlans = Plan::where('is_active', true)->orderBy('duration_days', 'asc')->get();
+                $this->sendPlansXmplus($chatId, $messageId, $activePlans);
+
+                return;
+            }
+            $durationDays = (int) Str::after($data, 'show_duration_');
             $this->sendPlansByDuration($chatId, $durationDays, $messageId);
+
+            return;
+        }
+
+        if (Str::startsWith($data, 'xmplus_unmapped_')) {
+            if (! $user) {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'ابتدا با /start وارد شوید.',
+                    'show_alert' => true,
+                ]);
+
+                return;
+            }
+            $pid = (int) Str::after($data, 'xmplus_unmapped_');
+            Telegram::answerCallbackQuery([
+                'callback_query_id' => $callbackQuery->getId(),
+                'text' => 'برای خرید این پکیج، در پنل ادمین یک پلن فعال بسازید و در آن فیلد «شناسه پکیج XMPlus» را '.$pid.' قرار دهید.',
+                'show_alert' => true,
+            ]);
+
             return;
         }
 
@@ -1732,21 +1764,17 @@ class WebhookController extends Controller
                 return;
             }
 
+            if (($this->settings->get('panel_type') ?? '') === 'xmplus') {
+                $this->sendPlansXmplus($chatId, $messageId, $activePlans);
+
+                return;
+            }
+
             $durations = $activePlans->pluck('duration_days')->unique()->sort();
 
             $message = "🚀 *انتخاب سرویس VPN*\n\n";
             $message .= "لطفاً مدت‌زمان سرویس مورد نظر را انتخاب کنید:\n\n";
             $message .= "👇 یکی از گزینه‌های زیر را بزنید:";
-
-            if (($this->settings->get('panel_type') ?? '') === 'xmplus') {
-                $xCat = XmplusCatalog::get($this->settings);
-                $xText = XmplusCatalog::formatPlainTextForTelegram($xCat);
-                if ($xText !== '') {
-                    $message = $xText."\n──────────\n\n".$message;
-                } elseif (! empty($xCat['error'])) {
-                    $message = "⚠️ (لیست پکیج‌های XMPlus موقتاً در دسترس نیست.)\n\n".$message;
-                }
-            }
 
             $keyboard = Keyboard::make()->inline();
 
@@ -1777,6 +1805,110 @@ class WebhookController extends Controller
         }
     }
 
+    /**
+     * منوی خرید وقتی پنل XMPlus است: دکمه اینلاین به‌ازای هر پلن دارای pid (نه مدت‌زمان‌های X-UI).
+     *
+     * @param  \Illuminate\Support\Collection<int, Plan>  $activePlans
+     */
+    protected function sendPlansXmplus($chatId, $messageId, $activePlans): void
+    {
+        $catalog = XmplusCatalog::get($this->settings);
+        $byPid = [];
+        foreach (array_merge($catalog['full'] ?? [], $catalog['traffic'] ?? []) as $p) {
+            if (is_array($p) && isset($p['id'])) {
+                $byPid[(int) $p['id']] = $p;
+            }
+        }
+
+        $mappedPlans = $activePlans->filter(function ($pl) {
+            return (int) ($pl->xmplus_package_id ?? 0) > 0;
+        })->values();
+
+        $message = "🛒 خرید سرویس VPN (XMPlus)\n\n";
+        $message .= "یک پکیج را از دکمه‌های زیر انتخاب کنید.\n";
+        $message .= 'قیمت نهایی به تومان مطابق «پلن فروشگاه» است (نه قیمت خام پنل).';
+
+        if (! empty($catalog['error']) && empty($catalog['full']) && empty($catalog['traffic'])) {
+            $message .= "\n\n⚠️ لیست پکیج‌های پنل موقتاً در دسترس نیست؛ اگر پلن‌ها pid دارند باز هم می‌توانید خرید کنید.";
+        }
+
+        $keyboard = Keyboard::make()->inline();
+
+        foreach ($mappedPlans as $plan) {
+            $pid = (int) $plan->xmplus_package_id;
+            $api = $byPid[$pid] ?? null;
+            $name = is_array($api) ? ($api['name'] ?? $plan->name) : $plan->name;
+            $btn = $name.' · '.number_format((float) $plan->price).' ت';
+            $btn = $this->truncateTelegramInlineButtonText($btn);
+            $keyboard->row([
+                Keyboard::inlineButton([
+                    'text' => $btn,
+                    'callback_data' => 'buy_plan_'.$plan->id,
+                ]),
+            ]);
+        }
+
+        if ($mappedPlans->isEmpty()) {
+            $message .= "\n\nهنوز هیچ پلن فعالی «شناسه پکیج XMPlus (pid)» ندارد.\n";
+            $message .= "در ادمین، برای هر پلن فروش، شناسه پکیج را از پنل XMPlus وارد کنید.\n\n";
+            $message .= "پکیج‌های دیده‌شده در پنل (فقط راهنما؛ روی دکمه بزنید تا توضیح بیاید):";
+
+            $n = 0;
+            foreach ($catalog['full'] ?? [] as $p) {
+                if (! is_array($p)) {
+                    continue;
+                }
+                $pid = (int) ($p['id'] ?? 0);
+                if ($pid <= 0) {
+                    continue;
+                }
+                $raw = (string) ($p['name'] ?? 'pid '.$pid);
+                $nm = $this->truncateTelegramInlineButtonText($raw.' · ℹ️');
+                $keyboard->row([
+                    Keyboard::inlineButton([
+                        'text' => $nm,
+                        'callback_data' => 'xmplus_unmapped_'.$pid,
+                    ]),
+                ]);
+                $n++;
+            }
+            foreach ($catalog['traffic'] ?? [] as $p) {
+                if (! is_array($p)) {
+                    continue;
+                }
+                $pid = (int) ($p['id'] ?? 0);
+                if ($pid <= 0) {
+                    continue;
+                }
+                $raw = (string) ($p['name'] ?? 'pid '.$pid);
+                $nm = $this->truncateTelegramInlineButtonText($raw.' · ترافیک');
+                $keyboard->row([
+                    Keyboard::inlineButton([
+                        'text' => $nm,
+                        'callback_data' => 'xmplus_unmapped_'.$pid,
+                    ]),
+                ]);
+                $n++;
+            }
+            if ($n === 0) {
+                $message = "❌ نه پلن فعالی با pid دارید و نه لیستی از XMPlus دریافت شد.\nتنظیمات API XMPlus و پلن‌های سایت را بررسی کنید.";
+            }
+        }
+
+        $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start'])]);
+
+        $this->sendOrEditMessage($chatId, $message, $keyboard, $messageId);
+    }
+
+    protected function truncateTelegramInlineButtonText(string $text, int $max = 64): string
+    {
+        if (mb_strlen($text) <= $max) {
+            return $text;
+        }
+
+        return rtrim(mb_substr($text, 0, max(1, $max - 1))).'…';
+    }
+
     protected function generateDurationLabel(int $days): string
     {
         if ($days % 30 === 0) {
@@ -1796,6 +1928,12 @@ class WebhookController extends Controller
     protected function sendPlansByDuration($chatId, $durationDays, $messageId = null)
     {
         try {
+            if (($this->settings->get('panel_type') ?? '') === 'xmplus') {
+                $this->sendPlans($chatId, $messageId);
+
+                return;
+            }
+
             $plans = Plan::where('is_active', true)
                 ->where('duration_days', $durationDays)
                 ->orderBy('volume_gb', 'asc')

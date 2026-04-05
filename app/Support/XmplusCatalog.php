@@ -46,6 +46,59 @@ class XmplusCatalog
     }
 
     /**
+     * تبدیل مقدار billing (آرایه یا JSON string) به متن خوانا.
+     *
+     * @param  mixed  $value
+     */
+    public static function formatBillingValue($value): string
+    {
+        if (is_string($value)) {
+            $trim = trim($value);
+            if ($trim !== '' && ($trim[0] === '{' || $trim[0] === '[')) {
+                $dec = json_decode($value, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($dec)) {
+                    $value = $dec;
+                }
+            }
+        }
+        if (! is_array($value)) {
+            return is_scalar($value) ? (string) $value : '';
+        }
+        $price = $value['price'] ?? null;
+        $days = $value['days'] ?? null;
+        $parts = [];
+        if ($price !== null && $price !== '') {
+            $parts[] = number_format((float) $price).' تومان';
+        }
+        if ($days !== null && $days !== '') {
+            $parts[] = (string) $days.' روزه';
+        }
+
+        return $parts !== [] ? implode('، ', $parts) : json_encode($value, JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * @param  array<string, mixed>  $billing
+     */
+    public static function formatBillingBlock(array $billing): string
+    {
+        $labels = [
+            'month' => 'ماهانه',
+            'quater' => '۳ماهه',
+            'semiannual' => '۶ماهه',
+            'annual' => 'سالانه',
+            'topup_traffic' => 'ترافیک',
+        ];
+        $chunks = [];
+        foreach ($billing as $k => $v) {
+            $label = $labels[$k] ?? $k;
+            $chunks[] = $label.': '.self::formatBillingValue($v);
+        }
+
+        return implode(' | ', $chunks);
+    }
+
+    /**
      * متن ساده برای تلگرام (بدون Markdown تا با کاراکترهای خاص پکیج‌ها نشکند).
      *
      * @param  array{full?: array, traffic?: array}  $catalog
@@ -70,10 +123,8 @@ class XmplusCatalog
             }
             $bill = $p['billing'] ?? [];
             $prices = '';
-            if (is_array($bill)) {
-                foreach ($bill as $bk => $bv) {
-                    $prices .= ($prices === '' ? '' : ' | ').$bk.': '.(is_scalar($bv) ? (string) $bv : json_encode($bv, JSON_UNESCAPED_UNICODE));
-                }
+            if (is_array($bill) && $bill !== []) {
+                $prices = self::formatBillingBlock($bill);
             }
             $line = "• pid {$id} — {$name}\n";
             $line .= "  حجم: {$traffic}";
@@ -105,11 +156,8 @@ class XmplusCatalog
                 $name = $p['name'] ?? '';
                 $traffic = $p['traffic'] ?? '';
                 $bill = $p['billing'] ?? [];
-                $pv = '';
-                if (is_array($bill) && isset($bill['topup_traffic'])) {
-                    $pv = (string) $bill['topup_traffic'];
-                }
-                $blocks[] = "• pid {$id} — {$name} ({$traffic})".($pv !== '' ? " — {$pv}" : '');
+                $pv = is_array($bill) ? self::formatBillingBlock($bill) : '';
+                $blocks[] = "• pid {$id} — {$name} ({$traffic})".($pv !== '' ? "\n  {$pv}" : '');
             }
         }
 
