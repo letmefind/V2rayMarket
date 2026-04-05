@@ -21,6 +21,9 @@ class XmplusProvisioningService
     /** اگر فاکتور Paid است و account/info هنوز services خالی است، بعد از این تعداد تلاش polling متوقف و پیام راهنما برگردانده می‌شود. */
     private const POLL_EARLY_FALLBACK_WHEN_PAID_NO_SERVICES_AFTER = 12;
 
+    /** Card2Card + همگام‌سازی MySQL معمولاً فقط ردیف را Paid می‌کند و سرویس نمی‌سازد — زودتر از حالت عادی fallback می‌کنیم. */
+    private const POLL_EARLY_FALLBACK_CARD2CARD_DB_SYNC_PAID_NO_SERVICE_AFTER = 4;
+
     public static function fromSettings(Collection $settings): XmplusService
     {
         $base = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
@@ -823,20 +826,27 @@ class XmplusProvisioningService
     /**
      * وقتی فاکتور در API Paid است اما هنوز sublink/servicelist برنمی‌گردد (مشکل یا تأخیر پنل).
      *
-     * @param  array{panel_base: string, order_id?: int}  $ctx
+     * @param  array{panel_base: string, order_id?: int, shop_collected_card2card?: bool}  $ctx
      */
     protected static function formatPaidInvoiceWithoutSublinkUserNotice(string $email, string $invid, array $ctx): string
     {
         $panel = rtrim((string) ($ctx['panel_base'] ?? ''), '/');
         $orderId = (int) ($ctx['order_id'] ?? 0);
+        $card2cardDb = ! empty($ctx['shop_collected_card2card']);
         $lines = [
             '⚠️ فاکتور در XMPlus با وضعیت Paid ثبت شده، اما API هنوز لینک اشتراک (subscription) را برنمی‌گرداند.',
             '',
-            'احتمالاً سرویس در پنل هنوز ساخته نشده، نیاز به تأیید دستی دارد، یا نسخهٔ پنل با Client API هم‌خوان نیست.',
-            '',
-            'اگر فاکتور فقط با ویرایش مستقیم دیتابیس به Paid رسیده (بدون invoice/pay)، XMPlus معمولاً سرویس و لینک نمی‌سازد؛ باید از مسیر پنل یا invoice/pay با درگاه نمایندگی تسویه شود.',
-            '',
         ];
+        if ($card2cardDb) {
+            $lines[] = 'این حالت اغلب وقتی رخ می‌دهد که با درگاه Card2Card فقط invoice/pay زده شده و سپس ردیف فاکتور در MySQL به Paid به‌روز شده باشد؛ در بسیاری از نسخه‌های XMPlus **همان به‌روزرسانی DB منطق ساخت سرویس را اجرا نمی‌کند** و account/services خالی می‌ماند.';
+            $lines[] = '';
+            $lines[] = 'راه‌حل پایدار: در Theme Settings به‌جای Card2Card از درگاهی استفاده کنید که با **موجودی/اعتبار نماینده** فاکتور را از مسیر API واقعاً ببندد تا پنل سرویس و sublink بسازد؛ یا سرویس را از ادمین XMPlus برای این کاربر دستی ایجاد کنید.';
+            $lines[] = '';
+        }
+        $lines[] = 'احتمالاً سرویس در پنل هنوز ساخته نشده، نیاز به تأیید دستی دارد، یا نسخهٔ پنل با Client API هم‌خوان نیست.';
+        $lines[] = '';
+        $lines[] = 'اگر فاکتور فقط با ویرایش مستقیم دیتابیس به Paid رسیده (بدون تکمیل مسیر پرداخت داخل پنل)، XMPlus معمولاً سرویس و لینک نمی‌سازد؛ باید از مسیر پنل یا invoice/pay با درگاه نمایندگی تسویه شود.';
+        $lines[] = '';
         if ($panel !== '') {
             $lines[] = '🌐 ورود به پنل کاربری: '.$panel;
         } else {
@@ -907,6 +917,16 @@ class XmplusProvisioningService
         $lastStatus = null;
         $inv = [];
         $attemptLimit = $maxAttempts;
+        $earlyPaidNoServiceAfter = self::POLL_EARLY_FALLBACK_WHEN_PAID_NO_SERVICES_AFTER;
+        if (
+            is_array($paidWithoutSublinkFallbackContext)
+            && ! empty($paidWithoutSublinkFallbackContext['shop_collected_card2card'])
+        ) {
+            $earlyPaidNoServiceAfter = min(
+                $earlyPaidNoServiceAfter,
+                self::POLL_EARLY_FALLBACK_CARD2CARD_DB_SYNC_PAID_NO_SERVICE_AFTER
+            );
+        }
 
         for ($i = 0; $i < $attemptLimit; $i++) {
             $inv = [];
@@ -1024,13 +1044,14 @@ class XmplusProvisioningService
                 $paidNow
                 && $services === []
                 && is_array($paidWithoutSublinkFallbackContext)
-                && ($i + 1) >= self::POLL_EARLY_FALLBACK_WHEN_PAID_NO_SERVICES_AFTER
+                && ($i + 1) >= $earlyPaidNoServiceAfter
             ) {
                 $notice = self::formatPaidInvoiceWithoutSublinkUserNotice($email, $invid, $paidWithoutSublinkFallbackContext);
                 $api->log('warning', 'XMPlus: پایان زودهنگام polling — Paid بدون سرویس در API', [
                     'step' => 'poll',
                     'attempt' => $i + 1,
                     'invid' => $invid,
+                    'early_after' => $earlyPaidNoServiceAfter,
                 ]);
 
                 return ['sublink' => $notice, 'sid' => null];
