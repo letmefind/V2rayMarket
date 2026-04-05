@@ -584,7 +584,7 @@ class ThemeSettings extends Page implements HasForms
                                     TextInput::make('xmplus_invoice_db_host')
                                         ->label('هاست MySQL')
                                         ->maxLength(191)
-                                        ->helperText('میزبان واقعی دیتابیس (ممکن است سروری جدا از XMPlus باشد): نام یا IP که از سرور VPNMarket به پورت MySQL آن reach است. نه URL پنل؛ مثال: db.internal، 10.0.1.5، یا هاست ارائه‌دهندهٔ DB.'),
+                                        ->helperText('نام یا IP که **فرآیند PHP (VPNMarket)** به آن وصل می‌شود — نه URL پنل. اگر `localhost` یا `127.0.0.1` بگذارید، MySQL فقط روی **همین سرور** استفاده می‌شود و در tcpdump ترافیک روی اینترفیس `lo` می‌بینید؛ برای دیتابیس روی **ماشین دیگر** باید IP/hostname همان سرور (مثلاً 10.0.1.5 یا db.internal) را بگذارید تا بسته‌ها روی eth0/wg0 و غیره به مقصد بروند.'),
                                     TextInput::make('xmplus_invoice_db_port')
                                         ->label('پورت')
                                         ->default('3306')
