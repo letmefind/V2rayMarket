@@ -569,7 +569,10 @@ class ThemeSettings extends Page implements HasForms
                                     Toggle::make('xmplus_invoice_db_sync_enabled')
                                         ->label('بعد از تأیید پرداخت در VPNMarket، status فاکتور در DB پنل را ۱ کن')
                                         ->helperText('فقط وقتی «پول در فروشگاه شما تأیید شده» (مثلاً تأیید ادمین تلگرام، Plisio، کیف پول) و مسیر provision با همان معنا اجرا می‌شود.'),
-                                    TextInput::make('xmplus_invoice_db_host')->label('هاست MySQL')->maxLength(191),
+                                    TextInput::make('xmplus_invoice_db_host')
+                                        ->label('هاست MySQL')
+                                        ->maxLength(191)
+                                        ->helperText('فقط نام میزبان یا IP سرور MySQL (مثال: 127.0.0.1، localhost، db.example.com). آدرس https پنل را اینجا نگذارید مگر MySQL روی همان دامنه در دسترس باشد؛ در غیر این صورت از IP داخلی یا هاستی که فایروال به VPNMarket اجازه می‌دهد استفاده کنید.'),
                                     TextInput::make('xmplus_invoice_db_port')->label('پورت')->default('3306')->maxLength(8),
                                     TextInput::make('xmplus_invoice_db_database')->label('نام دیتابیس')->maxLength(128),
                                     TextInput::make('xmplus_invoice_db_username')->label('کاربر MySQL')->maxLength(128),

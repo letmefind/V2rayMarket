@@ -38,15 +38,28 @@ final class XmplusInvoiceDatabaseSyncService
             return 0;
         }
 
-        $host = trim((string) $settings->get('xmplus_invoice_db_host', ''));
+        $hostRaw = trim((string) $settings->get('xmplus_invoice_db_host', ''));
+        $port = (int) ($settings->get('xmplus_invoice_db_port', 3306) ?: 3306);
+        if (preg_match('#^https?://#i', $hostRaw) === 1) {
+            $parsed = parse_url($hostRaw);
+            if (is_array($parsed) && ! empty($parsed['port']) && (int) $parsed['port'] > 0) {
+                $port = (int) $parsed['port'];
+            }
+        }
+        $host = self::sanitizeMysqlHost($hostRaw);
         $database = trim((string) $settings->get('xmplus_invoice_db_database', ''));
         $username = trim((string) $settings->get('xmplus_invoice_db_username', ''));
         $password = (string) ($settings->get('xmplus_invoice_db_password') ?? '');
-        $port = (int) ($settings->get('xmplus_invoice_db_port', 3306) ?: 3306);
         $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
 
         if ($host === '' || $database === '' || $username === '') {
             throw new RuntimeException('XMPlus DB sync: host / database / username ناقص است.');
+        }
+
+        if (in_array(strtolower($host), ['http', 'https', 'tcp'], true)) {
+            throw new RuntimeException(
+                'XMPlus DB sync: مقدار هاست MySQL نامعتبر است («'.$host.'»). در فیلد هاست فقط نام میزبان یا IP سرور دیتابیس بگذارید، نه آدرس وب پنل.'
+            );
         }
 
         $paidDate = now()->format('Y-m-d H:i');
@@ -83,6 +96,41 @@ final class XmplusInvoiceDatabaseSyncService
         }
 
         return $affected;
+    }
+
+    /**
+     * فقط نام میزبان یا IP برای PDO — اگر URL کامل paste شده باشد، host را جدا می‌کند.
+     * خطای getaddrinfo for https معمولاً یعنی در فیلد هاست به‌جای mysql، آدرس https پنل گذاشته‌اید.
+     */
+    protected static function sanitizeMysqlHost(string $raw): string
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return '';
+        }
+
+        if (preg_match('#^https?://#i', $raw) === 1) {
+            $parsed = parse_url($raw);
+            if (! is_array($parsed)) {
+                return '';
+            }
+            $h = isset($parsed['host']) ? trim((string) $parsed['host']) : '';
+
+            return $h;
+        }
+
+        $raw = preg_replace('#^[a-z]+://#i', '', $raw) ?? $raw;
+        if (str_contains($raw, '/')) {
+            $raw = explode('/', $raw, 2)[0];
+        }
+        if (str_contains($raw, ':') && ! str_starts_with($raw, '[')) {
+            $maybePort = strrchr($raw, ':');
+            if ($maybePort !== false && ctype_digit(substr($maybePort, 1))) {
+                $raw = substr($raw, 0, -strlen($maybePort));
+            }
+        }
+
+        return trim($raw);
     }
 
     protected static function sanitizeTableName(string $name): string
