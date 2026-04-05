@@ -976,4 +976,324 @@ class XmplusProvisioningService
 
         return $data;
     }
+
+    /**
+     * وقتی پنل XMPlus است و «پرداخت از درگاه‌های خود پنل در وب» فعال است، کارت/Plisio/دستی VPNMarket نباید نمایش داده شود.
+     */
+    public static function shouldUseXmplusGatewaysForWebCheckout(Collection $settings, ?Order $order): bool
+    {
+        if (($settings->get('panel_type') ?? '') !== 'xmplus') {
+            return false;
+        }
+        if ($order === null || ! $order->plan_id) {
+            return false;
+        }
+
+        return filter_var($settings->get('xmplus_web_gateway_checkout', true), FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * فاکتور XMPlus (در صورت نیاز) + کش انتخاب درگاه برای صفحهٔ پرداخت وب.
+     *
+     * @return array{ok: bool, error: ?string, gateways: array<int, array{id: int, name: string, gateway: string}>}
+     */
+    public static function prepareWebPaymentGateways(Order $order, Collection $settings): array
+    {
+        if (($settings->get('panel_type') ?? '') !== 'xmplus') {
+            return ['ok' => false, 'error' => 'نوع پنل XMPlus نیست.', 'gateways' => []];
+        }
+        $plan = $order->plan;
+        if (! $plan) {
+            return ['ok' => false, 'error' => 'این سفارش پلن ندارد.', 'gateways' => []];
+        }
+        $user = $order->user;
+        if (! $user) {
+            return ['ok' => false, 'error' => 'کاربر سفارش نامعتبر است.', 'gateways' => []];
+        }
+
+        try {
+            $api = self::fromSettings($settings);
+        } catch (InvalidArgumentException $e) {
+            return ['ok' => false, 'error' => $e->getMessage(), 'gateways' => []];
+        }
+
+        $pid = self::resolvePackageId($plan, $settings);
+
+        try {
+            if ($order->renews_order_id) {
+                $originalOrder = Order::find($order->renews_order_id);
+                if (! $originalOrder) {
+                    return ['ok' => false, 'error' => 'سفارش اصلی برای تمدید یافت نشد.', 'gateways' => []];
+                }
+                [$email, $passwdPlain, $invid, $knownSid, $credentialsMessage] = self::webCheckoutEnsureRenewalInvoice(
+                    $api,
+                    $user,
+                    $order,
+                    $originalOrder
+                );
+                $isRenewal = true;
+                $originalOrderId = $originalOrder->id;
+            } else {
+                [$email, $passwdPlain, $invid, $knownSid, $credentialsMessage] = self::webCheckoutEnsureNewPurchaseInvoice(
+                    $api,
+                    $settings,
+                    $user,
+                    $plan,
+                    $order,
+                    $pid,
+                    self::resolveBilling($plan),
+                    (string) ($settings->get('xmplus_affiliate_code') ?? ''),
+                    $panelBase
+                );
+                $isRenewal = false;
+                $originalOrderId = null;
+            }
+        } catch (\Throwable $e) {
+            Log::channel('xmplus')->warning('prepareWebPaymentGateways: '.$e->getMessage(), ['order_id' => $order->id]);
+
+            return ['ok' => false, 'error' => $e->getMessage(), 'gateways' => []];
+        }
+
+        $gateways = $api->listGateways();
+        if ($gateways === []) {
+            return ['ok' => false, 'error' => 'لیست درگاه‌های فعال XMPlus از API خالی است؛ در پنل XMPlus درگاه فعال کنید.', 'gateways' => []];
+        }
+
+        $options = [];
+        foreach ($gateways as $g) {
+            $options[] = ['id' => $g['id'], 'name' => $g['name']];
+        }
+
+        Cache::put(self::invoiceContextCacheKey($order->id), [
+            'email' => $email,
+            'passwd' => $passwdPlain,
+            'invid' => $invid,
+            'pid' => $pid,
+            'is_renewal' => $isRenewal,
+            'original_order_id' => $originalOrderId,
+            'known_sid' => $knownSid,
+            'gateway_options' => $options,
+            'credentials_message' => $credentialsMessage,
+            'wallet_already_charged' => false,
+        ], now()->addHours(48));
+
+        return ['ok' => true, 'error' => null, 'gateways' => $gateways];
+    }
+
+    /**
+     * @return array{0: string, 1: string, 2: string, 3: ?int, 4: ?string}
+     */
+    protected static function webCheckoutEnsureNewPurchaseInvoice(
+        XmplusService $api,
+        Collection $settings,
+        User $user,
+        Plan $plan,
+        Order $order,
+        int $pid,
+        string $billing,
+        string $aff,
+        string $panelBase
+    ): array {
+        $domain = trim((string) $settings->get('xmplus_email_domain', ''));
+        if ($domain === '') {
+            throw new InvalidArgumentException('XMPlus: دامنه ایمیل (xmplus_email_domain) را در تنظیمات تم پر کنید.');
+        }
+        $domain = ltrim($domain, '@');
+
+        $credentialsMessage = null;
+        $existingInv = trim((string) ($order->xmplus_inv_id ?? ''));
+
+        if ($existingInv !== '') {
+            $email = $user->xmplus_client_email;
+            $passwdPlain = $user->xmplus_client_password;
+            if (! is_string($email) || $email === '' || ! is_string($passwdPlain) || $passwdPlain === '') {
+                throw new RuntimeException('XMPlus: برای ادامهٔ پرداخت، حساب XMPlus کاربر ناقص است.');
+            }
+            try {
+                $view = $api->invoiceView($email, $passwdPlain, $existingInv);
+                $st = strtolower((string) data_get($view, 'invoice.status', ''));
+                if ($st === 'pending') {
+                    return [$email, $passwdPlain, $existingInv, null, null];
+                }
+            } catch (\Throwable) {
+                // فاکتور نامعتبر — دوباره می‌سازیم
+            }
+            $order->forceFill(['xmplus_inv_id' => null])->save();
+        }
+
+        $email = $user->xmplus_client_email;
+        $passwdPlain = null;
+
+        if (! is_string($email) || $email === '') {
+            $email = 'tg'.$user->id.'@'.$domain;
+            $passwdPlain = Str::password(16, symbols: false);
+            $name = self::xmplusDisplayName($user);
+            $sendCode = filter_var($settings->get('xmplus_send_register_code', false), FILTER_VALIDATE_BOOLEAN);
+            if ($sendCode) {
+                $api->registerSendCode($name, $email);
+            }
+            $regCode = (string) ($settings->get('xmplus_registration_code') ?? '');
+            $reg = $api->register($name, $email, $passwdPlain, $regCode, $aff);
+            if (! self::apiOk($reg)) {
+                throw new RuntimeException('XMPlus ثبت‌نام ناموفق: '.json_encode($reg, JSON_UNESCAPED_UNICODE));
+            }
+            $user->forceFill([
+                'xmplus_client_email' => $email,
+                'xmplus_client_password' => $passwdPlain,
+            ])->save();
+            $credentialsMessage = self::formatCredentialsMessage($email, $passwdPlain, $panelBase);
+        } else {
+            $passwdPlain = $user->xmplus_client_password;
+            if (! is_string($passwdPlain) || $passwdPlain === '') {
+                throw new RuntimeException('XMPlus: ایمیل کاربر ثبت است اما رمز ذخیره نشده است.');
+            }
+        }
+
+        $inv = $api->invoiceCreate($email, $passwdPlain, $pid, $billing, '', 1);
+        if (! self::apiOk($inv)) {
+            throw new RuntimeException('XMPlus ساخت فاکتور ناموفق: '.json_encode($inv, JSON_UNESCAPED_UNICODE));
+        }
+        $invid = $inv['invid'] ?? data_get($inv, 'data.invid');
+        $invid = is_scalar($invid) ? (string) $invid : '';
+        if ($invid === '') {
+            throw new RuntimeException('XMPlus: شناسه فاکتور در پاسخ invoice/create نیست.');
+        }
+        $order->forceFill(['xmplus_inv_id' => $invid])->save();
+
+        return [$email, $passwdPlain, $invid, null, $credentialsMessage];
+    }
+
+    /**
+     * @return array{0: string, 1: string, 2: string, 3: int, 4: ?string}
+     */
+    protected static function webCheckoutEnsureRenewalInvoice(
+        XmplusService $api,
+        User $user,
+        Order $renewalOrder,
+        Order $originalOrder
+    ): array {
+        $email = $user->xmplus_client_email ?? $originalOrder->panel_username;
+        $passwdPlain = $user->xmplus_client_password;
+        if (! is_string($email) || $email === '' || ! is_string($passwdPlain) || $passwdPlain === '') {
+            throw new RuntimeException('XMPlus تمدید: اطلاعات ورود کاربر به پنل یافت نشد.');
+        }
+        $sidRaw = $originalOrder->panel_client_id ?? null;
+        if ($sidRaw === null || $sidRaw === '') {
+            throw new RuntimeException('XMPlus تمدید: شناسه سرویس (sid) روی سفارش اصلی نیست.');
+        }
+        $sid = (int) $sidRaw;
+        if ($sid <= 0) {
+            throw new RuntimeException('XMPlus تمدید: شناسه سرویس نامعتبر است.');
+        }
+
+        $existingInv = trim((string) ($renewalOrder->xmplus_inv_id ?? ''));
+        if ($existingInv !== '') {
+            try {
+                $view = $api->invoiceView($email, $passwdPlain, $existingInv);
+                $st = strtolower((string) data_get($view, 'invoice.status', ''));
+                if ($st === 'pending') {
+                    return [$email, $passwdPlain, $existingInv, $sid, null];
+                }
+            } catch (\Throwable) {
+            }
+            $renewalOrder->forceFill(['xmplus_inv_id' => null])->save();
+        }
+
+        $renew = $api->serviceRenew($email, $passwdPlain, $sid);
+        if (! self::apiOk($renew)) {
+            throw new RuntimeException('XMPlus تمدید ناموفق: '.json_encode($renew, JSON_UNESCAPED_UNICODE));
+        }
+        $invid = $renew['invid'] ?? null;
+        $invid = is_scalar($invid) ? (string) $invid : '';
+        if ($invid === '') {
+            throw new RuntimeException('XMPlus تمدید: شناسه فاکتور (invid) در پاسخ نیست.');
+        }
+        $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
+
+        return [$email, $passwdPlain, $invid, $sid, null];
+    }
+
+    /**
+     * پرداخت وب با درگاه انتخابی؛ در صورت لینک مستقیم https به درگاه خارجی، polling اینجا انجام نمی‌شود.
+     *
+     * @return array{
+     *   outcome: 'complete',
+     *   final_config: string,
+     *   panel_username: string,
+     *   panel_client_id: ?string
+     * }|array{outcome: 'redirect', url: string}|array{outcome: 'await_offsite', pay: array<string, mixed>}
+     */
+    public static function payInvoiceWithGatewayForWeb(XmplusService $api, array $ctx, int $gatewayId): array
+    {
+        $email = (string) ($ctx['email'] ?? '');
+        $passwd = (string) ($ctx['passwd'] ?? '');
+        $invid = (string) ($ctx['invid'] ?? '');
+        $pid = (int) ($ctx['pid'] ?? 0);
+        $knownSid = isset($ctx['known_sid']) ? (int) $ctx['known_sid'] : null;
+        if ($knownSid !== null && $knownSid <= 0) {
+            $knownSid = null;
+        }
+        if ($email === '' || $passwd === '' || $invid === '' || $pid <= 0) {
+            throw new RuntimeException('XMPlus: بافتار پرداخت وب ناقص یا منقضی است؛ صفحه را از نو باز کنید.');
+        }
+
+        try {
+            $payResponse = $api->invoicePay($email, $passwd, $invid, $gatewayId);
+        } catch (\Throwable $e) {
+            throw new RuntimeException('XMPlus invoice/pay ناموفق: '.$e->getMessage(), 0, $e);
+        }
+        if (! is_array($payResponse)) {
+            $payResponse = [];
+        }
+
+        $data = $payResponse['data'] ?? null;
+        if (is_string($data) && $data !== '' && preg_match('#^https?://#i', $data) === 1) {
+            return ['outcome' => 'redirect', 'url' => $data];
+        }
+
+        if (self::invoicePayLooksAsync($payResponse)) {
+            return ['outcome' => 'await_offsite', 'pay' => $payResponse];
+        }
+
+        $maxAttempts = 18;
+        $sleepSeconds = 2;
+        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds, false);
+        $sid = $poll['sid'];
+
+        return [
+            'outcome' => 'complete',
+            'final_config' => $poll['sublink'],
+            'panel_username' => $email,
+            'panel_client_id' => $sid !== null ? (string) $sid : null,
+        ];
+    }
+
+    /**
+     * پس از QR/کارت/تأیید ادمین: فقط polling تا آماده شدن لینک.
+     *
+     * @return array{final_config: string, panel_username: string, panel_client_id: ?string}
+     */
+    public static function pollXmplusWebAfterOffsitePayment(XmplusService $api, array $ctx): array
+    {
+        $email = (string) ($ctx['email'] ?? '');
+        $passwd = (string) ($ctx['passwd'] ?? '');
+        $invid = (string) ($ctx['invid'] ?? '');
+        $pid = (int) ($ctx['pid'] ?? 0);
+        $knownSid = isset($ctx['known_sid']) ? (int) $ctx['known_sid'] : null;
+        if ($knownSid !== null && $knownSid <= 0) {
+            $knownSid = null;
+        }
+        if ($email === '' || $passwd === '' || $invid === '' || $pid <= 0) {
+            throw new RuntimeException('XMPlus: بافتار تکمیل پرداخت ناقص است.');
+        }
+
+        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, 72, 5, false);
+        $sid = $poll['sid'];
+
+        return [
+            'final_config' => $poll['sublink'],
+            'panel_username' => $email,
+            'panel_client_id' => $sid !== null ? (string) $sid : null,
+        ];
+    }
 }

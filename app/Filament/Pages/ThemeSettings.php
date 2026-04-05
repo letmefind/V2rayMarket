@@ -106,6 +106,9 @@ class ThemeSettings extends Page implements HasForms
         if (array_key_exists('xmplus_telegram_gateway_picker', $settings) && $settings['xmplus_telegram_gateway_picker'] !== null) {
             $settings['xmplus_telegram_gateway_picker'] = filter_var($settings['xmplus_telegram_gateway_picker'], FILTER_VALIDATE_BOOLEAN);
         }
+        if (array_key_exists('xmplus_web_gateway_checkout', $settings) && $settings['xmplus_web_gateway_checkout'] !== null) {
+            $settings['xmplus_web_gateway_checkout'] = filter_var($settings['xmplus_web_gateway_checkout'], FILTER_VALIDATE_BOOLEAN);
+        }
         if (array_key_exists('xmplus_invoice_db_sync_enabled', $settings) && $settings['xmplus_invoice_db_sync_enabled'] !== null) {
             $settings['xmplus_invoice_db_sync_enabled'] = filter_var($settings['xmplus_invoice_db_sync_enabled'], FILTER_VALIDATE_BOOLEAN);
         }
@@ -183,6 +186,7 @@ class ThemeSettings extends Page implements HasForms
             'xmplus_registration_code' => null,
             'xmplus_send_register_code' => false,
             'xmplus_telegram_gateway_picker' => true,
+            'xmplus_web_gateway_checkout' => true,
             'xmplus_auto_pay_gateway_id' => null,
             'xmplus_invoice_db_sync_enabled' => false,
             'xmplus_invoice_db_host' => null,
@@ -554,6 +558,10 @@ class ThemeSettings extends Page implements HasForms
                                     Toggle::make('xmplus_telegram_gateway_picker')
                                         ->label('نمایش درگاه‌های XMPlus در ربات (دکمه اینلاین)')
                                         ->helperText('فقط وقتی مشتری هنوز در VPNMarket پرداخت نکرده (مثلاً تأیید دستی بدون واریز) معنا دارد. اگر مشتری در سایت یا کیف پول پرداخت کرده باشد، سیستم دیگر از او پرداخت دوم در XMPlus نمی‌خواهد و فقط از «شناسه درگاه خودکار» برای تسویه با اعتبار شما استفاده می‌کند.'),
+                                    Toggle::make('xmplus_web_gateway_checkout')
+                                        ->label('در سایت: فقط درگاه‌های فعال XMPlus (بدون کارت/Plisio/دستی VPNMarket)')
+                                        ->helperText('وقتی نوع پنل «XMPlus» است و این گزینه روشن باشد، صفحهٔ پرداخت سفارش پلن فقط لیست درگاه‌های Client API (/api/client/gateways) را نشان می‌دهد. برای شارژ کیف پول یا پنل‌های دیگر تغییری ایجاد نمی‌شود. خاموش کنید اگر می‌خواهید مشتری در سایت از Plisio یا کارت VPNMarket پرداخت کند.')
+                                        ->default(true),
                                     TextInput::make('xmplus_auto_pay_gateway_id')
                                         ->label('شناسه درگاه برای پرداخت خودکار فاکتور (تسویهٔ فروشنده)')
                                         ->numeric()

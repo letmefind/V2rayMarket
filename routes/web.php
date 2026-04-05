@@ -129,6 +129,8 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/payment/manual-crypto/{order}/pick', [OrderController::class, 'pickManualCryptoNetwork'])->name('payment.manual-crypto.pick');
     Route::post('/payment/manual-crypto/{order}/proof', [OrderController::class, 'submitManualCryptoProof'])->name('payment.manual-crypto.proof');
     Route::post('/payment/wallet/{order}', [OrderController::class, 'processWalletPayment'])->name('payment.wallet.process');
+    Route::post('/payment/xmplus/{order}', [OrderController::class, 'processXmplusGatewayPayment'])->name('payment.xmplus.process');
+    Route::post('/payment/xmplus/{order}/finalize', [OrderController::class, 'finalizeXmplusWebPayment'])->name('payment.xmplus.finalize');
 });
 
 Route::post('/webhooks/nowpayments', [NowPaymentsWebhookController::class, 'handle'])->name('webhooks.nowpayments');

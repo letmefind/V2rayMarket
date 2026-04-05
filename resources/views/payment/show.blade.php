@@ -113,7 +113,55 @@
                         @php
                             $xwp = $xmplusWalletDisplay ?? null;
                             $isXmplusPay = is_array($xwp) && (($xwp['mode'] ?? '') === 'xmplus');
+                            $useXmplusWeb = filter_var($useXmplusWebGateways ?? false, FILTER_VALIDATE_BOOLEAN);
+                            $xmGwList = $xmplusWebGateways ?? [];
+                            $xmGwErr = $xmplusWebCheckoutError ?? null;
                         @endphp
+
+                        @if ($useXmplusWeb && $order->plan)
+                            <div class="md:col-span-2 space-y-4">
+                                @if ($xmGwErr)
+                                    <div class="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-4 text-right text-sm text-amber-900 dark:text-amber-100">
+                                        <strong>راه‌اندازی پرداخت XMPlus:</strong> {{ $xmGwErr }}
+                                    </div>
+                                @endif
+                                @if ($xmGwList !== [])
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 text-right">
+                                        درگاه‌های زیر مستقیماً از پنل XMPlus (Client API) خوانده می‌شوند؛ برخی ممکن است پس از پرداخت نیاز به تأیید مدیر در همان پنل داشته باشند.
+                                    </p>
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        @foreach ($xmGwList as $gw)
+                                            @php
+                                                $gid = (int) ($gw['id'] ?? 0);
+                                                $glabel = trim((string) ($gw['name'] ?? $gw['gateway'] ?? ('درگاه '.$gid)));
+                                            @endphp
+                                            @if ($gid > 0)
+                                                <form method="POST" action="{{ route('payment.xmplus.process', $order) }}">
+                                                    @csrf
+                                                    <input type="hidden" name="gateway_id" value="{{ $gid }}">
+                                                    <button type="submit"
+                                                            class="w-full text-center p-6 border-2 rounded-lg border-indigo-200 dark:border-indigo-800 hover:border-indigo-500 dark:hover:border-indigo-500 transition bg-white dark:bg-gray-800">
+                                                        <h4 class="font-bold text-gray-900 dark:text-gray-100">{{ $glabel }}</h4>
+                                                        @if (!empty($gw['gateway']))
+                                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1" dir="ltr">{{ $gw['gateway'] }}</p>
+                                                        @endif
+                                                    </button>
+                                                </form>
+                                            @endif
+                                        @endforeach
+                                    </div>
+                                @elseif (!$xmGwErr)
+                                    <p class="text-sm text-gray-500 text-right">در حال بارگذاری درگاه‌ها… صفحه را تازه کنید.</p>
+                                @endif
+                                <form method="POST" action="{{ route('payment.xmplus.finalize', $order) }}" class="pt-2 border-t dark:border-gray-700">
+                                    @csrf
+                                    <button type="submit"
+                                            class="w-full text-center py-3 px-4 rounded-lg border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
+                                        تکمیل پرداخت XMPlus (بعد از بازگشت از درگاه / QR / تأیید ادمین)
+                                    </button>
+                                </form>
+                            </div>
+                        @else
                         @if ($order->plan)
                             @if ($isXmplusPay)
                                 <div class="w-full text-center p-6 border-2 rounded-lg border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20">
@@ -196,6 +244,7 @@
                                     دریافت آدرس ولت، واریز، ثبت TxID — تأیید توسط مدیر
                                 </p>
                             </a>
+                        @endif
                         @endif
 
                     </div>

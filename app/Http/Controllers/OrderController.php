@@ -13,6 +13,7 @@ use App\Models\Transaction;
 use App\Services\ManualCryptoService;
 use App\Services\MarzbanService;
 use App\Services\PlisioService;
+use App\Actions\CompleteXmplusGatewayPaymentAction;
 use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
 use App\Models\Notification;
@@ -62,9 +63,24 @@ class OrderController extends Controller
         $dashSettings = Setting::all()->pluck('value', 'key');
         $xmplusWalletDisplay = XmplusProvisioningService::fetchXmplusWalletDisplay(Auth::user(), $dashSettings);
 
+        $useXmplusWebGateways = XmplusProvisioningService::shouldUseXmplusGatewaysForWebCheckout($dashSettings, $order);
+        $xmplusWebGateways = [];
+        $xmplusWebCheckoutError = null;
+        if ($useXmplusWebGateways && $order->status === 'pending' && $order->plan_id) {
+            $prep = XmplusProvisioningService::prepareWebPaymentGateways($order->loadMissing(['plan', 'user']), $dashSettings);
+            if ($prep['ok']) {
+                $xmplusWebGateways = $prep['gateways'];
+            } else {
+                $xmplusWebCheckoutError = $prep['error'] ?? 'خطای ناشناخته';
+            }
+        }
+
         return view('payment.show', [
             'order' => $order,
             'xmplusWalletDisplay' => $xmplusWalletDisplay,
+            'useXmplusWebGateways' => $useXmplusWebGateways,
+            'xmplusWebGateways' => $xmplusWebGateways,
+            'xmplusWebCheckoutError' => $xmplusWebCheckoutError,
         ]);
     }
 
@@ -77,6 +93,10 @@ class OrderController extends Controller
             abort(403);
         }
 
+        $block = $this->redirectIfXmplusWebBlocksShopPayment($order);
+        if ($block !== null) {
+            return $block;
+        }
 
         $order->update(['payment_method' => 'card']);
 
@@ -796,6 +816,11 @@ class OrderController extends Controller
             return redirect()->route('dashboard')->with('status', 'این سفارش قبلاً پرداخت شده است.');
         }
 
+        $block = $this->redirectIfXmplusWebBlocksShopPayment($order);
+        if ($block !== null) {
+            return $block;
+        }
+
         $plisio = PlisioService::fromDatabase();
         if (! $plisio->isEnabled()) {
             return redirect()->back()->with('error', 'درگاه پرداخت Plisio فعال نیست. از پنل ادمین آن را فعال و API Key را ذخیره کنید.');
@@ -841,6 +866,10 @@ class OrderController extends Controller
     public function showManualCrypto(Request $request, Order $order)
     {
         $this->assertManualCryptoOrderOwned($order);
+        $block = $this->redirectIfXmplusWebBlocksShopPayment($order);
+        if ($block !== null) {
+            return $block;
+        }
         $settings = Setting::all()->pluck('value', 'key');
         if (! ManualCryptoService::isEnabled($settings)) {
             return redirect()->route('order.show', $order)->with('error', 'پرداخت USDT/USDC دستی در حال حاضر غیرفعال است.');
@@ -887,6 +916,10 @@ class OrderController extends Controller
     public function pickManualCryptoNetwork(Request $request, Order $order)
     {
         $this->assertManualCryptoOrderOwned($order);
+        $block = $this->redirectIfXmplusWebBlocksShopPayment($order);
+        if ($block !== null) {
+            return $block;
+        }
         $settings = Setting::all()->pluck('value', 'key');
         if (! ManualCryptoService::isEnabled($settings)) {
             return redirect()->route('order.show', $order)->with('error', 'پرداخت USDT/USDC دستی غیرفعال است.');
@@ -919,6 +952,10 @@ class OrderController extends Controller
     public function submitManualCryptoProof(Request $request, Order $order)
     {
         $this->assertManualCryptoOrderOwned($order);
+        $block = $this->redirectIfXmplusWebBlocksShopPayment($order);
+        if ($block !== null) {
+            return $block;
+        }
         if (! ManualCryptoService::databaseReady()) {
             return redirect()->route('order.show', $order)->with('error', 'پایگاه داده به‌روز نشده است. مدیر سرور باید دستور php artisan migrate را اجرا کند.');
         }
@@ -955,5 +992,86 @@ class OrderController extends Controller
         ]);
 
         return redirect()->route('dashboard')->with('status', 'اطلاعات پرداخت ثبت شد. پس از تأیید مدیر، سفارش تکمیل می‌شود.');
+    }
+
+    /**
+     * پرداخت از درگاه‌های XMPlus در وب (لیست از Client API).
+     */
+    public function processXmplusGatewayPayment(Request $request, Order $order)
+    {
+        if (Auth::id() !== $order->user_id) {
+            abort(403);
+        }
+        if ($order->status === 'paid') {
+            return redirect()->route('dashboard')->with('status', 'این سفارش قبلاً پرداخت شده است.');
+        }
+        $settings = Setting::all()->pluck('value', 'key');
+        if (! XmplusProvisioningService::shouldUseXmplusGatewaysForWebCheckout($settings, $order)) {
+            return redirect()->route('order.show', $order)->with('error', 'پرداخت XMPlus از وب برای این سفارش فعال نیست.');
+        }
+
+        $request->validate(['gateway_id' => 'required|integer|min:1']);
+
+        $res = CompleteXmplusGatewayPaymentAction::executeForWebUser(
+            $order->id,
+            (int) $request->input('gateway_id'),
+            (int) Auth::id()
+        );
+
+        if (! $res['ok']) {
+            return redirect()->route('order.show', $order)->with('error', $res['message']);
+        }
+
+        if (! empty($res['redirect'])) {
+            session()->flash(
+                'status',
+                'پس از اتمام پرداخت در درگاه، به این سایت برگردید و در صفحهٔ سفارش روی «تکمیل پرداخت XMPlus» بزنید تا سرویس فعال شود.'
+            );
+
+            return redirect()->away($res['redirect']);
+        }
+
+        if (! empty($res['await_view'])) {
+            return view('payment.xmplus-await', [
+                'order' => $order->loadMissing(['plan']),
+                'pay' => is_array($res['pay'] ?? null) ? $res['pay'] : [],
+                'xmplusPanelUrl' => rtrim((string) $settings->get('xmplus_panel_url', ''), '/'),
+            ]);
+        }
+
+        return redirect()->route('dashboard')->with('status', $res['message'] ?? 'سفارش تکمیل شد.');
+    }
+
+    /**
+     * پس از QR / تأیید ادمین / بازگشت از درگاه خارجی.
+     */
+    public function finalizeXmplusWebPayment(Order $order)
+    {
+        if (Auth::id() !== $order->user_id) {
+            abort(403);
+        }
+
+        $res = CompleteXmplusGatewayPaymentAction::finalizeWebAfterOffsite($order->id, (int) Auth::id());
+        if (! $res['ok']) {
+            return redirect()->route('order.show', $order)->with('error', $res['message']);
+        }
+
+        session()->forget(['discount_code', 'discount_amount', 'discount_applied_order_id']);
+
+        return redirect()->route('dashboard')->with('status', $res['message'] ?? 'سفارش تکمیل شد.');
+    }
+
+    /**
+     * وقتی پنل XMPlus و «پرداخت از درگاه‌های پنل در سایت» فعال است، روش‌های پرداخت VPNMarket برای سفارش پلن مسدود می‌شود.
+     */
+    protected function redirectIfXmplusWebBlocksShopPayment(Order $order): ?\Illuminate\Http\RedirectResponse
+    {
+        $settings = Setting::all()->pluck('value', 'key');
+        if (XmplusProvisioningService::shouldUseXmplusGatewaysForWebCheckout($settings, $order)) {
+            return redirect()->route('order.show', $order)
+                ->with('error', 'در حالت پنل XMPlus با فعال بودن «پرداخت از درگاه‌های پنل در سایت»، فقط درگاه‌های همان پنل (XMPlus) قابل استفاده‌اند.');
+        }
+
+        return null;
     }
 }
