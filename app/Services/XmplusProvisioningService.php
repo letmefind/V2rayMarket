@@ -472,11 +472,18 @@ class XmplusProvisioningService
                 );
             }
             if (is_array($pay) && self::invoicePayGatewayIsCard2Card($pay)) {
-                $api->log('info', 'XMPlus: Card2Card پس از پرداخت فروشگاه — همگام‌سازی DB فاکتور در صورت فعال بودن تنظیمات', [
+                $api->log('warning', 'XMPlus: پس از پرداخت فروشگاه، invoice/pay درگاه Card2Card برگرداند — شناسهٔ xmplus_auto_pay_gateway_id اشتباه است؛ همگام‌سازی MySQL انجام نمی‌شود (همان فقط Paid می‌کرد بدون ساخت سرویس).', [
                     'invid' => $invid,
                     'order_id' => $order->id,
+                    'gateway_in_response' => $pay['gateway'] ?? null,
+                    'gatewayid_setting' => (int) $gatewayId,
                 ]);
-                self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $order, true);
+                throw new RuntimeException(
+                    'XMPlus: «شناسه درگاه برای پرداخت خودکار فاکتور» در تنظیمات تم الان '.(int) $gatewayId.' است و پاسخ invoice/pay می‌گوید درگاه **Card2Card** است. '
+                    .'برای مشتریانی که در VPNMarket قبلاً پرداخت کرده‌اند باید شناسهٔ درگاه **ShopPrepaidConfirm** (یا موجودی/اعتبار نماینده) را از `POST /api/client/gateways` بگذارید، نه Card2Card. '
+                    .'اگر با Card2Card ادامه دهید و ردیف فاکتور را با MySQL Paid کنید، در API فاکتور Paid می‌شود اما **سرویس و sublink ساخته نمی‌شود** (همان وضعی که در لاگ دیدید). '
+                    .'شناسه را اصلاح کنید، سپس برای این سفارش در پنل XMPlus فاکتور را در صورت نیاز دستی اصلاح/دوباره بسازید و در فروشگاه دوباره «تأیید و اجرا» بزنید.'
+                );
             }
             $async = self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
@@ -710,7 +717,15 @@ class XmplusProvisioningService
                     );
                 }
                 if (is_array($pay) && self::invoicePayGatewayIsCard2Card($pay)) {
-                    self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, true);
+                    $api->log('warning', 'XMPlus تمدید: invoice/pay Card2Card پس از پرداخت فروشگاه — شناسهٔ درگاه خودکار اشتباه است؛ همگام‌سازی MySQL انجام نمی‌شود.', [
+                        'invid' => $invid,
+                        'gatewayid_setting' => (int) $gatewayId,
+                        'gateway' => $pay['gateway'] ?? null,
+                    ]);
+                    throw new RuntimeException(
+                        'XMPlus تمدید: شناسه درگاه خودکار ('.(int) $gatewayId.') به Card2Card اشاره می‌کند. برای تسویه پس از پرداخت فروشگاه درگاه ShopPrepaidConfirm یا موجودی نماینده را در Theme Settings بگذارید، نه Card2Card. '
+                        .'همگام‌سازی MySQL فاکتور را Paid می‌کند بدون ساخت سرویس.'
+                    );
                 }
             } else {
                 $pay = [];
