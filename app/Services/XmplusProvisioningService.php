@@ -871,9 +871,9 @@ class XmplusProvisioningService
             '',
         ];
         if ($shopPrepaid) {
-            $lines[] = 'درگاه **ShopPrepaidConfirm** روی پنل باید علاوه بر Paid کردن فاکتور، همان منطقی را اجرا کند که با تأیید پرداخت در ادمین سرویس و sublink ساخته می‌شود. اگر فقط فیلدهای status/paid_date در دیتابیس عوض شوند، در Client API معمولاً `account/info` با `services: []` می‌ماند.';
+            $lines[] = 'درگاه **ShopPrepaidConfirm** روی پنل باید علاوه بر Paid کردن فاکتور، همان منطقی را اجرا کند که با تأیید پرداخت در ادمین سرویس و sublink ساخته می‌شود. اگر فقط فیلدهای status/paid_date در دیتابیس عوض شوند، در Client API معمولاً `account/info` با `services: []` و فاکتور با `serviceid` خالی می‌ماند.';
             $lines[] = '';
-            $lines[] = 'روی سرور XMPlus در `ShopPrepaidConfirm.php` متد `ShopPrepaidConfirmKernel::tryFulfillSubscriptionAfterPaid()` را بررسی کنید؛ در صورت نیاز همان سرویس/کنترلر واقعی پنل را در انتهای `settle()` صدا بزنید (طبق `Invoice.php` و مسیر تأیید فاکتور ادمین).';
+            $lines[] = 'روی سرور XMPlus آخرین `ShopPrepaidConfirm.php` را بگذارید؛ `tryFulfillSubscriptionAfterPaid()` و `tryAppContainerFulfillHooks()` سرویس‌های رایج را امتحان می‌کنند. اگر باز هم لینک نیامد، در سورس XMPlus همان کلاس/متدی را که ادمین با آن فاکتور را تأیید و سرویس می‌سازد پیدا کنید و در انتهای `ShopPrepaidConfirmKernel::settle()` صریحاً صدا بزنید.';
             $lines[] = '';
         }
         if ($card2cardDb) {
@@ -1227,6 +1227,20 @@ class XmplusProvisioningService
      */
     protected static function sublinkFromServiceInfo(array $info): ?string
     {
+        foreach (['sublink', 'subscription_url', 'sub_link', 'config_link'] as $k) {
+            if (! empty($info[$k]) && is_string($info[$k])) {
+                return (string) $info[$k];
+            }
+        }
+        $nested = $info['data'] ?? $info['service'] ?? null;
+        if (is_array($nested)) {
+            foreach (['sublink', 'subscription_url', 'sub_link'] as $k) {
+                if (! empty($nested[$k]) && is_string($nested[$k])) {
+                    return (string) $nested[$k];
+                }
+            }
+        }
+
         $servers = $info['servers'] ?? [];
         if (is_array($servers) && $servers !== []) {
             $first = $servers[0] ?? [];
@@ -1244,10 +1258,26 @@ class XmplusProvisioningService
     protected static function pickSublinkFromServices(array $services, int $expectPid, ?int $preferSid): ?string
     {
         foreach ($services as $s) {
+            if (! is_array($s) || empty($s['sublink'])) {
+                continue;
+            }
+            if ($preferSid !== null && (int) ($s['sid'] ?? 0) === $preferSid) {
+                return (string) $s['sublink'];
+            }
+        }
+        foreach ($services as $s) {
+            if (! is_array($s) || empty($s['sublink'])) {
+                continue;
+            }
+            if ((int) ($s['packageid'] ?? 0) === $expectPid) {
+                return (string) $s['sublink'];
+            }
+        }
+        foreach ($services as $s) {
             if (! is_array($s)) {
                 continue;
             }
-            if ($preferSid !== null && (int) ($s['sid'] ?? 0) === $preferSid && ($s['status'] ?? '') === 'Active') {
+            if ($preferSid !== null && (int) ($s['sid'] ?? 0) === $preferSid && self::xmplusServiceRowLooksActive($s)) {
                 if (! empty($s['sublink'])) {
                     return (string) $s['sublink'];
                 }
@@ -1257,17 +1287,31 @@ class XmplusProvisioningService
             if (! is_array($s)) {
                 continue;
             }
-            if (($s['status'] ?? '') === 'Active' && (int) ($s['packageid'] ?? 0) === $expectPid && ! empty($s['sublink'])) {
+            if (self::xmplusServiceRowLooksActive($s) && (int) ($s['packageid'] ?? 0) === $expectPid && ! empty($s['sublink'])) {
                 return (string) $s['sublink'];
             }
         }
         foreach ($services as $s) {
-            if (is_array($s) && ($s['status'] ?? '') === 'Active' && ! empty($s['sublink'])) {
+            if (is_array($s) && self::xmplusServiceRowLooksActive($s) && ! empty($s['sublink'])) {
                 return (string) $s['sublink'];
             }
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $s
+     */
+    protected static function xmplusServiceRowLooksActive(array $s): bool
+    {
+        $raw = trim((string) ($s['status'] ?? ''));
+        $st = strtolower($raw);
+        if (in_array($st, ['inactive', 'expired', 'cancelled', 'canceled', 'disabled', 'suspended'], true)) {
+            return false;
+        }
+
+        return $st === 'active' || $st === '' || $st === 'activating' || strcasecmp($raw, 'Active') === 0;
     }
 
     /**
@@ -1287,13 +1331,17 @@ class XmplusProvisioningService
             if (! is_array($s)) {
                 continue;
             }
-            if (($s['status'] ?? '') === 'Active' && (int) ($s['packageid'] ?? 0) === $expectPid) {
-                return (int) ($s['sid'] ?? 0) ?: null;
+            if (self::xmplusServiceRowLooksActive($s) && (int) ($s['packageid'] ?? 0) === $expectPid) {
+                $sid = (int) ($s['sid'] ?? 0);
+
+                return $sid > 0 ? $sid : null;
             }
         }
         foreach ($services as $s) {
-            if (is_array($s) && ($s['status'] ?? '') === 'Active' && isset($s['sid'])) {
-                return (int) $s['sid'];
+            if (is_array($s) && self::xmplusServiceRowLooksActive($s) && isset($s['sid'])) {
+                $sid = (int) $s['sid'];
+
+                return $sid > 0 ? $sid : null;
             }
         }
 

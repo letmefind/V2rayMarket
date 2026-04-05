@@ -450,6 +450,10 @@ final class ShopPrepaidConfirmKernel
             'addSubscription',
             'buildUserService',
             'syncServices',
+            'handlePaymentSuccess',
+            'onGatewaySuccess',
+            'completePayment',
+            'generateSubscription',
         ];
 
         foreach ($postPaidInstance as $method) {
@@ -478,6 +482,87 @@ final class ShopPrepaidConfirmKernel
         self::tryReflectionPostPaidServiceMethods($invoiceFqcn, $invId);
 
         self::tryStaticFulfillHooks($invId, $invoice);
+
+        self::tryAppContainerFulfillHooks($invoice, $invId);
+    }
+
+    /**
+     * بسیاری از نصب‌های XMPlus منطق «بستن فاکتور + ساخت سرویس» را در یک سرویس قابل resolve از container گذاشته‌اند.
+     *
+     * @param  object  $invoice  مدل فاکتور (همان نمونهٔ بارگذاری‌شده از DB)
+     */
+    private static function tryAppContainerFulfillHooks(object $invoice, string $invId): void
+    {
+        if (! function_exists('app')) {
+            return;
+        }
+        try {
+            $app = app();
+        } catch (Throwable $e) {
+            return;
+        }
+
+        $classCandidates = [
+            'App\\Application\\Services\\InvoicePaymentService',
+            'App\\Application\\Services\\PaymentService',
+            'App\\Application\\Services\\OrderService',
+            'App\\Application\\Services\\InvoiceService',
+            'App\\Application\\Services\\BillingService',
+            'App\\Services\\InvoiceService',
+            'App\\Services\\OrderService',
+            'App\\Services\\PaymentService',
+        ];
+
+        $methodCandidates = [
+            'payInvoice',
+            'completeInvoice',
+            'fulfillInvoice',
+            'confirmInvoice',
+            'processPaidInvoice',
+            'afterInvoicePaid',
+            'createServiceFromInvoice',
+            'handlePaidInvoice',
+            'settleInvoice',
+            'processGatewayPayment',
+            'onInvoicePaid',
+        ];
+
+        foreach ($classCandidates as $cls) {
+            if (! class_exists($cls)) {
+                continue;
+            }
+            try {
+                $svc = $app->make($cls);
+            } catch (Throwable $e) {
+                continue;
+            }
+            if (! is_object($svc)) {
+                continue;
+            }
+
+            foreach ($methodCandidates as $m) {
+                if (! method_exists($svc, $m)) {
+                    continue;
+                }
+                try {
+                    $rm = new ReflectionMethod($svc, $m);
+                    if (! $rm->isPublic()) {
+                        continue;
+                    }
+                    $req = $rm->getNumberOfRequiredParameters();
+                    if ($req !== 1) {
+                        continue;
+                    }
+                    try {
+                        $svc->{$m}($invoice);
+                    } catch (Throwable $e) {
+                        $svc->{$m}($invId);
+                    }
+                } catch (Throwable $e) {
+                    // امضا یا نوع آرگومان با این نصب جور نیست
+                }
+            }
+        }
     }
 
     /**
