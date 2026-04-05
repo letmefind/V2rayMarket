@@ -352,6 +352,8 @@ final class ShopPrepaidConfirmKernel
         }
 
         if (self::invoiceRowLooksPaid($invoice)) {
+            self::tryFulfillSubscriptionAfterPaid($invoiceFqcn, $invId, $order);
+
             return;
         }
 
@@ -384,6 +386,8 @@ final class ShopPrepaidConfirmKernel
             }
             $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
             if ($invoice !== null && self::invoiceRowLooksPaid($invoice)) {
+                self::tryFulfillSubscriptionAfterPaid($invoiceFqcn, $invId, $order);
+
                 return;
             }
         }
@@ -392,6 +396,8 @@ final class ShopPrepaidConfirmKernel
 
         $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
         if ($invoice !== null && self::invoiceRowLooksPaid($invoice)) {
+            self::tryFulfillSubscriptionAfterPaid($invoiceFqcn, $invId, $order);
+
             return;
         }
 
@@ -399,6 +405,8 @@ final class ShopPrepaidConfirmKernel
 
         $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
         if ($invoice !== null && self::invoiceRowLooksPaid($invoice)) {
+            self::tryFulfillSubscriptionAfterPaid($invoiceFqcn, $invId, $order);
+
             return;
         }
 
@@ -407,6 +415,153 @@ final class ShopPrepaidConfirmKernel
             .'On the XMPlus server open App/Application/Models/Invoice.php and the admin route/controller that confirms payment; '
             .'add one explicit call to that logic at the end of ShopPrepaidConfirmKernel::settle() in ShopPrepaidConfirm.php.'
         );
+    }
+
+    /**
+     * فقط Paid کردن ردیف فاکتور در XMPlus کافی نیست؛ باید همان منطقی اجرا شود که سرویس/ساب‌لینک می‌سازد.
+     * این متد پس از اطمینان از Paid بودن فاکتور، متدهای رایج و reflection را امتحان می‌کند؛ اگر کافی نبود
+     * در همین کلاس یک فراخوانی صریح به سرویس/کنترلر واقعی پنل خودتان اضافه کنید.
+     *
+     * @param  class-string  $invoiceFqcn
+     * @param  array<string, mixed>  $order
+     */
+    private static function tryFulfillSubscriptionAfterPaid(string $invoiceFqcn, string $invId, array $order): void
+    {
+        $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
+        if ($invoice === null || ! self::invoiceRowLooksPaid($invoice)) {
+            return;
+        }
+
+        $postPaidInstance = [
+            'activateServices',
+            'createService',
+            'createServices',
+            'issueService',
+            'fulfillInvoice',
+            'fulfill',
+            'completeOrder',
+            'afterPaid',
+            'afterPaymentSuccess',
+            'processAfterPayment',
+            'postPayment',
+            'deliverProduct',
+            'provisionSubscription',
+            'provisionService',
+            'addSubscription',
+            'buildUserService',
+            'syncServices',
+        ];
+
+        foreach ($postPaidInstance as $method) {
+            if (! method_exists($invoice, $method)) {
+                continue;
+            }
+            try {
+                $invoice->$method();
+            } catch (Throwable $e) {
+                // نسخهٔ بعدی پنل ممکن است امضای دیگری داشته باشد
+            }
+            $invoice = $invoiceFqcn::where('inv_id', $invId)->first();
+            if ($invoice === null) {
+                return;
+            }
+        }
+
+        try {
+            if (method_exists($invoice, 'refresh')) {
+                $invoice->refresh();
+            }
+        } catch (Throwable $e) {
+            // ignore
+        }
+
+        self::tryReflectionPostPaidServiceMethods($invoiceFqcn, $invId);
+
+        self::tryStaticFulfillHooks($invId, $invoice);
+    }
+
+    /**
+     * متدهای بدون پارامتر روی مدل Invoice که احتمالاً پس از پرداخت سرویس می‌سازند.
+     *
+     * @param  class-string  $invoiceFqcn
+     */
+    private static function tryReflectionPostPaidServiceMethods(string $invoiceFqcn, string $invId): void
+    {
+        try {
+            $ref = new ReflectionClass($invoiceFqcn);
+        } catch (Throwable $e) {
+            return;
+        }
+
+        foreach ($ref->getMethods(ReflectionMethod::IS_PUBLIC) as $rm) {
+            if ($rm->isStatic() || $rm->getNumberOfRequiredParameters() > 0) {
+                continue;
+            }
+            if ($rm->getDeclaringClass()->getName() !== $invoiceFqcn) {
+                continue;
+            }
+            $name = $rm->getName();
+            if (strpos($name, '__') === 0) {
+                continue;
+            }
+            if (preg_match('/^(get|set|is|has|to|new|delete|find|all|where|query|attribute)/i', $name) === 1) {
+                continue;
+            }
+            if (preg_match('/service|subscription|fulfill|deliver|provision|activate|issue|package|product|order|user.?service/i', $name) !== 1) {
+                continue;
+            }
+
+            $working = $invoiceFqcn::where('inv_id', $invId)->first();
+            if ($working === null) {
+                return;
+            }
+
+            try {
+                $working->$name();
+            } catch (Throwable $e) {
+                continue;
+            }
+        }
+    }
+
+    /**
+     * چند کلاس استاتیک رایج در فورک‌های XMPlus (در صورت وجود).
+     *
+     * @param  object  $invoice
+     */
+    private static function tryStaticFulfillHooks(string $invId, object $invoice): void
+    {
+        $candidates = [
+            ['App\\Application\\Services\\InvoiceService', 'fulfillPaidInvoice'],
+            ['App\\Application\\Services\\InvoiceService', 'processPaidInvoice'],
+            ['App\\Application\\Services\\InvoiceService', 'activateFromInvoice'],
+            ['App\\Application\\Services\\OrderService', 'fulfillInvoice'],
+            ['App\\Services\\InvoiceService', 'fulfillPaidInvoice'],
+        ];
+
+        foreach ($candidates as [$cls, $meth]) {
+            if (! class_exists($cls) || ! method_exists($cls, $meth)) {
+                continue;
+            }
+            try {
+                $rm = new ReflectionMethod($cls, $meth);
+                if (! $rm->isStatic()) {
+                    continue;
+                }
+                $req = $rm->getNumberOfRequiredParameters();
+                if ($req === 0) {
+                    $cls::$meth();
+                } elseif ($req === 1) {
+                    try {
+                        $cls::$meth($invoice);
+                    } catch (Throwable $e) {
+                        $cls::$meth($invId);
+                    }
+                }
+            } catch (Throwable $e) {
+                // این نام کلاس/متد روی این نصب XMPlus وجود ندارد یا امضا فرق دارد
+            }
+        }
     }
 
     /**

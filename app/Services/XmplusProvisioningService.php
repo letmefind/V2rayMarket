@@ -24,6 +24,9 @@ class XmplusProvisioningService
     /** Card2Card + همگام‌سازی MySQL معمولاً فقط ردیف را Paid می‌کند و سرویس نمی‌سازد — زودتر از حالت عادی fallback می‌کنیم. */
     private const POLL_EARLY_FALLBACK_CARD2CARD_DB_SYNC_PAID_NO_SERVICE_AFTER = 4;
 
+    /** ShopPrepaidConfirm اگر فقط DB را Paid کند بدون اجرای منطق ساخت سرویس، همان وضعیت Card2Card است — polling را کوتاه می‌کنیم و پیام هدایت می‌دهیم. */
+    private const POLL_EARLY_FALLBACK_SHOP_PREPAID_PAID_NO_SERVICE_AFTER = 6;
+
     public static function fromSettings(Collection $settings): XmplusService
     {
         $base = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
@@ -246,6 +249,18 @@ class XmplusProvisioningService
         $g = strtolower(trim((string) ($pay['gateway'] ?? '')));
 
         return $g === 'card2card' || str_contains($g, 'card2card');
+    }
+
+    /**
+     * درگاه سفارشی «پرداخت از پیش توسط فروشگاه» (اسنیپت ShopPrepaidConfirm روی پنل).
+     *
+     * @param  array<string, mixed>  $pay
+     */
+    protected static function invoicePayGatewayIsShopPrepaidConfirm(array $pay): bool
+    {
+        $g = strtolower(trim((string) ($pay['gateway'] ?? '')));
+
+        return $g === 'shopprepaidconfirm' || str_contains($g, 'shopprepaid');
     }
 
     /**
@@ -492,6 +507,7 @@ class XmplusProvisioningService
                 'panel_base' => $panelBase,
                 'order_id' => $order->id,
                 'shop_collected_card2card' => is_array($pay) && self::invoicePayGatewayIsCard2Card($pay),
+                'shop_prepaid_confirm_gateway' => is_array($pay) && self::invoicePayGatewayIsShopPrepaidConfirm($pay),
             ];
             $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $result['sublink'];
@@ -742,6 +758,7 @@ class XmplusProvisioningService
                 'panel_base' => $panelBase,
                 'order_id' => $renewalOrder->id,
                 'shop_collected_card2card' => $shopPaymentAlreadyCollected && is_array($pay) && self::invoicePayGatewayIsCard2Card($pay),
+                'shop_prepaid_confirm_gateway' => $shopPaymentAlreadyCollected && is_array($pay) && self::invoicePayGatewayIsShopPrepaidConfirm($pay),
             ];
             $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $poll['sublink'];
@@ -841,17 +858,24 @@ class XmplusProvisioningService
     /**
      * وقتی فاکتور در API Paid است اما هنوز sublink/servicelist برنمی‌گردد (مشکل یا تأخیر پنل).
      *
-     * @param  array{panel_base: string, order_id?: int, shop_collected_card2card?: bool}  $ctx
+     * @param  array{panel_base: string, order_id?: int, shop_collected_card2card?: bool, shop_prepaid_confirm_gateway?: bool}  $ctx
      */
     protected static function formatPaidInvoiceWithoutSublinkUserNotice(string $email, string $invid, array $ctx): string
     {
         $panel = rtrim((string) ($ctx['panel_base'] ?? ''), '/');
         $orderId = (int) ($ctx['order_id'] ?? 0);
         $card2cardDb = ! empty($ctx['shop_collected_card2card']);
+        $shopPrepaid = ! empty($ctx['shop_prepaid_confirm_gateway']);
         $lines = [
             '⚠️ فاکتور در XMPlus با وضعیت Paid ثبت شده، اما API هنوز لینک اشتراک (subscription) را برنمی‌گرداند.',
             '',
         ];
+        if ($shopPrepaid) {
+            $lines[] = 'درگاه **ShopPrepaidConfirm** روی پنل باید علاوه بر Paid کردن فاکتور، همان منطقی را اجرا کند که با تأیید پرداخت در ادمین سرویس و sublink ساخته می‌شود. اگر فقط فیلدهای status/paid_date در دیتابیس عوض شوند، در Client API معمولاً `account/info` با `services: []` می‌ماند.';
+            $lines[] = '';
+            $lines[] = 'روی سرور XMPlus در `ShopPrepaidConfirm.php` متد `ShopPrepaidConfirmKernel::tryFulfillSubscriptionAfterPaid()` را بررسی کنید؛ در صورت نیاز همان سرویس/کنترلر واقعی پنل را در انتهای `settle()` صدا بزنید (طبق `Invoice.php` و مسیر تأیید فاکتور ادمین).';
+            $lines[] = '';
+        }
         if ($card2cardDb) {
             $lines[] = 'این حالت اغلب وقتی رخ می‌دهد که با درگاه Card2Card فقط invoice/pay زده شده و سپس ردیف فاکتور در MySQL به Paid به‌روز شده باشد؛ در بسیاری از نسخه‌های XMPlus **همان به‌روزرسانی DB منطق ساخت سرویس را اجرا نمی‌کند** و account/services خالی می‌ماند.';
             $lines[] = '';
@@ -940,6 +964,15 @@ class XmplusProvisioningService
             $earlyPaidNoServiceAfter = min(
                 $earlyPaidNoServiceAfter,
                 self::POLL_EARLY_FALLBACK_CARD2CARD_DB_SYNC_PAID_NO_SERVICE_AFTER
+            );
+        }
+        if (
+            is_array($paidWithoutSublinkFallbackContext)
+            && ! empty($paidWithoutSublinkFallbackContext['shop_prepaid_confirm_gateway'])
+        ) {
+            $earlyPaidNoServiceAfter = min(
+                $earlyPaidNoServiceAfter,
+                self::POLL_EARLY_FALLBACK_SHOP_PREPAID_PAID_NO_SERVICE_AFTER
             );
         }
 
