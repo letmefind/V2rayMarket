@@ -291,11 +291,86 @@ class XmplusProvisioningService
     }
 
     /**
+     * برخی پنل‌ها (مثلاً با ShopPrepaidConfirm) برای POST /api/client/invoice/pay HTTP 200 می‌دهند ولی بدنه JSON خالی است؛
+     * در لاگ VPNMarket به‌صورت {"_raw":""} دیده می‌شود. در این حالت فقط با invoice/view می‌توان تأیید کرد فاکتور بسته شده یا نه.
+     *
+     * @param  array<string, mixed>  $pay
+     */
+    protected static function invoicePayResponseBodyEmptyOrUnstructured(array $pay): bool
+    {
+        if ($pay === []) {
+            return true;
+        }
+        $hasStructured = isset($pay['code']) || isset($pay['status']) || isset($pay['data'])
+            || isset($pay['ret']) || isset($pay['gateway']) || isset($pay['message'])
+            || isset($pay['orderid']) || isset($pay['invid']);
+        if ($hasStructured) {
+            return false;
+        }
+        if (array_key_exists('_raw', $pay)) {
+            return trim((string) $pay['_raw']) === '';
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<string, mixed>|null  آرایهٔ pay مصنوعی در صورت تأیید Paid، وگرنه null
+     */
+    protected static function recoverShopInvoicePayAfterEmptyResponse(
+        XmplusService $api,
+        string $email,
+        string $passwd,
+        string $invid,
+        array $pay
+    ): ?array {
+        if (! self::invoicePayResponseBodyEmptyOrUnstructured($pay)) {
+            return null;
+        }
+        $attempts = 8;
+        for ($i = 0; $i < $attempts; $i++) {
+            if ($i > 0) {
+                usleep(400_000);
+            }
+            try {
+                $view = $api->invoiceView($email, $passwd, $invid);
+                if (self::invoiceViewResponseIsPaid($view)) {
+                    $api->log('info', 'XMPlus invoice/pay بدون JSON قابل‌اعتماد بود؛ invoice/view فاکتور را Paid گزارش کرد — ادامه با polling', [
+                        'step' => 'invoice_pay_empty_body_recovered',
+                        'invid' => $invid,
+                        'attempt' => $i + 1,
+                    ]);
+
+                    return array_merge($pay, [
+                        'code' => 100,
+                        'status' => 'success',
+                        'gateway' => 'ShopPrepaidConfirm',
+                        '_empty_pay_body_recovered_via_invoice_view' => true,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                $api->log('warning', 'XMPlus invoice/view هنگام بازیابی پس از pay خالی', [
+                    'invid' => $invid,
+                    'attempt' => $i + 1,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @param  callable(): array<string, mixed>  $invoicePay
      * @return array<string, mixed>
      */
-    protected static function runInvoicePayStrictForShopCollected(XmplusService $api, callable $invoicePay): array
-    {
+    protected static function runInvoicePayStrictForShopCollected(
+        XmplusService $api,
+        callable $invoicePay,
+        string $email,
+        string $passwd,
+        string $invid
+    ): array {
         try {
             $pay = $invoicePay();
         } catch (\Throwable $e) {
@@ -305,13 +380,19 @@ class XmplusProvisioningService
                 $e
             );
         }
-        if (! self::invoicePayResponseLooksSuccessful($pay)) {
-            throw new RuntimeException(
-                'XMPlus invoice/pay پاسخ موفق شناخته نشد؛ فاکتور احتمالاً Pending مانده. پاسخ خام: '.json_encode($pay, JSON_UNESCAPED_UNICODE)
-            );
+        if (self::invoicePayResponseLooksSuccessful($pay)) {
+            return $pay;
         }
 
-        return $pay;
+        $recovered = self::recoverShopInvoicePayAfterEmptyResponse($api, $email, $passwd, $invid, $pay);
+        if ($recovered !== null) {
+            return $recovered;
+        }
+
+        throw new RuntimeException(
+            'XMPlus invoice/pay پاسخ موفق شناخته نشد؛ فاکتور احتمالاً Pending مانده. پاسخ خام: '.json_encode($pay, JSON_UNESCAPED_UNICODE)
+            .' — اگر بدنه خالی است، در پنل خروجی JSON متد pay() درگاه ShopPrepaidConfirm را درست کنید؛ در غیر این صورت VPNMarket با invoice/view هم سعی می‌کند Paid بودن را تشخیص دهد.'
+        );
     }
 
     protected static function shouldOfferTelegramGatewayPicker(Collection $settings, User $user): bool
@@ -365,6 +446,12 @@ class XmplusProvisioningService
             $regCode = (string) ($settings->get('xmplus_registration_code') ?? '');
             $reg = $api->register($name, $email, $passwdPlain, $regCode, $aff);
             if (! self::apiOk($reg)) {
+                if (self::apiIsEmailAlreadyRegistered($reg)) {
+                    throw new RuntimeException(
+                        'XMPlus: ایمیل '.$email.' از قبل در پنل ثبت است ولی فروشگاه هنوز رمز Client API این کاربر را ندارد. '
+                        .'در پروفایل/ادمین همان رمز پنل را ذخیره کنید یا کاربر را در XMPlus حذف کنید. پاسخ: '.json_encode($reg, JSON_UNESCAPED_UNICODE)
+                    );
+                }
                 throw new RuntimeException('XMPlus ثبت‌نام ناموفق: '.json_encode($reg, JSON_UNESCAPED_UNICODE));
             }
 
@@ -463,7 +550,10 @@ class XmplusProvisioningService
                     $api,
                     function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {
                         return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
-                    }
+                    },
+                    $email,
+                    $passwdPlain,
+                    $invid
                 );
                 $api->log('info', 'XMPlus invoice/pay (تسویه پس از پرداخت فروشگاه)', [
                     'step' => 'invoice_pay_shop_collected',
@@ -718,7 +808,10 @@ class XmplusProvisioningService
                     $api,
                     function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {
                         return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
-                    }
+                    },
+                    $email,
+                    $passwdPlain,
+                    $invid
                 );
                 if (is_array($pay) && self::invoicePayLooksCustomerSideCheckout($pay)) {
                     $api->log('warning', 'XMPlus تمدید: invoice/pay درگاه سمت مشتری؛ همگام‌سازی MySQL انجام نمی‌شود.', [
@@ -935,6 +1028,18 @@ class XmplusProvisioningService
         }
 
         return false;
+    }
+
+    /**
+     * ثبت‌نام Client API وقتی همان ایمیل از قبل در XMPlus وجود دارد (VPNMarket هنوز creds ذخیره نکرده).
+     *
+     * @param  array<string, mixed>  $row
+     */
+    protected static function apiIsEmailAlreadyRegistered(array $row): bool
+    {
+        $msg = strtolower((string) ($row['message'] ?? ''));
+
+        return str_contains($msg, 'already registered') || str_contains($msg, 'already been registered');
     }
 
     /**
@@ -1718,6 +1823,12 @@ class XmplusProvisioningService
             $regCode = (string) ($settings->get('xmplus_registration_code') ?? '');
             $reg = $api->register($name, $email, $passwdPlain, $regCode, $aff);
             if (! self::apiOk($reg)) {
+                if (self::apiIsEmailAlreadyRegistered($reg)) {
+                    throw new RuntimeException(
+                        'XMPlus: ایمیل '.$email.' از قبل در پنل ثبت است ولی فروشگاه هنوز رمز Client API این کاربر را ندارد. '
+                        .'در پروفایل/ادمین همان رمز پنل را ذخیره کنید یا کاربر را در XMPlus حذف کنید. پاسخ: '.json_encode($reg, JSON_UNESCAPED_UNICODE)
+                    );
+                }
                 throw new RuntimeException('XMPlus ثبت‌نام ناموفق: '.json_encode($reg, JSON_UNESCAPED_UNICODE));
             }
             $user->forceFill([

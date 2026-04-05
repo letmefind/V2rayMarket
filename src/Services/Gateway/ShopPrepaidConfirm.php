@@ -3,14 +3,26 @@
 /**
  * درگاه XMPlus: «پرداخت از پیش توسط فروشگاه» (ShopPrepaidConfirm).
  *
- * — کپی در `src/Services/Gateway/` روی سرور پنل؛ در VPNMarket شناسهٔ درگاه از `POST /api/client/gateways`.
+ * — کپی در `src/Services/Gateway/` روی سرور پنل (مثل Card2Card.php هم‌مسیر).
  * — Handler و Kernel در همین فایل‌اند (XMPlus اغلب فقط همین فایل را لود می‌کند).
  *
- * قرارداد pay() برای Client API / VPNMarket:
- *   ret=1, code=100, status=success, gateway=ShopPrepaidConfirm, data=''  (ret=2 گاهی به code=208 خطا می‌شود).
+ * تفاوت با Card2Card (نمونهٔ symmetricnet):
+ *   Card2Card در pay() فاکتور را Paid نمی‌کند؛ فقط QR/آدرس می‌دهد و فاکتور با status=0 می‌ماند تا
+ *   مسیرهایی مثل /portal/invoice/query یا notify تکمیل شود. این درگاه باید همان «تکمیل پرداخت»
+ *   را یک‌جا شبیه‌سازی کند؛ بنابراین علاوه بر به‌روز کردن ردیف، متد pay(شناسهٔ درگاه) و
+ *   App\Utility\Helpers (در صورت وجود) هم امتحان می‌شود. اگر پنل شما تابع اختصاصی دارد،
+ *   در hookPanelFulfill() همان یک خط را بگذارید. روی سرور: در Gatewayها معمولاً فقط JS به /portal/invoice/query
+ *   اشاره می‌کند؛ کنترلر PHP را با جستجوی محدود به *.php از ریشهٔ public_html پیدا کنید:
+ *   grep -R "invoice/query" --include="*.php" .
+ *   symmetricnet (نمونه): app/routes/user.php → POST …/invoice/query →
+ *   \App\Application\Controller\User\InvoiceController::check
+ *   app/routes/reseller.php → \App\Application\Controller\Reseller\InvoiceController::check
+ *   متد check معمولاً به Request/Response وابسته است؛ همان بلوکی را که بعد از تأیید پرداخت سرویس می‌سازد
+ *   در یک کلاس استاتیک کوچک بگذارید و در تنظیمات درگاه after_paid_class / after_paid_method را پر کنید،
+ *   یا در hookPanelFulfill() صدا بزنید.
  *
- * اگر فاکتور Paid شد ولی `account/info` هنوز services خالی است، منطق ساخت سرویس پنل اجرا نشده —
- * در `ShopPrepaidConfirmKernel::hookPanelFulfill()` یک فراخوانی صریح به سورس XMPlus خودتان اضافه کنید.
+ * قرارداد pay() برای Client API / VPNMarket:
+ *   ret=1, code=100, status=success, gateway=ShopPrepaidConfirm, data=''
  */
 
 namespace App\Services\Gateway;
@@ -42,6 +54,8 @@ final class ShopPrepaidConfirm
         $gatewayName = htmlspecialchars((string) ($this->config['name'] ?? 'ShopPrepaidConfirm'), ENT_QUOTES, 'UTF-8');
         $handlerClass = htmlspecialchars((string) ($this->config['handler_class'] ?? ''), ENT_QUOTES, 'UTF-8');
         $handlerMethod = htmlspecialchars((string) ($this->config['handler_method'] ?? 'settle'), ENT_QUOTES, 'UTF-8');
+        $afterPaidClass = htmlspecialchars((string) ($this->config['after_paid_class'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $afterPaidMethod = htmlspecialchars((string) ($this->config['after_paid_method'] ?? 'handle'), ENT_QUOTES, 'UTF-8');
 
         return [
             'name' => '<div class="row mb-3">
@@ -62,6 +76,20 @@ final class ShopPrepaidConfirm
 								<div class="col-sm-8">
 									<input type="text" class="form-control shadow-lg" id="handler_method" name="config[handler_method]" value="'.$handlerMethod.'" placeholder="settle">
 									<small class="text-muted">امضا: public static function settle(array $order, array $config): void</small>
+								</div>
+							</div>',
+            'after_paid_class' => '<div class="row mb-3">
+								<label for="after_paid_class" class="col-sm-3 col-form-label form-label">After-paid class (FQCN)</label>
+								<div class="col-sm-8">
+									<input type="text" class="form-control shadow-lg" id="after_paid_class" name="config[after_paid_class]" value="'.$afterPaidClass.'" placeholder="مثال: App\\Services\\ShopPrepaidAfterPaid">
+									<small class="text-muted">اختیاری. منطق همان <code>User\\InvoiceController::check</code> را اینجا استاتیک کنید (Slim را مستقیم صدا نزنید).</small>
+								</div>
+							</div>',
+            'after_paid_method' => '<div class="row mb-3">
+								<label for="after_paid_method" class="col-sm-3 col-form-label form-label">After-paid method</label>
+								<div class="col-sm-8">
+									<input type="text" class="form-control shadow-lg" id="after_paid_method" name="config[after_paid_method]" value="'.$afterPaidMethod.'" placeholder="handle">
+									<small class="text-muted">متد استاتیک؛ ۰ تا ۳ آرگومان اجباری: () | (\$invoice) | (\$invoice,\$invId) | (\$invoice,\$invId,\$gatewayId)</small>
 								</div>
 							</div>',
         ];
@@ -316,8 +344,8 @@ final class ShopPrepaidConfirmOrder
 final class ShopPrepaidConfirmHandler
 {
     /**
-     * @param  array<string, mixed>  $order
-     * @param  array<string, mixed>  $config
+     * @param  array<string, mixed>  $order  معمولاً شامل order_id (= inv_id) مثل Card2Card::pay()
+     * @param  array<string, mixed>  $config  شامل id درگاه از پنل (در صورت پاس دادن توسط هستهٔ checkout)
      */
     public static function settle(array $order, array $config): void
     {
@@ -380,12 +408,7 @@ final class ShopPrepaidConfirmKernel
      */
     public static function settle(array $order, array $config): void
     {
-        unset($config);
-
-        $invId = ShopPrepaidConfirmOrder::invoicePublicKey($order);
-        if ($invId === '') {
-            throw new RuntimeException('ShopPrepaidConfirmKernel: missing invoice id in $order (order_id / invid / orderid).');
-        }
+        $gatewayId = self::numericGatewayId($order, $config);
 
         $fqcn = self::INVOICE_MODEL;
         if (! class_exists($fqcn)) {
@@ -394,38 +417,269 @@ final class ShopPrepaidConfirmKernel
             );
         }
 
-        $invoice = $fqcn::where('inv_id', $invId)->first();
+        $invoice = self::loadInvoice($fqcn, $order);
         if ($invoice === null) {
-            throw new RuntimeException("ShopPrepaidConfirmKernel: no invoice row for inv_id={$invId}.");
+            $hint = ShopPrepaidConfirmOrder::invoicePublicKey($order);
+
+            throw new RuntimeException(
+                'ShopPrepaidConfirmKernel: invoice not found (tried inv_id from order like Card2Card, and id PK). '
+                .'order_id/invid='.($hint !== '' ? $hint : '(empty)').'.'
+            );
         }
 
+        $invId = self::invoiceInvIdFromModel($invoice);
+        if ($invId === '') {
+            throw new RuntimeException('ShopPrepaidConfirmKernel: loaded invoice has empty inv_id.');
+        }
+
+        self::tryPayWithGatewayId($fqcn, $invId, $gatewayId);
+
         if (! self::rowIsPaid($invoice)) {
-            self::markPaidBestEffort($fqcn, $invId, $invoice, $order);
+            $invoice = $fqcn::where('inv_id', $invId)->first() ?? $invoice;
+            self::markPaidBestEffort($fqcn, $invId, $invoice, $order, $gatewayId);
         }
 
         $invoice = $fqcn::where('inv_id', $invId)->first();
         if ($invoice === null || ! self::rowIsPaid($invoice)) {
             throw new RuntimeException(
                 'ShopPrepaidConfirmKernel: could not mark invoice '.$invId.' as paid. '
-                .'See Invoice model and admin payment-confirm path on your XMPlus install.'
+                .'See Invoice model and the same code path as /portal/invoice/query on your panel.'
             );
         }
 
-        self::fulfillAfterPaid($fqcn, $invId, $order);
-        self::hookPanelFulfill($invoice, $invId, $order);
+        self::fulfillAfterPaid($fqcn, $invId, $order, $gatewayId);
+        self::tryUtilityHelpers($invoice, $invId, $gatewayId);
+        self::hookPanelFulfill($invoice, $invId, $order, $gatewayId, $config);
     }
 
     /**
-     * نقطهٔ توسعه: اگر همهٔ هوک‌های بالا کافی نبود، اینجا یک خط اضافه کنید، مثلاً:
-     *   \App\Application\Services\X::confirmPaidInvoice($invoice);
+     * آخرین قلاب: منطق اختصاصی symmetricnet / XMPlus خودتان را اینجا صدا بزنید.
+     *
+     * @param  array<string, mixed>  $order
+     * @param  array<string, mixed>  $config
      */
-    public static function hookPanelFulfill(object $invoice, string $invId, array $order): void
+    public static function hookPanelFulfill(object $invoice, string $invId, array $order, ?int $gatewayId, array $config): void
     {
-        unset($invoice, $invId, $order);
+        self::tryConfiguredAfterPaidStatic($config, $invoice, $invId, $gatewayId);
+        self::tryDomainInvoiceAfterPaidStatics($invoice, $invId, $gatewayId);
     }
 
-    private static function markPaidBestEffort(string $fqcn, string $invId, object $invoice, array $order): void
+    /**
+     * از تنظیمات درگاه: after_paid_class + after_paid_method (متد استاتیک).
+     *
+     * @param  array<string, mixed>  $config
+     */
+    private static function tryConfiguredAfterPaidStatic(array $config, object $invoice, string $invId, ?int $gatewayId): void
     {
+        $cls = trim((string) ($config['after_paid_class'] ?? ''));
+        $method = trim((string) ($config['after_paid_method'] ?? 'handle'));
+        if ($cls === '' || ! class_exists($cls) || ! is_callable([$cls, $method])) {
+            return;
+        }
+        try {
+            $rm = new ReflectionMethod($cls, $method);
+            if (! $rm->isStatic()) {
+                return;
+            }
+            self::invokeStaticByRequiredArity($cls, $method, $invoice, $invId, $gatewayId);
+        } catch (Throwable $e) {
+        }
+    }
+
+    /**
+     * اگر روی پنل کلاس App\Domain\Invoice وجود داشته باشد، چند نام متد رایج را امتحان می‌کند.
+     */
+    private static function tryDomainInvoiceAfterPaidStatics(object $invoice, string $invId, ?int $gatewayId): void
+    {
+        $cls = 'App\\Domain\\Invoice';
+        if (! class_exists($cls)) {
+            return;
+        }
+        $candidates = [
+            'afterInvoicePaid', 'handlePaidInvoice', 'provisionFromInvoice', 'createServiceFromInvoice',
+            'confirmPaid', 'afterPaid', 'deliver', 'fulfill',
+        ];
+        foreach ($candidates as $method) {
+            if (! is_callable([$cls, $method])) {
+                continue;
+            }
+            try {
+                $rm = new ReflectionMethod($cls, $method);
+                if (! $rm->isStatic()) {
+                    continue;
+                }
+                self::invokeStaticByRequiredArity($cls, $method, $invoice, $invId, $gatewayId);
+
+                return;
+            } catch (Throwable $e) {
+            }
+        }
+    }
+
+    /**
+     * @param  class-string  $cls
+     */
+    private static function invokeStaticByRequiredArity(string $cls, string $method, object $invoice, string $invId, ?int $gatewayId): void
+    {
+        $rm = new ReflectionMethod($cls, $method);
+        $req = $rm->getNumberOfRequiredParameters();
+        if ($req === 0) {
+            $cls::$method();
+
+            return;
+        }
+        if ($req === 1) {
+            $cls::$method($invoice);
+
+            return;
+        }
+        if ($req === 2) {
+            $cls::$method($invoice, $invId);
+
+            return;
+        }
+        if ($req === 3) {
+            $cls::$method($invoice, $invId, $gatewayId ?? 0);
+
+            return;
+        }
+    }
+
+    /**
+     * شناسهٔ عددی درگاه (برای متدهایی مثل pay($gatewayId) روی مدل فاکتور).
+     *
+     * @param  array<string, mixed>  $order
+     * @param  array<string, mixed>  $config
+     */
+    private static function numericGatewayId(array $order, array $config): ?int
+    {
+        foreach (['gatewayid', 'gateway_id'] as $k) {
+            if (isset($order[$k]) && is_numeric($order[$k])) {
+                $n = (int) $order[$k];
+
+                return $n > 0 ? $n : null;
+            }
+        }
+        if (isset($config['id']) && is_numeric($config['id'])) {
+            $n = (int) $config['id'];
+
+            return $n > 0 ? $n : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * همان الویت Card2Card: order_id سپس سایر کلیدها؛ در نهایت id به‌عنوان کلید اصلی جدول.
+     *
+     * @param  class-string  $fqcn
+     */
+    private static function loadInvoice(string $fqcn, array $order): ?object
+    {
+        $invId = ShopPrepaidConfirmOrder::invoicePublicKey($order);
+        if ($invId !== '' && method_exists($fqcn, 'where')) {
+            $row = $fqcn::where('inv_id', $invId)->first();
+            if ($row !== null) {
+                return $row;
+            }
+        }
+        if (! empty($order['id']) && is_numeric($order['id']) && method_exists($fqcn, 'find')) {
+            $pk = (int) $order['id'];
+            if ($pk > 0) {
+                $row = $fqcn::find($pk);
+
+                return is_object($row) ? $row : null;
+            }
+        }
+
+        return null;
+    }
+
+    private static function invoiceInvIdFromModel(object $invoice): string
+    {
+        $v = $invoice->inv_id ?? $invoice->invioce_id ?? null;
+        if (is_string($v) || is_numeric($v)) {
+            return trim((string) $v);
+        }
+
+        return '';
+    }
+
+    /**
+     * بسیاری از پنل‌ها با یک متد pay(int $gatewayId) یا مشابه، هم Paid و هم سرویس را جلو می‌برند.
+     *
+     * @param  class-string  $fqcn
+     */
+    private static function tryPayWithGatewayId(string $fqcn, string $invId, ?int $gatewayId): void
+    {
+        if ($gatewayId === null || $gatewayId <= 0) {
+            return;
+        }
+        $methodNames = ['pay', 'checkout', 'completePay', 'gatewayPay', 'payWithGateway', 'executeGatewayPay'];
+        $inv = $fqcn::where('inv_id', $invId)->first();
+        if ($inv === null || self::rowIsPaid($inv)) {
+            return;
+        }
+        foreach ($methodNames as $m) {
+            if (! method_exists($inv, $m)) {
+                continue;
+            }
+            try {
+                $rm = new ReflectionMethod($inv, $m);
+                if ($rm->getNumberOfRequiredParameters() !== 1) {
+                    continue;
+                }
+                $inv->{$m}($gatewayId);
+            } catch (Throwable $e) {
+            }
+            $inv = $fqcn::where('inv_id', $invId)->first();
+            if ($inv !== null && self::rowIsPaid($inv)) {
+                return;
+            }
+        }
+    }
+
+    /**
+     * کلاس Helpers در نمونهٔ شما (Card2Card) ایمپورت شده؛ احتمالاً تکمیل پرداخت از اینجا هم صدا زده می‌شود.
+     */
+    private static function tryUtilityHelpers(object $invoice, string $invId, ?int $gatewayId): void
+    {
+        $cls = 'App\\Utility\\Helpers';
+        if (! class_exists($cls)) {
+            return;
+        }
+        $candidates = [
+            'invoicePayComplete', 'InvoicePayComplete', 'completeInvoicePayment', 'gatewayInvoicePaid',
+            'payInvoiceComplete', 'invoiceNotifySuccess', 'invoicePaid', 'paidInvoice', 'finishInvoice',
+        ];
+        foreach ($candidates as $m) {
+            if (! is_callable([$cls, $m])) {
+                continue;
+            }
+            try {
+                $rm = new ReflectionMethod($cls, $m);
+                if (! $rm->isStatic()) {
+                    continue;
+                }
+                $req = $rm->getNumberOfRequiredParameters();
+                if ($req === 1) {
+                    try {
+                        $cls::$m($invoice);
+                    } catch (Throwable $e) {
+                        $cls::$m($invId);
+                    }
+                } elseif ($req === 2 && $gatewayId !== null && $gatewayId > 0) {
+                    $cls::$m($invoice, $gatewayId);
+                }
+            } catch (Throwable $e) {
+            }
+        }
+    }
+
+    private static function markPaidBestEffort(string $fqcn, string $invId, object $invoice, array $order, ?int $gatewayId): void
+    {
+        self::tryPayWithGatewayId($fqcn, $invId, $gatewayId);
+
         self::tryMethodsOnInvoice($fqcn, $invId, self::PAY_INSTANCE_METHODS);
 
         if (self::reloadPaid($fqcn, $invId)) {
@@ -444,13 +698,14 @@ final class ShopPrepaidConfirmKernel
     /**
      * @param  class-string  $fqcn
      */
-    private static function fulfillAfterPaid(string $fqcn, string $invId, array $order): void
+    private static function fulfillAfterPaid(string $fqcn, string $invId, array $order, ?int $gatewayId): void
     {
         $invoice = $fqcn::where('inv_id', $invId)->first();
         if ($invoice === null || ! self::rowIsPaid($invoice)) {
             return;
         }
 
+        self::tryPayWithGatewayId($fqcn, $invId, $gatewayId);
         self::tryMethodsOnInvoice($fqcn, $invId, self::FULFILL_INSTANCE_METHODS);
 
         try {
