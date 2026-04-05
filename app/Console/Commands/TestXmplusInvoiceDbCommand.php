@@ -37,7 +37,9 @@ class TestXmplusInvoiceDbCommand extends Command
             return self::SUCCESS;
         }
 
-        $this->error($result['message']);
+        foreach (explode("\n", $result['message']) as $line) {
+            $this->line($line);
+        }
 
         return self::FAILURE;
     }

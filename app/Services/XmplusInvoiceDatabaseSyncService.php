@@ -45,11 +45,42 @@ final class XmplusInvoiceDatabaseSyncService
                 'message' => 'اتصال برقرار است. نسخهٔ سرور: '.$version.'. '.$tableNote,
             ];
         } catch (\Throwable $e) {
+            $hostRaw = trim((string) $settings->get('xmplus_invoice_db_host', ''));
+            $port = (int) ($settings->get('xmplus_invoice_db_port', 3306) ?: 3306);
+            $host = self::sanitizeMysqlHost($hostRaw);
+
             return [
                 'ok' => false,
-                'message' => $e->getMessage(),
+                'message' => self::formatMysqlConnectionFailureMessage($e->getMessage(), $host, $port),
             ];
         }
+    }
+
+    /**
+     * توضیح فارسی برای خطاهای رایجٔ اتصال (فایروال، bind-address، …).
+     */
+    public static function formatMysqlConnectionFailureMessage(string $pdoMessage, string $host, int $port): string
+    {
+        $msg = trim($pdoMessage);
+        $is2002 = str_contains($msg, '2002');
+        $isTimeout = $is2002 && (stripos($msg, 'timed out') !== false || stripos($msg, 'timeout') !== false);
+        $isRefused = $is2002 && stripos($msg, 'refused') !== false;
+
+        if ($isTimeout) {
+            return $msg."\n\n"
+                .'[راهنما] Connection timed out یعنی از این سرور تا '.$host.':'.$port.' در سطح TCP به‌موقع پاسخ نمی‌آید (نه خطای رمز یا نام دیتابیس). '
+                ."روی سرور دیتابیس (مثلاً Hestia):\n"
+                ."• MySQL باید به آدرس قابل‌دسترس از بیرون گوش بدهد (مثلاً bind-address در MariaDB/MySQL، نه فقط 127.0.0.1 مگر با تونل).\n"
+                ."• فایروال سرور دیتابیس و اگر هست Cloud Security Group باید پورت {$port} را از IP عمومی همین سرور VPNMarket باز کند.\n"
+                ."• از همین ماشین تست کنید: nc -zv {$host} {$port}  یا  timeout 5 bash -c \"echo >/dev/tcp/{$host}/{$port}\" 2>&1\n";
+        }
+
+        if ($isRefused) {
+            return $msg."\n\n"
+                .'[راهنما] Connection refused معمولاً یعنی به آن IP رسیدید اما روی پورت '.$port.' سرویسی گوش نمی‌دهد یا فایروال رد می‌کند.';
+        }
+
+        return $msg;
     }
 
     /**
