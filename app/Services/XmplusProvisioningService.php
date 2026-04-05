@@ -219,7 +219,8 @@ class XmplusProvisioningService
             return false;
         }
         $gw = strtolower((string) ($pay['gateway'] ?? ''));
-        foreach (['paypal', 'stripe', 'wechat', 'alipay', 'card'] as $needle) {
+        // نباید از needle عمومی «card» استفاده کرد — «Card2Card» شامل card است ولی درگاه کارت‌به‌کارت پنل است نه StripeCard.
+        foreach (['paypal', 'stripe', 'wechat', 'alipay'] as $needle) {
             if ($gw !== '' && str_contains($gw, $needle)) {
                 return true;
             }
