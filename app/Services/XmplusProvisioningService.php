@@ -170,7 +170,9 @@ class XmplusProvisioningService
         $maxAttempts = $async ? 72 : 18;
         $sleepSeconds = $async ? 5 : 2;
 
-        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds);
+        $panelBasePoll = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
+        $pollFb = $panelBasePoll !== '' ? ['panel_base' => $panelBasePoll, 'order_id' => (int) ($ctx['order_id'] ?? 0)] : null;
+        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
         $sid = $poll['sid'];
 
         return [
@@ -426,7 +428,8 @@ class XmplusProvisioningService
                 $maxAttempts = $async ? 72 : 18;
                 $sleepSeconds = $async ? 5 : 2;
             }
-            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, $customerCheckout);
+            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $order->id] : null;
+            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, $customerCheckout, $pollFb);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
 
@@ -464,7 +467,8 @@ class XmplusProvisioningService
             $async = self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
             $sleepSeconds = $async ? 5 : 2;
-            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds);
+            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $order->id] : null;
+            $result = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, null, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $result['sublink'];
             $sid = $result['sid'];
 
@@ -499,6 +503,8 @@ class XmplusProvisioningService
                 'gateway_options' => $options,
                 'credentials_message' => $credentialsMessage,
                 'wallet_already_charged' => $order->status === 'paid',
+                'order_id' => $order->id,
+                'panel_base' => $panelBase,
             ], now()->addHours(48));
 
             return [
@@ -637,7 +643,8 @@ class XmplusProvisioningService
             $async = is_array($pay) && self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
             $sleepSeconds = $async ? 5 : 2;
-            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds);
+            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $renewalOrder->id] : null;
+            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
 
@@ -672,6 +679,8 @@ class XmplusProvisioningService
                 'gateway_options' => $options,
                 'credentials_message' => null,
                 'wallet_already_charged' => $renewalOrder->status === 'paid',
+                'order_id' => $renewalOrder->id,
+                'panel_base' => $panelBase,
             ], now()->addHours(48));
 
             return [
@@ -682,7 +691,8 @@ class XmplusProvisioningService
         }
 
         if ($invid !== '') {
-            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, false);
+            $pollFb = $panelBase !== '' ? ['panel_base' => $panelBase, 'order_id' => $renewalOrder->id] : null;
+            $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, false, 18, 2, false, $pollFb);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
 
@@ -730,6 +740,35 @@ class XmplusProvisioningService
     }
 
     /**
+     * وقتی فاکتور در API Paid است اما هنوز sublink/servicelist برنمی‌گردد (مشکل یا تأخیر پنل).
+     *
+     * @param  array{panel_base: string, order_id?: int}  $ctx
+     */
+    protected static function formatPaidInvoiceWithoutSublinkUserNotice(string $email, string $invid, array $ctx): string
+    {
+        $panel = rtrim((string) ($ctx['panel_base'] ?? ''), '/');
+        $orderId = (int) ($ctx['order_id'] ?? 0);
+        $lines = [
+            '⚠️ فاکتور در XMPlus با وضعیت Paid ثبت شده، اما API هنوز لینک اشتراک (subscription) را برنمی‌گرداند.',
+            '',
+            'احتمالاً سرویس در پنل هنوز ساخته نشده، نیاز به تأیید دستی دارد، یا نسخهٔ پنل با Client API هم‌خوان نیست.',
+            '',
+        ];
+        if ($panel !== '') {
+            $lines[] = '🌐 ورود به پنل کاربری: '.$panel;
+        }
+        $lines[] = '📧 ایمیل پنل: '.$email;
+        $lines[] = '📄 شناسه فاکتور (invid): '.$invid;
+        if ($orderId > 0) {
+            $lines[] = '🛒 شماره سفارش فروشگاه: #'.$orderId;
+        }
+        $lines[] = '';
+        $lines[] = 'لطفاً از بخش «سرویس‌ها / اشتراک» همان پنل لینک را بردارید. اگر سرویسی دیده نمی‌شود با پشتیبانی هاست XMPlus تماس بگیرید.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
      * @param  array<string, mixed>  $row
      */
     protected static function apiOk(array $row): bool
@@ -759,7 +798,8 @@ class XmplusProvisioningService
         bool $autoPayGatewayConfigured = false,
         int $maxAttempts = 18,
         int $sleepSeconds = 2,
-        bool $shopCollectedCustomerGateway = false
+        bool $shopCollectedCustomerGateway = false,
+        ?array $paidWithoutSublinkFallbackContext = null
     ): array {
         $lastStatus = null;
         $inv = [];
@@ -890,6 +930,19 @@ class XmplusProvisioningService
         }
 
         if (strcasecmp($statusLabel, 'Paid') === 0) {
+            $fbPanel = is_array($paidWithoutSublinkFallbackContext)
+                ? trim((string) ($paidWithoutSublinkFallbackContext['panel_base'] ?? ''))
+                : '';
+            if ($fbPanel !== '') {
+                $notice = self::formatPaidInvoiceWithoutSublinkUserNotice($email, $invid, $paidWithoutSublinkFallbackContext);
+                $api->log('warning', 'XMPlus: فاکتور Paid اما بدون لینک اشتراک در API — تحویل پیام راهنما به کاربر', [
+                    'invid' => $invid,
+                    'order_id' => $paidWithoutSublinkFallbackContext['order_id'] ?? null,
+                    'wait_seconds' => $totalWait,
+                ]);
+
+                return ['sublink' => $notice, 'sid' => null];
+            }
             throw new RuntimeException(
                 'XMPlus: فاکتور در API با وضعیت Paid است اما پس از '.$totalWait.' ثانیه هنوز لینک اشتراک از account/info / service/info دیده نشد. '.
                 'گاهی پنل XMPlus سرویس را با تأخیر می‌سازد یا تا زمان تأیید دستی در پنل معلق می‌ماند. چند دقیقه بعد در VPNMarket دوباره «تایید و اجرا» بزنید، یا در پنل XMPlus سرویس/اشتراک همان کاربر را بررسی کنید.'
@@ -1204,6 +1257,8 @@ class XmplusProvisioningService
             return ['ok' => false, 'error' => 'کاربر سفارش نامعتبر است.', 'gateways' => []];
         }
 
+        $panelBase = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
+
         try {
             $api = self::fromSettings($settings);
         } catch (InvalidArgumentException $e) {
@@ -1268,6 +1323,8 @@ class XmplusProvisioningService
             'gateway_options' => $options,
             'credentials_message' => $credentialsMessage,
             'wallet_already_charged' => false,
+            'order_id' => $order->id,
+            'panel_base' => $panelBase,
         ], now()->addHours(48));
 
         return ['ok' => true, 'error' => null, 'gateways' => $gateways];
@@ -1450,7 +1507,9 @@ class XmplusProvisioningService
 
         $maxAttempts = 18;
         $sleepSeconds = 2;
-        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds, false);
+        $pb = trim((string) ($ctx['panel_base'] ?? ''));
+        $pollFb = $pb !== '' ? ['panel_base' => $pb, 'order_id' => (int) ($ctx['order_id'] ?? 0)] : null;
+        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
         $sid = $poll['sid'];
 
         return [
@@ -1480,7 +1539,9 @@ class XmplusProvisioningService
             throw new RuntimeException('XMPlus: بافتار تکمیل پرداخت ناقص است.');
         }
 
-        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, 72, 5, false);
+        $pb = trim((string) ($ctx['panel_base'] ?? ''));
+        $pollFb = $pb !== '' ? ['panel_base' => $pb, 'order_id' => (int) ($ctx['order_id'] ?? 0)] : null;
+        $poll = self::pollForSublink($api, $email, $passwd, $invid, $pid, $knownSid, true, 72, 5, false, $pollFb);
         $sid = $poll['sid'];
 
         return [
