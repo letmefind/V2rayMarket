@@ -114,9 +114,10 @@ class XmplusService
             ->withToken($token)
             ->post($url, $body);
 
+        $rawBody = $response->body();
         $parsed = $response->json();
         if (! is_array($parsed)) {
-            $parsed = ['_raw' => $response->body()];
+            $parsed = self::decodeJsonFromMessyBody($rawBody) ?? ['_raw' => $rawBody];
         }
 
         $this->log('info', "XMPlus response: POST {$path}", [
@@ -149,6 +150,36 @@ class XmplusService
     }
 
     /**
+     * وقتی پنل XMPlus قبل/بعد JSON هشدار PHP یا HTML چاپ کند، json() خالی می‌شود؛
+     * این تابع شیء JSON را از اولین «{» تا آخرین «}» استخراج می‌کند.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected static function decodeJsonFromMessyBody(string $body): ?array
+    {
+        $body = trim($body);
+        if ($body === '') {
+            return null;
+        }
+        $try = json_decode($body, true);
+        if (is_array($try)) {
+            return $try;
+        }
+        $start = strpos($body, '{');
+        if ($start === false) {
+            return null;
+        }
+        $end = strrpos($body, '}');
+        if ($end === false || $end < $start) {
+            return null;
+        }
+        $slice = substr($body, $start, $end - $start + 1);
+        $try = json_decode($slice, true);
+
+        return is_array($try) ? $try : null;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function registerSendCode(string $name, string $email): array
@@ -164,17 +195,14 @@ class XmplusService
      */
     public function register(string $name, string $email, string $passwd, string $code, string $aff = ''): array
     {
-        $body = [
+        // همیشه aff بفرستیم؛ برخی نسخه‌های پنل بدون isset روی $_POST/بدنه به aff دست می‌زنند و Warning قبل از JSON می‌دهند.
+        return $this->postClient('/api/client/register', [
             'name' => $name,
             'email' => $email,
             'passwd' => $passwd,
             'code' => $code,
-        ];
-        if ($aff !== '') {
-            $body['aff'] = $aff;
-        }
-
-        return $this->postClient('/api/client/register', $body, 'register');
+            'aff' => $aff,
+        ], 'register');
     }
 
     /**
