@@ -69,12 +69,18 @@ final class XmplusInvoiceDatabaseSyncService
 
         $affected = $stmt->rowCount();
 
-        Log::channel('xmplus')->info('XMPlus invoice DB sync: mark paid', [
+        $ctx = [
             'inv_id' => $invId,
             'table' => $table,
-            'rows' => $affected,
+            'rows_affected' => $affected,
             'paid_date' => $paidDate,
-        ]);
+            'paid_amount' => $paidAmount,
+        ];
+        if ($affected === 0) {
+            Log::channel('xmplus')->warning('XMPlus invoice DB sync: UPDATE اجرا شد اما هیچ ردیفی تغییر نکرد (inv_id نامعتبر یا قبلاً status≠0)', $ctx);
+        } else {
+            Log::channel('xmplus')->info('XMPlus invoice DB sync: فاکتور در DB پنل به Paid به‌روز شد', $ctx);
+        }
 
         return $affected;
     }

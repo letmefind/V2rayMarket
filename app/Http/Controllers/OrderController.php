@@ -59,7 +59,13 @@ class OrderController extends Controller
             return redirect()->route('dashboard')->with('status', 'این سفارش قبلاً پرداخت شده است.');
         }
 
-        return view('payment.show', ['order' => $order]);
+        $dashSettings = Setting::all()->pluck('value', 'key');
+        $xmplusWalletDisplay = XmplusProvisioningService::fetchXmplusWalletDisplay(Auth::user(), $dashSettings);
+
+        return view('payment.show', [
+            'order' => $order,
+            'xmplusWalletDisplay' => $xmplusWalletDisplay,
+        ]);
     }
 
     /**
@@ -350,6 +356,11 @@ class OrderController extends Controller
 
         if (!$order->plan) {
             return redirect()->back()->with('error', 'این عملیات برای شارژ کیف پول مجاز نیست.');
+        }
+
+        $panelSettings = Setting::all()->pluck('value', 'key');
+        if (($panelSettings->get('panel_type') ?? '') === 'xmplus') {
+            return redirect()->back()->with('error', 'در حالت پنل XMPlus موجودی و پرداخت از کیف پول در VPNMarket معنا ندارد؛ از پنل XMPlus (طبق account/info) یا روش‌های دیگر پرداخت استفاده کنید.');
         }
 
         $user = auth()->user();

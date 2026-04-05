@@ -42,6 +42,14 @@ class WebhookController extends Controller
 {
     protected $settings;
 
+    protected function isXmplusPanel(): bool
+    {
+        if (! $this->settings) {
+            $this->settings = Setting::all()->pluck('value', 'key');
+        }
+
+        return ($this->settings->get('panel_type') ?? '') === 'xmplus';
+    }
 
     public function sendBroadcastMessage(string $chatId, string $message): bool
     {
@@ -1345,6 +1353,7 @@ class WebhookController extends Controller
     {
         $plan = $order->plan;
         $balance = $user->balance ?? 0;
+        $xmplus = $this->isXmplusPanel();
 
         $message = "🛒 *تایید خرید*\n\n";
         $message .= "▫️ پلن: *{$this->escape($plan->name)}*\n";
@@ -1360,8 +1369,19 @@ class WebhookController extends Controller
             $message .= "▫️ قیمت: *" . number_format($order->amount) . " تومان*\n";
         }
 
-        $message .= "▫️ موجودی کیف پول: *" . number_format($balance) . " تومان*\n\n";
-        $message .= "لطفاً روش پرداخت را انتخاب کنید:";
+        if ($xmplus) {
+            $snap = XmplusProvisioningService::fetchXmplusWalletDisplay($user, $this->settings);
+            if (is_array($snap) && ! empty($snap['linked']) && empty($snap['error'])) {
+                $message .= '▫️ موجودی (XMPlus): *'.$this->escape((string) ($snap['money'] ?? '—'))."*\n";
+            } elseif (is_array($snap) && empty($snap['linked'])) {
+                $message .= "▫️ موجودی XMPlus: پس از اتصال حساب\n";
+            } elseif (is_array($snap) && ! empty($snap['error'])) {
+                $message .= "▫️ موجودی XMPlus: خطا در API\n";
+            }
+        } else {
+            $message .= "▫️ موجودی کیف پول: *" . number_format($balance) . " تومان*\n";
+        }
+        $message .= "\nلطفاً روش پرداخت را انتخاب کنید:";
 
         $keyboard = Keyboard::make()->inline();
 
@@ -1371,7 +1391,7 @@ class WebhookController extends Controller
             $keyboard->row([Keyboard::inlineButton(['text' => '❌ حذف کد تخفیف', 'callback_data' => "remove_discount_{$order->id}"])]);
         }
 
-        if ($balance >= $order->amount) {
+        if (! $xmplus && $balance >= $order->amount) {
             $keyboard->row([Keyboard::inlineButton(['text' => '✅ پرداخت با کیف پول', 'callback_data' => "pay_wallet_order_{$order->id}"])]);
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "pay_card_{$order->id}"])]);
@@ -1469,6 +1489,17 @@ class WebhookController extends Controller
             $order = $user->orders()->create([
                 'plan_id' => $plan->id, 'status' => 'pending', 'source' => 'telegram', 'amount' => $plan->price
             ]);
+        }
+
+        if ($this->isXmplusPanel()) {
+            $this->sendOrEditMessage(
+                $user->telegram_chat_id,
+                "❌ در حالت XMPlus پرداخت با کیف پول این ربات غیرفعال است.\n\nاز کارت، کریپتو یا پنل XMPlus استفاده کنید.",
+                Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به پلن‌ها', 'callback_data' => '/plans'])]),
+                $messageId
+            );
+
+            return;
         }
 
         if ($user->balance < $order->amount) {
@@ -2258,17 +2289,44 @@ class WebhookController extends Controller
 
     protected function sendWalletMenu($user, $messageId = null)
     {
-        $balance = number_format($user->balance ?? 0);
         $message = "💰 *کیف پول شما*\n\n";
-        $message .= "موجودی فعلی: *{$balance} تومان*\n\n";
-        $message .= "می‌توانید حساب خود را شارژ کنید یا تاریخچه تراکنش‌ها را مشاهده نمایید:";
+        $keyboard = Keyboard::make()->inline();
 
-        $keyboard = Keyboard::make()->inline()
-            ->row([
-                Keyboard::inlineButton(['text' => '💳 شارژ حساب', 'callback_data' => '/deposit']),
-                Keyboard::inlineButton(['text' => '📜 تاریخچه تراکنش‌ها', 'callback_data' => '/transactions']),
-            ])
-            ->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start'])]);
+        if ($this->isXmplusPanel()) {
+            $snap = XmplusProvisioningService::fetchXmplusWalletDisplay($user, $this->settings);
+            $panel = is_array($snap) ? (string) ($snap['panel_url'] ?? '') : '';
+            if ($panel === '') {
+                $panel = rtrim((string) $this->settings->get('xmplus_panel_url', ''), '/');
+            }
+            $message .= "در حالت *XMPlus* موجودی طبق API (`/api/client/account/info` → `money`) است، نه کیف پول VPNMarket.\n\n";
+            if (is_array($snap) && empty($snap['linked'])) {
+                $message .= 'پس از اولین خرید، حساب شما به XMPlus وصل می‌شود و موجودی اینجا نمایش داده می‌شود.';
+            } elseif (is_array($snap) && ! empty($snap['error'])) {
+                $message .= '⚠️ خطا در دریافت موجودی از XMPlus.';
+            } elseif (is_array($snap)) {
+                $m = $this->escape((string) ($snap['money'] ?? '—'));
+                $message .= "موجودی (XMPlus): *{$m}*";
+                if (! empty($snap['username'])) {
+                    $message .= "\n▫️ کاربر: ".$this->escape((string) $snap['username']);
+                }
+            }
+            $message .= "\n\nشارژ و تراکنش مالی را از *پنل XMPlus* انجام دهید.";
+            if ($panel !== '') {
+                $keyboard->row([Keyboard::inlineButton(['text' => '🔗 ورود به پنل XMPlus', 'url' => $panel])]);
+            }
+            $keyboard->row([Keyboard::inlineButton(['text' => '📜 تاریخچه (VPNMarket)', 'callback_data' => '/transactions'])]);
+        } else {
+            $balance = number_format($user->balance ?? 0);
+            $message .= "موجودی فعلی: *{$balance} تومان*\n\n";
+            $message .= 'می‌توانید حساب خود را شارژ کنید یا تاریخچه تراکنش‌ها را مشاهده نمایید:';
+            $keyboard
+                ->row([
+                    Keyboard::inlineButton(['text' => '💳 شارژ حساب', 'callback_data' => '/deposit']),
+                    Keyboard::inlineButton(['text' => '📜 تاریخچه تراکنش‌ها', 'callback_data' => '/transactions']),
+                ]);
+        }
+
+        $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start'])]);
 
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
@@ -2791,6 +2849,24 @@ class WebhookController extends Controller
     }
     protected function showDepositOptions($user, $messageId)
     {
+        if ($this->isXmplusPanel()) {
+            $snap = XmplusProvisioningService::fetchXmplusWalletDisplay($user, $this->settings);
+            $panel = is_array($snap) ? (string) ($snap['panel_url'] ?? '') : '';
+            if ($panel === '') {
+                $panel = rtrim((string) $this->settings->get('xmplus_panel_url', ''), '/');
+            }
+            $message = "💳 *شارژ و موجودی (XMPlus)*\n\nدر این حالت شارژ حساب از طریق *پنل XMPlus* انجام می‌شود، نه کیف پول VPNMarket.";
+            $keyboard = Keyboard::make()->inline();
+            if ($panel !== '') {
+                $keyboard->row([Keyboard::inlineButton(['text' => '🔗 ورود به پنل XMPlus', 'url' => $panel])]);
+            }
+            $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به کیف پول', 'callback_data' => '/wallet'])]);
+
+            $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
+
+            return;
+        }
+
         $message = "💳 *شارژ کیف پول*\n\nلطفاً مبلغ مورد نظر برای شارژ را انتخاب کنید یا مبلغ دلخواه خود را وارد نمایید:";
         $keyboard = Keyboard::make()->inline();
 
@@ -2832,6 +2908,12 @@ class WebhookController extends Controller
 
     protected function promptForCustomDeposit($user, $messageId)
     {
+        if ($this->isXmplusPanel()) {
+            $this->showDepositOptions($user, $messageId);
+
+            return;
+        }
+
         $user->update(['bot_state' => 'awaiting_deposit_amount']);
         $keyboard = Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '❌ انصراف', 'callback_data' => '/cancel_action'])]);
         $this->sendOrEditMessage($user->telegram_chat_id, "💳 لطفاً مبلغ دلخواه خود را (به تومان، حداقل ۱۰,۰۰۰) در یک پیام ارسال کنید:", $keyboard, $messageId);
@@ -2839,6 +2921,13 @@ class WebhookController extends Controller
 
     protected function processDepositAmount($user, $amount, $messageId = null)
     {
+        if ($this->isXmplusPanel()) {
+            $user->update(['bot_state' => null]);
+            $this->showDepositOptions($user, $messageId);
+
+            return;
+        }
+
         $amount = (int) preg_replace('/[^\d]/', '', $amount);
         $minDeposit = (int) $this->settings->get('min_deposit_amount', 10000);
 
@@ -2931,16 +3020,28 @@ class WebhookController extends Controller
         $plan = $originalOrder->plan;
         $balance = $user->balance ?? 0;
         $expiresAt = Carbon::parse($originalOrder->expires_at);
+        $xmplus = $this->isXmplusPanel();
 
         $message = "🔄 *تایید تمدید سرویس*\n\n";
         $message .= "▫️ سرویس: *{$this->escape($plan->name)}*\n";
         $message .= "▫️ تاریخ انقضای فعلی: *" . $this->escape($expiresAt->format('Y/m/d')) . "*\n";
         $message .= "▫️ هزینه تمدید ({$plan->duration_days} روز): *" . number_format($plan->price) . " تومان*\n";
-        $message .= "▫️ موجودی کیف پول: *" . number_format($balance) . " تومان*\n\n";
-        $message .= "لطفاً روش پرداخت برای تمدید را انتخاب کنید:";
+        if ($xmplus) {
+            $snap = XmplusProvisioningService::fetchXmplusWalletDisplay($user, $this->settings);
+            if (is_array($snap) && ! empty($snap['linked']) && empty($snap['error'])) {
+                $message .= '▫️ موجودی (XMPlus): *'.$this->escape((string) ($snap['money'] ?? '—'))."*\n";
+            } elseif (is_array($snap) && empty($snap['linked'])) {
+                $message .= "▫️ موجودی XMPlus: پس از اتصال حساب\n";
+            } elseif (is_array($snap) && ! empty($snap['error'])) {
+                $message .= "▫️ موجودی XMPlus: خطا در API\n";
+            }
+        } else {
+            $message .= "▫️ موجودی کیف پول: *" . number_format($balance) . " تومان*\n";
+        }
+        $message .= "\nلطفاً روش پرداخت برای تمدید را انتخاب کنید:";
 
         $keyboard = Keyboard::make()->inline();
-        if ($balance >= $plan->price) {
+        if (! $xmplus && $balance >= $plan->price) {
             $keyboard->row([Keyboard::inlineButton(['text' => '✅ تمدید با کیف پول (آنی)', 'callback_data' => "renew_pay_wallet_{$originalOrderId}"])]);
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 تمدید با کارت به کارت', 'callback_data' => "renew_pay_card_{$originalOrderId}"])]);
@@ -2966,6 +3067,17 @@ class WebhookController extends Controller
         }
 
         $plan = $originalOrder->plan;
+
+        if ($this->isXmplusPanel()) {
+            $this->sendOrEditMessage(
+                $user->telegram_chat_id,
+                "❌ در حالت XMPlus تمدید با کیف پول این ربات غیرفعال است.",
+                Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => '/my_services'])]),
+                $messageId
+            );
+
+            return;
+        }
 
         // بررسی موجودی قبل از هر کاری
         if ($user->balance < $plan->price) {

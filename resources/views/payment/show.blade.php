@@ -110,7 +110,30 @@
                     </h3>
                     <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
 
+                        @php
+                            $xwp = $xmplusWalletDisplay ?? null;
+                            $isXmplusPay = is_array($xwp) && (($xwp['mode'] ?? '') === 'xmplus');
+                        @endphp
                         @if ($order->plan)
+                            @if ($isXmplusPay)
+                                <div class="w-full text-center p-6 border-2 rounded-lg border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20">
+                                    <h4 class="font-bold text-gray-900 dark:text-gray-100">موجودی XMPlus (API account/info)</h4>
+                                    @if (empty($xwp['linked']))
+                                        <p class="text-sm text-gray-600 dark:text-gray-400 mt-2 text-right">پس از اولین خرید، حساب شما به XMPlus متصل می‌شود و مقدار <code class="text-xs">money</code> اینجا نمایش داده می‌شود.</p>
+                                    @elseif (! empty($xwp['error']))
+                                        <p class="text-sm text-red-600 mt-2">{{ $xwp['error'] }}</p>
+                                    @else
+                                        <p class="text-lg font-semibold text-green-600 dark:text-green-400 mt-2" dir="ltr">{{ $xwp['money'] ?? '—' }}</p>
+                                        @if (! empty($xwp['username']))
+                                            <p class="text-xs text-gray-500 mt-1">{{ $xwp['username'] }}</p>
+                                        @endif
+                                    @endif
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-3 text-right">پرداخت «از کیف پول VPNMarket» در این حالت غیرفعال است؛ از کارت، کریپتو یا پنل XMPlus استفاده کنید.</p>
+                                    @if (! empty($xwp['panel_url']))
+                                        <a href="{{ $xwp['panel_url'] }}" target="_blank" rel="noopener noreferrer" class="inline-block mt-3 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">ورود به پنل XMPlus</a>
+                                    @endif
+                                </div>
+                            @else
                             <form method="POST" action="{{ route('payment.wallet.process', $order->id) }}">
                                 @csrf
                                 <button type="submit"
@@ -131,6 +154,7 @@
                                     @endif
                                 </button>
                             </form>
+                            @endif
                         @endif
 
                         <form method="POST" action="{{ route('payment.card.process', $order->id) }}">

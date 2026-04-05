@@ -431,7 +431,10 @@ class XmplusProvisioningService
         try {
             XmplusInvoiceDatabaseSyncService::markInvoicePaid($settings, $invid, $order);
         } catch (\Throwable $e) {
-            Log::channel('xmplus')->warning('XMPlus invoice DB sync: '.$e->getMessage(), ['invid' => $invid]);
+            Log::channel('xmplus')->warning('XMPlus invoice DB sync خطا: '.$e->getMessage(), [
+                'invid' => $invid,
+                'order_id' => $order?->id,
+            ]);
         }
     }
 
@@ -788,6 +791,60 @@ class XmplusProvisioningService
         }
 
         return null;
+    }
+
+    /**
+     * موجودی نمایشی کیف پول از API: POST /api/client/account/info → data.money
+     *
+     * @return array<string, mixed>|null  null = پنل XMPlus فعال نیست (از balance محلی VPNMarket استفاده کنید)
+     */
+    public static function fetchXmplusWalletDisplay(User $user, Collection $settings): ?array
+    {
+        if (($settings->get('panel_type') ?? '') !== 'xmplus') {
+            return null;
+        }
+        $panelBase = rtrim((string) $settings->get('xmplus_panel_url', ''), '/');
+        $cacheKey = 'xmplus_wallet_v1:'.$user->id;
+
+        return Cache::remember($cacheKey, 45, function () use ($user, $settings, $panelBase) {
+            $email = $user->xmplus_client_email;
+            $pwd = $user->xmplus_client_password;
+            if (! is_string($email) || $email === '' || ! is_string($pwd) || $pwd === '') {
+                return [
+                    'mode' => 'xmplus',
+                    'linked' => false,
+                    'panel_url' => $panelBase,
+                    'money' => null,
+                    'username' => '',
+                ];
+            }
+            try {
+                $api = self::fromSettings($settings);
+                $acc = $api->accountInfo($email, $pwd);
+                $payload = self::extractAccountPayload($acc);
+                $money = $payload['money'] ?? (is_array($acc['data'] ?? null) ? ($acc['data']['money'] ?? '—') : '—');
+                $username = $payload['username'] ?? (is_array($acc['data'] ?? null) ? ($acc['data']['username'] ?? '') : '');
+
+                return [
+                    'mode' => 'xmplus',
+                    'linked' => true,
+                    'panel_url' => $panelBase,
+                    'money' => is_string($money) ? $money : json_encode($money),
+                    'username' => is_string($username) ? $username : '',
+                ];
+            } catch (\Throwable $e) {
+                Log::channel('xmplus')->warning('XMPlus fetchXmplusWalletDisplay: '.$e->getMessage(), ['user_id' => $user->id]);
+
+                return [
+                    'mode' => 'xmplus',
+                    'linked' => true,
+                    'panel_url' => $panelBase,
+                    'money' => null,
+                    'username' => '',
+                    'error' => $e->getMessage(),
+                ];
+            }
+        });
     }
 
     /**
