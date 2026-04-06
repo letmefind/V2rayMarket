@@ -39,11 +39,17 @@ $password = (string) ($settings->get('xmplus_invoice_db_password') ?? '');
 $table = trim((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
 
 // Parse database name (Hestia format: admin_web.admin_xmplus)
-if (str_contains($database, '.')) {
-    $parts = explode('.', $database, 2);
-    if (count($parts) === 2 && ($username === '' || $username === $database)) {
-        $username = $parts[0];
-        $database = $parts[1];
+if (str_contains($database, '.') && $username === $database) {
+    if (preg_match('/^([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)$/', $database, $m)) {
+        $username = $m[1];
+        $database = $m[2];
+        echo "🔧 Parse شد: user={$username}, db={$database}\n";
+    }
+} elseif (str_contains($database, '.') && $username === '') {
+    if (preg_match('/^([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)$/', $database, $m)) {
+        $username = $m[1];
+        $database = $m[2];
+        echo "🔧 Parse شد: user={$username}, db={$database}\n";
     }
 }
 
