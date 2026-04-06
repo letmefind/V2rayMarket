@@ -11,9 +11,11 @@ use App\Services\MarzbanService;
 use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
 use App\Support\XmplusGatewayTelegram;
+use App\Support\XmplusServerHelper;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Telegram\Bot\Laravel\Facades\Telegram;
+use Telegram\Bot\Keyboard\Keyboard;
 
 final class ApprovePendingOrderAction
 {
@@ -571,17 +573,80 @@ return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛
             $description = ($isRenewal ? 'تمدید سرویس' : 'خرید سرویس')." {$plan->name}";
             Transaction::create(['user_id' => $user->id, 'order_id' => $order->id, 'amount' => $plan->price, 'type' => 'purchase', 'status' => 'completed', 'description' => $description]);
             OrderPaid::dispatch($locked);
+            
+            // دریافت اطلاعات سرورها از XMPlus (اگر panel_client_id موجود باشد)
+            $servers = [];
+            $sid = ! empty($extraOrderAttrs['panel_client_id']) ? (int) $extraOrderAttrs['panel_client_id'] : null;
+            $email = $extraOrderAttrs['panel_username'] ?? $user->xmplus_client_email ?? null;
+            $passwd = $result['plain_password'] ?? $user->xmplus_client_password ?? null;
+            
+            if ($sid !== null && $sid > 0 && ! empty($email) && ! empty($passwd)) {
+                try {
+                    $api = XmplusProvisioningService::fromSettings($settings);
+                    $serviceInfo = $api->serviceInfo($email, $passwd, $sid);
+                    
+                    if (! empty($serviceInfo['servers']) && is_array($serviceInfo['servers'])) {
+                        $servers = $serviceInfo['servers'];
+                        XmplusServerHelper::cacheServers($order->id, $servers);
+                        Log::channel('xmplus')->info('XMPlus servers cached (approve)', [
+                            'order_id' => $order->id,
+                            'sid' => $sid,
+                            'servers_count' => count($servers),
+                        ]);
+                    }
+                } catch (\Throwable $e) {
+                    Log::channel('xmplus')->warning('ApprovePendingOrder: خطا در دریافت servers', [
+                        'error' => $e->getMessage(),
+                        'order_id' => $order->id,
+                        'sid' => $sid,
+                    ]);
+                }
+            }
 
             if ($user->telegram_chat_id) {
                 try {
                     $telegramMessage = $isRenewal
-                        ? "✅ سرویس شما (*{$plan->name}*) با موفقیت تمدید شد.\n\n❗️*نکته مهم:* لینک اشتراک شما تغییر کرده است. لطفاً لینک جدید زیر را کپی و در نرم‌افزار خود آپدیت کنید:\n\n`".$finalConfig.'`'
-                        : "✅ سرویس شما (*{$plan->name}*) با موفقیت فعال شد.\n\nاطلاعات کانفیگ شما:\n`".$finalConfig."`\n\nمی‌توانید لینک بالا را کپی کرده و در نرم‌افزار خود import کنید.";
+                        ? "✅ سرویس شما (<b>{$plan->name}</b>) با موفقیت تمدید شد.\n\n❗️<b>نکته مهم:</b> لینک اشتراک شما تغییر کرده است. لطفاً لینک جدید زیر را کپی و در نرم‌افزار خود آپدیت کنید:\n\n<code>".$finalConfig.'</code>'
+                        : "✅ سرویس شما (<b>{$plan->name}</b>) با موفقیت فعال شد.\n\nاطلاعات کانفیگ شما:\n<code>".$finalConfig."</code>\n\nمی‌توانید لینک بالا را کپی کرده و در نرم‌افزار خود import کنید.";
                     if ($telegramAppend) {
                         $telegramMessage .= "\n\n".$telegramAppend;
                     }
+                    
+                    // ساخت دکمه‌های سرورها
+                    $keyboard = null;
+                    if (! empty($servers)) {
+                        $serverButtons = XmplusServerHelper::buildServerButtons($order->id, $servers);
+                        
+                        // اضافه کردن دکمه‌های پایین پیام
+                        $serverButtons[] = [
+                            ['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services'],
+                            ['text' => '🏠 منوی اصلی', 'callback_data' => '/start'],
+                        ];
+                        
+                        $keyboard = Keyboard::make()->inline()->setResizeKeyboard(true);
+                        foreach ($serverButtons as $row) {
+                            $buttons = [];
+                            foreach ($row as $btn) {
+                                $buttons[] = Keyboard::inlineButton($btn);
+                            }
+                            $keyboard->row(...$buttons);
+                        }
+                        
+                        $telegramMessage .= "\n\n━━━━━━━━━━━━━━━━━\n🖥 <b>سرورهای موجود</b>\n\n📍 برای مشاهده جزئیات و QR Code هر سرور، روی دکمه آن کلیک کنید:";
+                    }
+                    
                     Telegram::setAccessToken($settings->get('telegram_bot_token'));
-                    Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => $telegramMessage, 'parse_mode' => 'Markdown']);
+                    $messageParams = [
+                        'chat_id' => $user->telegram_chat_id,
+                        'text' => $telegramMessage,
+                        'parse_mode' => 'HTML',
+                    ];
+                    
+                    if ($keyboard) {
+                        $messageParams['reply_markup'] = $keyboard;
+                    }
+                    
+                    Telegram::sendMessage($messageParams);
                 } catch (\Exception $e) {
                     Log::error('Failed to send Telegram notification: '.$e->getMessage());
                 }

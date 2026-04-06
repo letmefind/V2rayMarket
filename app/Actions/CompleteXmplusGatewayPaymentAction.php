@@ -504,31 +504,46 @@ final class CompleteXmplusGatewayPaymentAction
 
         // دریافت اطلاعات سرورها از XMPlus برای نمایش دکمه‌ها
         $servers = [];
-        if (! empty($prov['panel_client_id']) && ! empty($ctx['email']) && ! empty($ctx['passwd'])) {
+        $email = $prov['panel_username'] ?? $ctx['email'] ?? null;
+        $passwd = $ctx['passwd'] ?? null;
+        $sid = ! empty($prov['panel_client_id']) ? (int) $prov['panel_client_id'] : null;
+        
+        if ($sid !== null && $sid > 0 && ! empty($email) && ! empty($passwd)) {
             try {
                 $api = XmplusProvisioningService::fromSettings($settings);
-                $serviceInfo = $api->serviceInfo(
-                    (string) $ctx['email'],
-                    (string) $ctx['passwd'],
-                    (int) $prov['panel_client_id']
-                );
+                $serviceInfo = $api->serviceInfo($email, $passwd, $sid);
                 
                 if (! empty($serviceInfo['servers']) && is_array($serviceInfo['servers'])) {
                     $servers = $serviceInfo['servers'];
-                    // Cache کردن سرورها برای استفاده بعدی
                     XmplusServerHelper::cacheServers($order->id, $servers);
+                    Log::channel('xmplus')->info('XMPlus servers cached', [
+                        'order_id' => $order->id,
+                        'sid' => $sid,
+                        'servers_count' => count($servers),
+                    ]);
                 }
             } catch (\Throwable $e) {
-                Log::debug('CompleteXmplusGatewayPayment: خطا در دریافت servers', ['error' => $e->getMessage()]);
+                Log::channel('xmplus')->warning('CompleteXmplusGatewayPayment: خطا در دریافت servers', [
+                    'error' => $e->getMessage(),
+                    'order_id' => $order->id,
+                    'sid' => $sid,
+                ]);
             }
+        } else {
+            Log::channel('xmplus')->debug('CompleteXmplusGatewayPayment: شرایط برای دریافت servers فراهم نیست', [
+                'order_id' => $order->id,
+                'has_sid' => $sid !== null && $sid > 0,
+                'has_email' => ! empty($email),
+                'has_passwd' => ! empty($passwd),
+            ]);
         }
 
         if ($user->telegram_chat_id) {
             try {
                 Telegram::setAccessToken($settings->get('telegram_bot_token'));
                 $telegramMessage = $isRenewal
-                    ? "✅ سرویس شما (*{$plan->name}*) تمدید شد.\n\nلینک جدید:\n`".$finalConfig.'`'
-                    : "✅ سرویس شما (*{$plan->name}*) فعال شد.\n\n`".$finalConfig.'`';
+                    ? "✅ سرویس شما (<b>{$plan->name}</b>) تمدید شد.\n\nلینک جدید:\n<code>".$finalConfig.'</code>'
+                    : "✅ سرویس شما (<b>{$plan->name}</b>) فعال شد.\n\n<code>".$finalConfig.'</code>';
                 if ($telegramAppend) {
                     $telegramMessage .= "\n\n".$telegramAppend;
                 }
