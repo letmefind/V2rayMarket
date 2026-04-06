@@ -463,6 +463,8 @@ final class ShopPrepaidConfirmKernel
      */
     public static function hookPanelFulfill(object $invoice, string $invId, array $order, ?int $gatewayId, array $config): void
     {
+        // symmetricnet: Guest\CallbackController نشان می‌دهد مسیر واقعی ساخت سرویس این فراخوانی است.
+        self::tryInvoiceHelperPay($invoice);
         self::tryConfiguredAfterPaidStatic($config, $invoice, $invId, $gatewayId);
         self::tryDomainInvoiceAfterPaidStatics($invoice, $invId, $gatewayId);
     }
@@ -821,6 +823,34 @@ final class ShopPrepaidConfirmKernel
                 }
             } catch (Throwable $e) {
             }
+        }
+    }
+
+    /**
+     * مسیر واقعی observed روی symmetricnet:
+     * \App\Application\Controller\Guest\CallbackController::handle()
+     *   $service = InvoiceHelper::pay($invoice, $user)
+     */
+    private static function tryInvoiceHelperPay(object $invoice): void
+    {
+        $helper = 'App\\Utility\\InvoiceHelper';
+        $userModel = 'App\\Application\\Models\\User';
+        if (! class_exists($helper) || ! is_callable([$helper, 'pay']) || ! class_exists($userModel)) {
+            return;
+        }
+
+        $uidRaw = $invoice->userid ?? $invoice->user_id ?? null;
+        if (! is_numeric($uidRaw) || (int) $uidRaw <= 0 || ! method_exists($userModel, 'find')) {
+            return;
+        }
+
+        try {
+            $user = $userModel::find((int) $uidRaw);
+            if (! is_object($user)) {
+                return;
+            }
+            $helper::pay($invoice, $user);
+        } catch (Throwable $e) {
         }
     }
 
