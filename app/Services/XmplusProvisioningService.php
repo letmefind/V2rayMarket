@@ -1432,16 +1432,28 @@ class XmplusProvisioningService
      */
     protected static function pickSublinkFromServicesRelaxed(array $services, int $expectPid): array
     {
+        $candidates = [];
         foreach ($services as $s) {
             if (! is_array($s) || empty($s['sublink'])) {
                 continue;
             }
             if ((int) ($s['packageid'] ?? 0) === $expectPid) {
-                $sid = isset($s['sid']) ? (int) $s['sid'] : null;
-
-                return ['sublink' => (string) $s['sublink'], 'sid' => ($sid !== null && $sid > 0) ? $sid : null];
+                $candidates[] = $s;
             }
         }
+        if (count($candidates) > 0) {
+            usort($candidates, function ($a, $b) {
+                $sidA = (int) ($a['sid'] ?? 0);
+                $sidB = (int) ($b['sid'] ?? 0);
+
+                return $sidB <=> $sidA;
+            });
+            $best = $candidates[0];
+            $sid = isset($best['sid']) ? (int) $best['sid'] : null;
+
+            return ['sublink' => (string) $best['sublink'], 'sid' => ($sid !== null && $sid > 0) ? $sid : null];
+        }
+
         foreach ($services as $s) {
             if (is_array($s) && ! empty($s['sublink'])) {
                 $sid = isset($s['sid']) ? (int) $s['sid'] : null;
@@ -1519,14 +1531,27 @@ class XmplusProvisioningService
                 return (string) $s['sublink'];
             }
         }
+
+        $candidates = [];
         foreach ($services as $s) {
             if (! is_array($s) || empty($s['sublink'])) {
                 continue;
             }
             if ((int) ($s['packageid'] ?? 0) === $expectPid) {
-                return (string) $s['sublink'];
+                $candidates[] = $s;
             }
         }
+        if (count($candidates) > 0) {
+            usort($candidates, function ($a, $b) {
+                $sidA = (int) ($a['sid'] ?? 0);
+                $sidB = (int) ($b['sid'] ?? 0);
+
+                return $sidB <=> $sidA;
+            });
+
+            return (string) $candidates[0]['sublink'];
+        }
+
         foreach ($services as $s) {
             if (! is_array($s)) {
                 continue;
@@ -1537,14 +1562,27 @@ class XmplusProvisioningService
                 }
             }
         }
+
+        $activeCandidates = [];
         foreach ($services as $s) {
             if (! is_array($s)) {
                 continue;
             }
             if (self::xmplusServiceRowLooksActive($s) && (int) ($s['packageid'] ?? 0) === $expectPid && ! empty($s['sublink'])) {
-                return (string) $s['sublink'];
+                $activeCandidates[] = $s;
             }
         }
+        if (count($activeCandidates) > 0) {
+            usort($activeCandidates, function ($a, $b) {
+                $sidA = (int) ($a['sid'] ?? 0);
+                $sidB = (int) ($b['sid'] ?? 0);
+
+                return $sidB <=> $sidA;
+            });
+
+            return (string) $activeCandidates[0]['sublink'];
+        }
+
         foreach ($services as $s) {
             if (is_array($s) && self::xmplusServiceRowLooksActive($s) && ! empty($s['sublink'])) {
                 return (string) $s['sublink'];
@@ -1581,14 +1619,23 @@ class XmplusProvisioningService
                 return (int) $s['sid'];
             }
         }
+
+        $candidates = [];
         foreach ($services as $s) {
             if (! is_array($s)) {
                 continue;
             }
             if (self::xmplusServiceRowLooksActive($s) && (int) ($s['packageid'] ?? 0) === $expectPid) {
                 $sid = (int) ($s['sid'] ?? 0);
+                if ($sid > 0) {
+                    $candidates[] = $sid;
+                }
+            }
+        }
+        if (count($candidates) > 0) {
+            rsort($candidates);
 
-                return $sid > 0 ? $sid : null;
+            return $candidates[0];
             }
         }
         foreach ($services as $s) {
