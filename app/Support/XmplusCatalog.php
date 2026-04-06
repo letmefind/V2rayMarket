@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\Plan;
 use App\Services\XmplusProvisioningService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -27,15 +28,17 @@ class XmplusCatalog
             return ['full' => [], 'traffic' => []];
         }
 
-        $cacheKey = 'xmplus_catalog_v1_'.md5($url.'|'.$key);
+        $cacheKey = 'xmplus_catalog_v2_'.md5($url.'|'.$key);
 
         try {
             return Cache::remember($cacheKey, $ttlSeconds, function () use ($settings) {
                 $api = XmplusProvisioningService::fromSettings($settings);
+                $fullResp = $api->listFullPackages();
+                $trafficResp = $api->listTrafficPackages();
 
                 return [
-                    'full' => $api->listFullPackages(),
-                    'traffic' => $api->listTrafficPackages(),
+                    'full' => self::normalizePackagesFromResponse(is_array($fullResp) ? $fullResp : []),
+                    'traffic' => self::normalizePackagesFromResponse(is_array($trafficResp) ? $trafficResp : []),
                 ];
             });
         } catch (Throwable $e) {
@@ -43,6 +46,70 @@ class XmplusCatalog
 
             return ['full' => [], 'traffic' => [], 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * API پاسخی شبیه { status, code, packages: [...] } برمی‌گرداند؛ این تابع فقط آرایهٔ پکیج‌ها را برمی‌گرداند.
+     *
+     * @param  array<string, mixed>  $response
+     * @return array<int, array<string, mixed>>
+     */
+    public static function normalizePackagesFromResponse(array $response): array
+    {
+        $list = $response['packages'] ?? null;
+        if (! is_array($list)) {
+            return [];
+        }
+        $out = [];
+        foreach ($list as $p) {
+            if (is_array($p) && isset($p['id'])) {
+                $out[] = $p;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array{full?: array<int, mixed>, traffic?: array<int, mixed>}  $catalog
+     * @return array<int, array<string, mixed>>
+     */
+    public static function packagesByPid(array $catalog): array
+    {
+        $byPid = [];
+        foreach (array_merge($catalog['full'] ?? [], $catalog['traffic'] ?? []) as $p) {
+            if (is_array($p) && isset($p['id'])) {
+                $byPid[(int) $p['id']] = $p;
+            }
+        }
+
+        return $byPid;
+    }
+
+    /**
+     * نام نمایشی پلن در تلگرام/فاکتور: برای XMPlus از نام پکیج پنل، وگرنه نام پلن فروشگاه.
+     */
+    public static function displayNameForVpnPlan(Plan $plan, Collection $settings): string
+    {
+        $shopName = trim((string) ($plan->name ?? ''));
+        if (($settings->get('panel_type') ?? '') !== 'xmplus') {
+            return $shopName !== '' ? $shopName : 'پلن';
+        }
+        $pid = (int) ($plan->xmplus_package_id ?? 0);
+        if ($pid <= 0) {
+            $pid = (int) ($settings->get('xmplus_default_package_id') ?? 0);
+        }
+        if ($pid <= 0) {
+            return $shopName !== '' ? $shopName : 'پلن';
+        }
+        $catalog = self::get($settings);
+        $api = self::packagesByPid($catalog)[$pid] ?? null;
+        $nm = is_array($api) ? ($api['name'] ?? null) : null;
+        if (is_string($nm) && trim($nm) !== '') {
+            return trim($nm);
+        }
+
+        return $shopName !== '' ? $shopName : 'پلن';
     }
 
     /**

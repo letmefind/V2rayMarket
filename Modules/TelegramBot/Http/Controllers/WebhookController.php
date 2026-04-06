@@ -52,6 +52,15 @@ class WebhookController extends Controller
         return ($this->settings->get('panel_type') ?? '') === 'xmplus';
     }
 
+    protected function planTelegramDisplayName(Plan $plan): string
+    {
+        if (! $this->settings) {
+            $this->settings = Setting::all()->pluck('value', 'key');
+        }
+
+        return XmplusCatalog::displayNameForVpnPlan($plan, $this->settings);
+    }
+
     /**
      * فاکتور XMPlus را در پنل با وضعیت Pending می‌سازد تا بعداً با پرداخت آنلاین یا تأیید ادمین همان invid بسته شود.
      */
@@ -443,7 +452,9 @@ class WebhookController extends Controller
 
         foreach ($orders as $order) {
             $u = $order->user;
-            $planLabel = $order->plan_id ? ($order->plan->name ?? 'پلن') : 'شارژ کیف پول';
+            $planLabel = $order->plan_id
+                ? ($order->plan ? $this->planTelegramDisplayName($order->plan) : 'پلن')
+                : 'شارژ کیف پول';
             $pay = match ($order->payment_method) {
                 'manual_crypto' => 'USDT/USDC دستی',
                 'card' => 'کارت به کارت',
@@ -1432,7 +1443,7 @@ class WebhookController extends Controller
         $xmplus = $this->isXmplusPanel();
 
         $message = "🛒 *تایید خرید*\n\n";
-        $message .= "▫️ پلن: *{$this->escape($plan->name)}*\n";
+        $message .= '▫️ پلن: *'.$this->escape($this->planTelegramDisplayName($plan))."*\n";
 
         if ($order->discount_amount > 0) {
             $originalPrice = number_format($plan->price);
@@ -1615,7 +1626,7 @@ class WebhookController extends Controller
                 Transaction::create([
                     'user_id' => $user->id, 'order_id' => $order->id, 'amount' => -$order->amount,
                     'type' => 'purchase', 'status' => 'completed',
-                    'description' => "خرید سرویس {$plan->name}"
+                    'description' => 'خرید سرویس '.$this->planTelegramDisplayName($plan)
                 ]);
 
                 $provisionData = $this->provisionUserAccount($order, $plan, true);
@@ -1990,12 +2001,7 @@ class WebhookController extends Controller
     protected function sendPlansXmplus($chatId, $messageId, $activePlans): void
     {
         $catalog = XmplusCatalog::get($this->settings);
-        $byPid = [];
-        foreach (array_merge($catalog['full'] ?? [], $catalog['traffic'] ?? []) as $p) {
-            if (is_array($p) && isset($p['id'])) {
-                $byPid[(int) $p['id']] = $p;
-            }
-        }
+        $byPid = XmplusCatalog::packagesByPid($catalog);
 
         $mappedPlans = $activePlans->filter(function ($pl) {
             return (int) ($pl->xmplus_package_id ?? 0) > 0;
@@ -2018,7 +2024,9 @@ class WebhookController extends Controller
         foreach ($mappedPlans as $plan) {
             $pid = (int) $plan->xmplus_package_id;
             $api = $byPid[$pid] ?? null;
-            $name = is_array($api) ? ($api['name'] ?? $plan->name) : $plan->name;
+            $name = (is_array($api) && isset($api['name']) && trim((string) $api['name']) !== '')
+                ? trim((string) $api['name'])
+                : $this->planTelegramDisplayName($plan);
             $btn = $name.' · '.number_format((float) $plan->price).' ت';
             $btn = $this->truncateTelegramInlineButtonText($btn);
             $keyboard->row([
@@ -2390,7 +2398,7 @@ class WebhookController extends Controller
         }
 
         $message = "🔍 جزئیات سرویس #{$order->id}\n\n";
-        $message .= "{$statusIcon} سرویس: " . $this->escape($order->plan->name) . "\n";
+        $message .= "{$statusIcon} سرویس: ".$this->escape($this->planTelegramDisplayName($order->plan))."\n";
         $message .= "👤 نام کاربری: `" . $panelUsername . "`\n";
         $message .= "🗓 انقضا: " . $this->escape($expiresAt->format('Y/m/d')) . " - " . $remainingText . "\n";
         $message .= "📦  حجم:  " . $this->escape($order->plan->volume_gb . ' گیگابایت') . "\n";
@@ -2539,7 +2547,7 @@ class WebhookController extends Controller
                 $message .= "   💸 *مبلغ:* " . $this->escape($amount . " تومان") . "\n";
                 $message .= "   📅 *تاریخ:* " . $this->escape($date) . "\n";
                 if ($transaction->order?->plan) {
-                    $message .= "   🏷 *پلن:* " . $this->escape($transaction->order->plan->name) . "\n";
+                    $message .= '   🏷 *پلن:* '.$this->escape($this->planTelegramDisplayName($transaction->order->plan))."\n";
                 }
                 $message .= "〰️〰️〰️〰️〰️〰️\n";
             }
@@ -3155,7 +3163,7 @@ class WebhookController extends Controller
         $xmplus = $this->isXmplusPanel();
 
         $message = "🔄 *تایید تمدید سرویس*\n\n";
-        $message .= "▫️ سرویس: *{$this->escape($plan->name)}*\n";
+        $message .= '▫️ سرویس: *'.$this->escape($this->planTelegramDisplayName($plan))."*\n";
         $message .= "▫️ تاریخ انقضای فعلی: *" . $this->escape($expiresAt->format('Y/m/d')) . "*\n";
         $message .= "▫️ هزینه تمدید ({$plan->duration_days} روز): *" . number_format($plan->price) . " تومان*\n";
         if ($xmplus) {
@@ -3254,7 +3262,7 @@ class WebhookController extends Controller
                     'amount' => -$plan->price,
                     'type' => 'purchase',
                     'status' => 'completed',
-                    'description' => "تمدید سرویس {$plan->name} (سفارش اصلی #{$originalOrder->id})"
+                    'description' => 'تمدید سرویس '.$this->planTelegramDisplayName($plan)." (سفارش اصلی #{$originalOrder->id})"
                 ]);
 
 
@@ -3284,7 +3292,7 @@ class WebhookController extends Controller
             $newExpiryDate = Carbon::parse($originalOrder->refresh()->expires_at);
             $daysText = $this->escape($plan->duration_days . ' روز');
             $dateText = $this->escape($newExpiryDate->format('Y/m/d'));
-            $planName = $this->escape($plan->name);
+            $planName = $this->escape($this->planTelegramDisplayName($plan));
 
 
             $linkCode = $provisionData['link'];
