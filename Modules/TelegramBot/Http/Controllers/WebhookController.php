@@ -2144,6 +2144,44 @@ class WebhookController extends Controller
         return rtrim(mb_substr($text, 0, max(1, $max - 1))).'…';
     }
 
+    /**
+     * لیست سرورهای اشتراک XMPlus برای نمایش در «سرویس‌های من» (همان منبع serviceInfo که بعد از خرید کش می‌شود).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    protected function resolveXmplusServersForOrder(User $user, Order $order): array
+    {
+        if (! $this->isXmplusPanel()) {
+            return [];
+        }
+
+        $sid = (int) ($order->panel_client_id ?? 0);
+        $email = trim((string) ($user->xmplus_client_email ?? $order->panel_username ?? ''));
+        $passwd = (string) ($user->xmplus_client_password ?? '');
+
+        if ($sid > 0 && $email !== '' && $passwd !== '') {
+            try {
+                $api = XmplusProvisioningService::fromSettings($this->settings);
+                $serviceInfo = $api->serviceInfo($email, $passwd, $sid);
+                $servers = $serviceInfo['servers'] ?? [];
+                if (is_array($servers) && $servers !== []) {
+                    XmplusServerHelper::cacheServers($order->id, $servers);
+
+                    return $servers;
+                }
+            } catch (\Throwable $e) {
+                Log::channel('xmplus')->warning('resolveXmplusServersForOrder: '.$e->getMessage(), [
+                    'order_id' => $order->id,
+                    'sid' => $sid,
+                ]);
+            }
+        }
+
+        $cached = XmplusServerHelper::getCachedServers($order->id);
+
+        return is_array($cached) ? $cached : [];
+    }
+
     protected function generateDurationLabel(int $days): string
     {
         if ($days % 30 === 0) {
@@ -2408,7 +2446,46 @@ class WebhookController extends Controller
             $message .= "\n⏳ *در حال آماده‌سازی کانفیگ...*";
         }
 
+        $servers = $this->resolveXmplusServersForOrder($user, $order);
+        if ($servers !== []) {
+            $message .= "\n\n━━━━━━━━━━━━━━━━━\n🖥 *سرورهای موجود*\n\n";
+            foreach ($servers as $idx => $srv) {
+                if (! is_array($srv)) {
+                    continue;
+                }
+                $remark = trim((string) ($srv['remark'] ?? ('Server #'.($idx + 1))));
+                $addr = trim((string) ($srv['address'] ?? ''));
+                $port = trim((string) ($srv['port'] ?? ''));
+                $message .= '• '.$this->escape($remark);
+                $hostPort = $addr;
+                if ($port !== '') {
+                    $hostPort .= ($hostPort !== '' ? ':' : '').$port;
+                }
+                if ($hostPort !== '') {
+                    $message .= ' — '.$this->escape($hostPort);
+                }
+                $message .= "\n";
+            }
+            $message .= "\n📍 برای *جزئیات کامل* و *QR Code* هر سرور، دکمهٔ همان سرور را بزنید.";
+        }
+
         $keyboard = Keyboard::make()->inline();
+
+        foreach (XmplusServerHelper::buildServerButtons($order->id, $servers) as $row) {
+            $buttons = [];
+            foreach ($row as $btn) {
+                if (! is_array($btn)) {
+                    continue;
+                }
+                $buttons[] = Keyboard::inlineButton([
+                    'text' => $this->truncateTelegramInlineButtonText((string) ($btn['text'] ?? '')),
+                    'callback_data' => (string) ($btn['callback_data'] ?? ''),
+                ]);
+            }
+            if ($buttons !== []) {
+                $keyboard->row($buttons);
+            }
+        }
 
         if (!empty($order->config_details)) {
             $keyboard->row([
@@ -4497,9 +4574,11 @@ class WebhookController extends Controller
             return;
         }
 
-        // دریافت اطلاعات سرورها از Cache
         $servers = XmplusServerHelper::getCachedServers($orderId);
-        
+        if (empty($servers) || ! isset($servers[$serverIndex])) {
+            $servers = $this->resolveXmplusServersForOrder($order->user, $order);
+        }
+
         if (empty($servers) || ! isset($servers[$serverIndex])) {
             try {
                 Telegram::sendMessage([
