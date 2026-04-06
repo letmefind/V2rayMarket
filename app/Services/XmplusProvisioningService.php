@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
+use App\Services\XmplusInvoiceDatabaseSyncService;
 use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -920,6 +921,18 @@ class XmplusProvisioningService
 
             if ($invid !== '') {
                 $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
+                
+                // ✅ تنظیم serviceid در invoice تمدید
+                try {
+                    XmplusInvoiceDatabaseSyncService::setRenewalInvoiceServiceId($settings, $invid, $sid);
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus تمدید: خطا در set کردن serviceid در invoice', [
+                        'error' => $e->getMessage(),
+                        'invid' => $invid,
+                        'sid' => $sid,
+                    ]);
+                }
+                
                 $deferRenewalDbSync = $shopPaymentAlreadyCollected && $autoPayConfigured;
                 if (! $deferRenewalDbSync) {
                     self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, $shopPaymentAlreadyCollected);
@@ -936,6 +949,17 @@ class XmplusProvisioningService
                 'order_id' => $renewalOrder->id,
                 'service_exists' => $serviceExists,
             ]);
+            
+            // ✅ اطمینان از اینکه serviceid در invoice موجود است
+            try {
+                XmplusInvoiceDatabaseSyncService::setRenewalInvoiceServiceId($settings, $invid, $sid);
+            } catch (\Throwable $e) {
+                $api->log('warning', 'XMPlus تمدید: خطا در set کردن serviceid در invoice موجود', [
+                    'error' => $e->getMessage(),
+                    'invid' => $invid,
+                    'sid' => $sid,
+                ]);
+            }
         }
 
         if ($shopPaymentAlreadyCollected && $invid !== '' && ! $autoPayConfigured) {

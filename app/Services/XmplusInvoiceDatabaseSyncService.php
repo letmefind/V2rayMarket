@@ -141,6 +141,64 @@ final class XmplusInvoiceDatabaseSyncService
     }
 
     /**
+     * تنظیم serviceid در invoice تمدید (برای لینک کردن invoice به service موجود)
+     *
+     * @throws RuntimeException|PDOException
+     */
+    public static function setRenewalInvoiceServiceId(Collection $settings, string $invId, int $serviceId): int
+    {
+        $invId = trim($invId);
+        if ($invId === '' || $serviceId <= 0) {
+            throw new RuntimeException('XMPlus DB sync: inv_id یا service_id نامعتبر است.');
+        }
+
+        if (! self::enabled($settings)) {
+            return 0;
+        }
+
+        $pdo = self::createPdoConnection($settings);
+        $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
+
+        $affected = 0;
+        foreach (['inv_id', 'invioce_id'] as $col) {
+            try {
+                $sql = "UPDATE `{$table}` SET `serviceid` = :service_id WHERE `{$col}` = :inv_match";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([
+                    'service_id' => $serviceId,
+                    'inv_match' => $invId,
+                ]);
+                $affected = $stmt->rowCount();
+                if ($affected > 0) {
+                    Log::channel('xmplus')->info('XMPlus invoice DB sync: serviceid در فاکتور تمدید set شد', [
+                        'inv_id' => $invId,
+                        'service_id' => $serviceId,
+                        'table' => $table,
+                        'column' => $col,
+                    ]);
+                    break;
+                }
+            } catch (\Throwable $e) {
+                Log::channel('xmplus')->warning('XMPlus invoice DB sync: خطا در set کردن serviceid', [
+                    'error' => $e->getMessage(),
+                    'inv_id' => $invId,
+                    'service_id' => $serviceId,
+                ]);
+            }
+        }
+
+        if ($affected === 0) {
+            Log::channel('xmplus')->warning('XMPlus invoice DB sync: serviceid set نشد (inv_id پیدا نشد)', [
+                'inv_id' => $invId,
+                'service_id' => $serviceId,
+                'table' => $table,
+            ]);
+        }
+
+        return $affected;
+    }
+
+    /**
      * @throws RuntimeException|PDOException
      */
     protected static function createPdoConnection(Collection $settings): PDO
