@@ -38,7 +38,7 @@ final class XmplusGatewayTelegram
 
         Telegram::setAccessToken($token);
 
-        $msg = '💳 <b>پرداخت فاکتور XMPlus</b>'."\n\n";
+        $msg = '💳 <b>پرداخت آنلاین</b>'."\n\n";
         $msg .= 'سفارش #'.$order->id." — یکی از درگاه‌های زیر را بزنید:\n\n";
         $msg .= '<i>پس از پرداخت موفق، لینک اشتراک ارسال می‌شود.</i>';
 
@@ -109,7 +109,7 @@ final class XmplusGatewayTelegram
                         Telegram::sendPhoto([
                             'chat_id' => $chatId,
                             'photo' => InputFile::create($tmp, 'xmplus-pay.png'),
-                            'caption' => '🔔 QR پرداخت فاکتور XMPlus — در صورت نیاز ابتدا پرداخت را انجام دهید.',
+                            'caption' => '🔔 QR کد پرداخت — در صورت نیاز ابتدا پرداخت را انجام دهید.',
                         ]);
                     } catch (\Throwable $e) {
                         Log::warning('XmplusGatewayTelegram sendPhoto: '.$e->getMessage());
@@ -153,7 +153,7 @@ final class XmplusGatewayTelegram
             if ($invUrl !== null) {
                 $msg .= "\n\n".'بعد از تکمیل پرداخت، دکمهٔ زیر را بزنید.';
             } else {
-                $msg .= "\n\n".'لطفاً از پنل کاربری XMPlus همان فاکتور را باز کنید و پرداخت را تمام کنید؛ ربات تا تأیید فاکتور منتظر می‌ماند.';
+                $msg .= "\n\n".'لطفاً از پنل کاربری همان فاکتور را باز کنید و پرداخت را تمام کنید؛ ربات تا تأیید فاکتور منتظر می‌ماند.';
             }
 
             try {

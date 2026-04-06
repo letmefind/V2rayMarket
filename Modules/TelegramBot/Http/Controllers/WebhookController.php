@@ -1464,7 +1464,7 @@ class WebhookController extends Controller
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "pay_card_{$order->id}"])]);
         if ($xmplus) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 پرداخت آنلاین XMPlus (PayPal و...)', 'callback_data' => "pay_xmplusgw_{$order->id}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 پرداخت آنلاین ارزی / کریپتو', 'callback_data' => "pay_xmplusgw_{$order->id}"])]);
         }
         if ($this->isPlisioActive()) {
             $keyboard->row([Keyboard::inlineButton(['text' => '💎 پرداخت Plisio (کریپتو)', 'callback_data' => "pay_plisio_{$order->id}"])]);
@@ -3166,7 +3166,7 @@ class WebhookController extends Controller
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 تمدید با کارت به کارت', 'callback_data' => "renew_pay_card_{$originalOrderId}"])]);
         if ($xmplus) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 تمدید با درگاه XMPlus (PayPal و...)', 'callback_data' => "renew_pay_xmplusgw_{$originalOrderId}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 تمدید با پرداخت آنلاین ارزی / کریپتو', 'callback_data' => "renew_pay_xmplusgw_{$originalOrderId}"])]);
         }
         if ($this->isPlisioActive()) {
             $keyboard->row([Keyboard::inlineButton(['text' => '💎 تمدید با Plisio', 'callback_data' => "renew_pay_plisio_{$originalOrderId}"])]);
@@ -3261,7 +3261,7 @@ class WebhookController extends Controller
                 ]);
                 $this->sendOrEditMessage(
                     $user->telegram_chat_id,
-                    '✅ مبلغ تمدید از کیف پول کسر شد. برای پرداخت فاکتور XMPlus، *پیام بعدی* (دکمه‌های درگاه) را ببینید.',
+                    '✅ مبلغ تمدید از کیف پول کسر شد. برای تکمیل پرداخت، *پیام بعدی* (دکمه‌های درگاه) را ببینید.',
                     $confirmKb,
                     $messageId
                 );
