@@ -506,33 +506,8 @@ final class ShopPrepaidConfirmKernel
         array $userServiceIdsBefore = []
     ): void
     {
-        // ✅ اگر invoice تمدید است، ابتدا منطق تمدید را اجرا کن
-        $isRenew = isset($invoice->isrenew) && (int)$invoice->isrenew === 1;
-        $serviceId = self::extractServiceIdFromInvoice($invoice);
-        
-        if ($isRenew && $serviceId > 0) {
-            self::debugLog($config, 'hook:renewal_detected', [
-                'inv_id' => $invId,
-                'service_id' => $serviceId,
-                'isrenew' => $invoice->isrenew ?? null,
-            ]);
-            
-            $renewed = self::tryRenewService($invoice, $serviceId, $config);
-            if ($renewed) {
-                self::debugLog($config, 'hook:renewal_success', [
-                    'inv_id' => $invId,
-                    'service_id' => $serviceId,
-                ]);
-                return;
-            }
-            
-            self::debugLog($config, 'hook:renewal_failed_fallback_to_helper', [
-                'inv_id' => $invId,
-                'service_id' => $serviceId,
-            ]);
-        }
-        
         // symmetricnet: Guest\CallbackController نشان می‌دهد مسیر واقعی ساخت سرویس این فراخوانی است.
+        // InvoiceHelper::pay($invoice, $user) تمام منطق ساخت/تمدید service را طبق package دارد.
         $helperDiag = null;
         $helperBuiltService = self::tryInvoiceHelperPay($invoice, $config, $invId, $helperDiag);
         self::tryConfiguredAfterPaidStatic($config, $invoice, $invId, $gatewayId);
@@ -565,159 +540,6 @@ final class ShopPrepaidConfirmKernel
         }
     }
 
-    /**
-     * تمدید service موجود بر اساس invoice تمدید
-     *
-     * @return bool true اگر تمدید موفق بود
-     */
-    private static function tryRenewService(object $invoice, int $serviceId, array $config): bool
-    {
-        $serviceModel = 'App\\Application\\Models\\Service';
-        if (!class_exists($serviceModel)) {
-            self::debugLog($config, 'renewal:service_model_not_found', [
-                'model' => $serviceModel,
-            ]);
-            return false;
-        }
-        
-        try {
-            // پیدا کردن service
-            $service = $serviceModel::find($serviceId);
-            if (!is_object($service)) {
-                self::debugLog($config, 'renewal:service_not_found', [
-                    'service_id' => $serviceId,
-                ]);
-                return false;
-            }
-            
-            // محاسبه مدت تمدید از invoice
-            $packageExpire = isset($invoice->package_expire) ? (int)$invoice->package_expire : 0;
-            if ($packageExpire <= 0) {
-                // fallback: از cycle محاسبه کن
-                $cycle = $invoice->cycle ?? '';
-                $packageExpire = self::calculateValidityFromCycle($cycle);
-            }
-            
-            if ($packageExpire <= 0) {
-                self::debugLog($config, 'renewal:invalid_expire', [
-                    'package_expire' => $packageExpire,
-                    'cycle' => $invoice->cycle ?? null,
-                ]);
-                return false;
-            }
-            
-            // تمدید service
-            $currentDueDate = trim((string)($service->due_date ?? ''));
-            $newDueDate = self::calculateNewDueDate($currentDueDate, $packageExpire);
-            
-            // validity ثابت می‌ماند، فقط due_date تمدید می‌شود
-            $service->due_date = $newDueDate;
-            
-            // اگر service منقضی شده، فعال کن
-            $currentStatus = isset($service->status) ? (int)$service->status : 0;
-            if ($currentStatus === -1 || $currentStatus === 0) {
-                $service->status = 1; // Active
-            }
-            
-            // ریست ترافیک اگر فعال باشد
-            if (isset($invoice->package_type) && (int)$invoice->package_type === 2) {
-                $packageTraffic = self::extractPackageTrafficBytes($invoice);
-                if ($packageTraffic > 0) {
-                    $service->traffic = $packageTraffic;
-                    $service->used = 0;
-                    $service->u = 0;
-                    $service->d = 0;
-                }
-            }
-            
-            $service->save();
-            
-            self::debugLog($config, 'renewal:service_renewed', [
-                'service_id' => $serviceId,
-                'old_due_date' => $currentDueDate,
-                'new_due_date' => $newDueDate,
-                'added_days' => $packageExpire,
-            ]);
-            
-            return true;
-            
-        } catch (Throwable $e) {
-            self::debugLog($config, 'renewal:exception', [
-                'service_id' => $serviceId,
-                'error' => $e->getMessage(),
-            ]);
-            return false;
-        }
-    }
-    
-    /**
-     * محاسبه تعداد روزهای اعتبار از cycle
-     */
-    private static function calculateValidityFromCycle(string $cycle): int
-    {
-        $cycle = strtolower(trim($cycle));
-        $map = [
-            'month' => 30,
-            'monthly' => 30,
-            'quater' => 90,
-            'quarterly' => 90,
-            'semiannual' => 180,
-            'semi-annual' => 180,
-            'annual' => 365,
-            'yearly' => 365,
-            'week' => 7,
-            'weekly' => 7,
-        ];
-        
-        return $map[$cycle] ?? 30;
-    }
-    
-    /**
-     * محاسبه due_date جدید
-     */
-    private static function calculateNewDueDate(string $currentDueDate, int $addDays): string
-    {
-        try {
-            $now = new \DateTime();
-            
-            if ($currentDueDate === '' || $currentDueDate === '0000-00-00' || $currentDueDate === '0000-00-00 00:00:00') {
-                // اگر due_date خالی است، از امروز شروع کن
-                $base = clone $now;
-            } else {
-                $base = new \DateTime($currentDueDate);
-                
-                // اگر تاریخ در گذشته است، از امروز شروع کن
-                if ($base < $now) {
-                    $base = clone $now;
-                }
-            }
-            
-            $base->modify("+{$addDays} days");
-            return $base->format('Y-m-d H:i:s');
-            
-        } catch (Throwable $e) {
-            // fallback
-            return date('Y-m-d H:i:s', strtotime("+{$addDays} days"));
-        }
-    }
-    
-    /**
-     * استخراج حجم ترافیک از invoice
-     */
-    private static function extractPackageTrafficBytes(object $invoice): int
-    {
-        // bandwidth یا traffic به byte
-        if (isset($invoice->bandwidth)) {
-            $bw = trim((string)$invoice->bandwidth);
-            if (is_numeric($bw)) {
-                return (int)$bw;
-            }
-        }
-        
-        // یا از package محاسبه کن
-        // فعلاً 0 برمی‌گردانیم تا ترافیک تغییر نکند
-        return 0;
-    }
 
     /**
      * از تنظیمات درگاه: after_paid_class + after_paid_method (متد استاتیک).
@@ -1241,27 +1063,6 @@ final class ShopPrepaidConfirmKernel
         return null;
     }
     
-    /**
-     * از روی ردیف invoice، service_id را استخراج می‌کند.
-     */
-    private static function extractServiceIdFromInvoice(object $invoice): int
-    {
-        foreach (['serviceid', 'service_id', 'sid'] as $k) {
-            if (! isset($invoice->{$k})) {
-                continue;
-            }
-            $v = $invoice->{$k};
-            if (is_numeric($v) && (int) $v > 0) {
-                return (int) $v;
-            }
-            if (is_string($v) && trim($v) !== '' && is_numeric(trim($v)) && (int) trim($v) > 0) {
-                return (int) trim($v);
-            }
-        }
-
-        return 0;
-    }
-
     /**
      * لیست id سرویس‌های فعلی کاربر از جدول service.
      *
