@@ -199,40 +199,55 @@ final class XmplusInvoiceDatabaseSyncService
         $columnVariants = ['serviceid', 'service_id', 'sid'];
         $invIdVariants = ['inv_id', 'invioce_id'];
         
-        // امتحان کردن تمام ترکیبات ستون‌ها
-        foreach ($invIdVariants as $invCol) {
-            foreach ($columnVariants as $serviceCol) {
-                try {
-                    $sql = "UPDATE `{$table}` SET `{$serviceCol}` = :service_id WHERE `{$invCol}` = :inv_match";
-                    $stmt = $pdo->prepare($sql);
-                    $stmt->execute([
-                        'service_id' => $serviceId,
-                        'inv_match' => $invId,
-                    ]);
-                    $affected = $stmt->rowCount();
-                    if ($affected > 0) {
-                        Log::channel('xmplus')->info('XMPlus invoice DB sync: serviceid در فاکتور تمدید set شد', [
-                            'inv_id' => $invId,
+        // امتحان با چند تلاش (XMPlus ممکن است invoice را هنوز commit نکرده باشد)
+        $maxAttempts = 3;
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            if ($attempt > 1) {
+                // تأخیر قبل از تلاش بعدی
+                usleep(500000); // 0.5 ثانیه
+                Log::channel('xmplus')->debug('XMPlus invoice DB sync: تلاش '.$attempt.' برای set کردن serviceid', [
+                    'inv_id' => $invId,
+                    'attempt' => $attempt,
+                ]);
+            }
+            
+            // امتحان کردن تمام ترکیبات ستون‌ها
+            foreach ($invIdVariants as $invCol) {
+                foreach ($columnVariants as $serviceCol) {
+                    try {
+                        $sql = "UPDATE `{$table}` SET `{$serviceCol}` = :service_id WHERE `{$invCol}` = :inv_match";
+                        $stmt = $pdo->prepare($sql);
+                        $stmt->execute([
                             'service_id' => $serviceId,
-                            'table' => $table,
-                            'inv_column' => $invCol,
-                            'service_column' => $serviceCol,
+                            'inv_match' => $invId,
                         ]);
-                        return $affected;
+                        $affected = $stmt->rowCount();
+                        if ($affected > 0) {
+                            Log::channel('xmplus')->info('XMPlus invoice DB sync: serviceid در فاکتور تمدید set شد', [
+                                'inv_id' => $invId,
+                                'service_id' => $serviceId,
+                                'table' => $table,
+                                'inv_column' => $invCol,
+                                'service_column' => $serviceCol,
+                                'attempt' => $attempt,
+                            ]);
+                            return $affected;
+                        }
+                    } catch (\Throwable $e) {
+                        // ستون وجود ندارد، امتحان variant بعدی
+                        continue;
                     }
-                } catch (\Throwable $e) {
-                    // ستون وجود ندارد، امتحان variant بعدی
-                    continue;
                 }
             }
         }
 
-        Log::channel('xmplus')->warning('XMPlus invoice DB sync: serviceid set نشد (inv_id پیدا نشد یا ستون service وجود ندارد)', [
+        Log::channel('xmplus')->warning('XMPlus invoice DB sync: serviceid set نشد بعد از '.$maxAttempts.' تلاش (inv_id پیدا نشد یا ستون service وجود ندارد)', [
             'inv_id' => $invId,
             'service_id' => $serviceId,
             'table' => $table,
             'tried_service_columns' => $columnVariants,
             'tried_inv_columns' => $invIdVariants,
+            'max_attempts' => $maxAttempts,
         ]);
 
         return $affected;
