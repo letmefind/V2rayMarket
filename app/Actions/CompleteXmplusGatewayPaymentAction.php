@@ -57,20 +57,135 @@ final class CompleteXmplusGatewayPaymentAction
         $api = XmplusProvisioningService::fromSettings($settings);
 
         try {
-            $prov = XmplusProvisioningService::payInvoiceWithGatewayAndPoll(
-                $api,
-                $ctx,
-                $gatewayId,
-                $settings,
-                $telegramChatId
-            );
+            // مشابه مسیر وب: اگر درگاه خارجی (PayPal/Stripe/...) باشد، اینجا polling نکن.
+            $telegramFlow = XmplusProvisioningService::payInvoiceWithGatewayForWeb($api, $ctx, $gatewayId);
         } catch (\Throwable $e) {
             Log::channel('xmplus')->error('CompleteXmplusGatewayPayment: '.$e->getMessage(), ['order_id' => $orderId]);
 
             return ['ok' => false, 'message' => 'خطا: '.$e->getMessage()];
         }
 
+        $outcome = (string) ($telegramFlow['outcome'] ?? '');
+        if ($outcome === 'redirect') {
+            $url = (string) ($telegramFlow['url'] ?? '');
+            if ($url !== '' && $order->user?->telegram_chat_id) {
+                try {
+                    Telegram::setAccessToken($settings->get('telegram_bot_token'));
+                    Telegram::sendMessage([
+                        'chat_id' => $order->user->telegram_chat_id,
+                        'text' => "🔗 لینک پرداخت درگاه:\n".$url,
+                    ]);
+                    Telegram::sendMessage([
+                        'chat_id' => $order->user->telegram_chat_id,
+                        'text' => 'بعد از پرداخت، دکمهٔ زیر را بزنید تا فعال‌سازی بررسی شود.',
+                        'reply_markup' => \Telegram\Bot\Keyboard\Keyboard::make()->inline()
+                            ->row([
+                                \Telegram\Bot\Keyboard\Keyboard::inlineButton([
+                                    'text' => '✅ پرداخت کردم، بررسی کن',
+                                    'callback_data' => 'xmpgwcheck_'.$orderId,
+                                ]),
+                            ]),
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('CompleteXmplusGatewayPayment telegram redirect msg: '.$e->getMessage());
+                }
+            }
+
+            return ['ok' => true, 'message' => 'لینک پرداخت ارسال شد؛ بعد از پرداخت «بررسی کن» را بزنید.'];
+        }
+
+        if ($outcome === 'await_offsite') {
+            $pay = is_array($telegramFlow['pay'] ?? null) ? $telegramFlow['pay'] : [];
+            XmplusGatewayTelegram::sendInvoicePayInstructions($pay, $telegramChatId, $settings);
+            $ctx['xmplus_web_await_pay'] = $pay;
+            Cache::put($ctxKey, $ctx, now()->addHours(48));
+            if ($order->user?->telegram_chat_id) {
+                try {
+                    Telegram::setAccessToken($settings->get('telegram_bot_token'));
+                    Telegram::sendMessage([
+                        'chat_id' => $order->user->telegram_chat_id,
+                        'text' => 'بعد از پرداخت، دکمهٔ زیر را بزنید تا فعال‌سازی بررسی شود.',
+                        'reply_markup' => \Telegram\Bot\Keyboard\Keyboard::make()->inline()
+                            ->row([
+                                \Telegram\Bot\Keyboard\Keyboard::inlineButton([
+                                    'text' => '✅ پرداخت کردم، بررسی کن',
+                                    'callback_data' => 'xmpgwcheck_'.$orderId,
+                                ]),
+                            ]),
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::warning('CompleteXmplusGatewayPayment telegram await msg: '.$e->getMessage());
+                }
+            }
+
+            return ['ok' => true, 'message' => 'منتظر تکمیل پرداخت در درگاه هستیم؛ پس از پرداخت، «بررسی کن» را بزنید.'];
+        }
+
+        if ($outcome !== 'complete') {
+            return ['ok' => false, 'message' => 'پاسخ غیرمنتظره از XMPlus.'];
+        }
+
+        $prov = [
+            'final_config' => (string) ($telegramFlow['final_config'] ?? ''),
+            'panel_username' => (string) ($telegramFlow['panel_username'] ?? ''),
+            'panel_client_id' => $telegramFlow['panel_client_id'] ?? null,
+        ];
+
         return self::persistAfterPoll($order, $ctx, $ctxKey, $prov, $settings);
+    }
+
+    /**
+     * بررسی مجدد پس از پرداخت خارجی در ربات تلگرام.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public static function finalizeTelegramAfterOffsite(int $orderId, string $telegramChatId): array
+    {
+        $settings = Setting::all()->pluck('value', 'key');
+        if (($settings->get('panel_type') ?? '') !== 'xmplus') {
+            return ['ok' => false, 'message' => 'نوع پنل XMPlus نیست.'];
+        }
+
+        $order = Order::with(['user', 'plan'])->find($orderId);
+        if (! $order || ! $order->user || ! $order->plan) {
+            return ['ok' => false, 'message' => 'سفارش یافت نشد.'];
+        }
+        if ((string) $order->user->telegram_chat_id !== $telegramChatId) {
+            return ['ok' => false, 'message' => 'این سفارش متعلق به شما نیست.'];
+        }
+
+        $ctxKey = XmplusProvisioningService::invoiceContextCacheKey($orderId);
+        $ctx = Cache::get($ctxKey);
+        if (! is_array($ctx)) {
+            return ['ok' => false, 'message' => 'جلسه پرداخت منقضی شده؛ دوباره روش پرداخت را انتخاب کنید.'];
+        }
+
+        $cfg = $order->config_details;
+        $canProceed = $order->status === 'pending'
+            || ($order->status === 'paid' && ($cfg === null || $cfg === ''));
+        if (! $canProceed) {
+            return ['ok' => false, 'message' => 'این سفارش قبلاً تکمیل شده است.'];
+        }
+
+        $api = XmplusProvisioningService::fromSettings($settings);
+        $pollCtx = $ctx;
+        unset($pollCtx['xmplus_web_await_pay'], $pollCtx['gateway_options']);
+
+        try {
+            $prov = XmplusProvisioningService::pollXmplusWebAfterOffsitePayment($api, $pollCtx);
+        } catch (\Throwable $e) {
+            Log::channel('xmplus')->error('finalizeTelegramAfterOffsite: '.$e->getMessage(), ['order_id' => $orderId]);
+
+            return ['ok' => false, 'message' => $e->getMessage()];
+        }
+
+        $provArr = [
+            'final_config' => $prov['final_config'],
+            'panel_username' => $prov['panel_username'],
+            'panel_client_id' => $prov['panel_client_id'],
+        ];
+
+        return self::persistAfterPoll($order, $ctx, $ctxKey, $provArr, $settings);
     }
 
     /**

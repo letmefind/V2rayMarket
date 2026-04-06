@@ -873,6 +873,31 @@ class WebhookController extends Controller
             return;
         }
 
+        if (preg_match('/^xmpgwcheck_(\d+)$/', $data, $xgwc)) {
+            if (! $user) {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => 'ابتدا با /start وارد شوید.',
+                    'show_alert' => true,
+                ]);
+
+                return;
+            }
+            $gwOrderId = (int) $xgwc[1];
+            $out = CompleteXmplusGatewayPaymentAction::finalizeTelegramAfterOffsite($gwOrderId, (string) $chatId);
+            try {
+                Telegram::answerCallbackQuery([
+                    'callback_query_id' => $callbackQuery->getId(),
+                    'text' => Str::limit($out['message'] ?? '', 190),
+                    'show_alert' => ! ($out['ok'] ?? false),
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('xmpgwcheck answerCallbackQuery: '.$e->getMessage());
+            }
+
+            return;
+        }
+
         if (Str::startsWith($data, 'show_service_')) {
             $orderId = Str::after($data, 'show_service_');
             $this->showServiceDetails($user, $orderId, $messageId);
