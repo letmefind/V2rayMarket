@@ -2009,7 +2009,7 @@ class WebhookController extends Controller
 
         $message = \App\Models\BotMessage::get(
             'msg_select_plan',
-            "🛒 خرید سرویس VPN (XMPlus)\n\nیک پکیج را از دکمه‌های زیر انتخاب کنید.\nقیمت نهایی به تومان مطابق «پلن فروشگاه» است (نه قیمت خام پنل)."
+            "🛒 خرید سرویس VPN (BypassNET)\n\nیک پکیج را از دکمه‌های زیر انتخاب کنید.\nقیمت نهایی به تومان مطابق «پلن فروشگاه» است (نه قیمت خام پنل)."
         );
 
         if (! empty($catalog['error']) && empty($catalog['full']) && empty($catalog['traffic'])) {

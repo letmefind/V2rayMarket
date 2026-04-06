@@ -90,7 +90,7 @@ class PollXmplusOffsitePayment implements ShouldQueue
             Telegram::setAccessToken($token);
             Telegram::sendMessage([
                 'chat_id' => $this->telegramChatId,
-                'text' => \App\Models\BotMessage::get('msg_payment_pending_check', "⏳ پرداخت این سفارش هنوز در XMPlus نهایی نشده است.\nبعد از تکمیل پرداخت، دکمه «✅ پرداخت کردم، بررسی کن» را بزنید."),
+                'text' => \App\Models\BotMessage::get('msg_payment_pending_check', "⏳ پرداخت این سفارش هنوز در BypassNET نهایی نشده است.\nبعد از تکمیل پرداخت، دکمه «✅ پرداخت کردم، بررسی کن» را بزنید."),
             ]);
         } catch (\Throwable $e) {
             Log::warning('PollXmplusOffsitePayment notifyStillPending: '.$e->getMessage(), [

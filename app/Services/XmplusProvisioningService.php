@@ -1576,7 +1576,7 @@ class XmplusProvisioningService
                 throw new RuntimeException(
                     \App\Models\BotMessage::get(
                         'msg_payment_still_pending',
-                        '⏳ پرداخت این سفارش هنوز در XMPlus نهایی نشده است (فاکتور «{invoice_id}» همچنان Pending است).\n\nاین معمولاً به این دلیل است که پرداخت در درگاه (PayPal، Stripe و...) هنوز تکمیل نشده یا callback به پنل ارسال نشده است.\n\n▫️ اگر پرداخت را در درگاه تکمیل کردید، لطفاً چند دقیقه صبر کنید و سپس دکمهٔ «✅ پرداخت کردم، بررسی کن» را دوباره بزنید.\n▫️ اگر پرداخت را تکمیل نکردید، به لینک پرداخت برگردید و آن را تمام کنید.',
+                        '⏳ پرداخت این سفارش هنوز در BypassNET نهایی نشده است (فاکتور «{invoice_id}» همچنان Pending است).\n\nاین معمولاً به این دلیل است که پرداخت در درگاه (PayPal، Stripe و...) هنوز تکمیل نشده یا callback به پنل ارسال نشده است.\n\n▫️ اگر پرداخت را در درگاه تکمیل کردید، لطفاً چند دقیقه صبر کنید و سپس دکمهٔ «✅ پرداخت کردم، بررسی کن» را دوباره بزنید.\n▫️ اگر پرداخت را تکمیل نکردید، به لینک پرداخت برگردید و آن را تمام کنید.',
                         ['invoice_id' => $invid]
                     )
                 );
@@ -1633,7 +1633,7 @@ class XmplusProvisioningService
                                 throw new RuntimeException(
                                     \App\Models\BotMessage::get(
                                         'err_service_not_found',
-                                        "❌ فاکتور «{invoice_id}» با وضعیت Paid است و serviceid={service_id} دارد، اما سرویس در پنل XMPlus یافت نشد.\n\nاین معمولاً به یکی از دلایل زیر است:\n▫️ سرویس از پنل XMPlus حذف شده است\n▫️ سرویس متعلق به کاربر دیگری است (userid mismatch)\n▫️ مشکلی در API پنل XMPlus وجود دارد\n\n🔧 راه‌حل:\n1. وارد پنل XMPlus شوید و بخش «سرویس‌ها» را چک کنید\n2. سرویس با sid={service_id} را جستجو کنید\n3. اگر سرویس وجود دارد، لینک را دستی کپی کنید\n4. اگر سرویس حذف شده، با پشتیبانی XMPlus تماس بگیرید\n\n🌐 ورود به پنل: {panel_url}\n📧 ایمیل: {email}",
+                                        "❌ فاکتور «{invoice_id}» با وضعیت Paid است و serviceid={service_id} دارد، اما سرویس در پنل BypassNET یافت نشد.\n\nاین معمولاً به یکی از دلایل زیر است:\n▫️ سرویس از پنل BypassNET حذف شده است\n▫️ سرویس متعلق به کاربر دیگری است (userid mismatch)\n▫️ مشکلی در API پنل BypassNET وجود دارد\n\n🔧 راه‌حل:\n1. وارد پنل BypassNET شوید و بخش «سرویس‌ها» را چک کنید\n2. سرویس با sid={service_id} را جستجو کنید\n3. اگر سرویس وجود دارد، لینک را دستی کپی کنید\n4. اگر سرویس حذف شده، با پشتیبانی BypassNET تماس بگیرید\n\n🌐 ورود به پنل: {panel_url}\n📧 ایمیل: {email}",
                                         [
                                             'invoice_id' => $invid,
                                             'service_id' => $sidFromInv,

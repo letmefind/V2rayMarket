@@ -203,7 +203,7 @@ final class CompleteXmplusGatewayPaymentAction
                 if (strcasecmp($statusCheck, 'Pending') === 0) {
                     return [
                         'ok' => false,
-                        'message' => \App\Models\BotMessage::get('msg_payment_pending_check', "⏳ پرداخت این سفارش هنوز در XMPlus نهایی نشده است.\nبعد از تکمیل پرداخت، دکمه «✅ پرداخت کردم، بررسی کن» را بزنید."),
+                        'message' => \App\Models\BotMessage::get('msg_payment_pending_check', "⏳ پرداخت این سفارش هنوز در BypassNET نهایی نشده است.\nبعد از تکمیل پرداخت، دکمه «✅ پرداخت کردم، بررسی کن» را بزنید."),
                     ];
                 }
             } catch (\Throwable $e) {
