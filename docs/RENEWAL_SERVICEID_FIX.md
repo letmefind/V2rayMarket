@@ -241,10 +241,55 @@ App\Services\XmplusInvoiceDatabaseSyncService::testConnection(
 
 ## 🐛 عیب‌یابی
 
+### مشکل: "Column not found: Unknown column 'serviceid' in 'SET'"
+
+**این مشکل اصلی است!** یعنی ستون `serviceid` در جدول `invoice` وجود ندارد.
+
+#### راه‌حل 1: بررسی ساختار جدول
+```bash
+cd /var/www/vpnmarket
+php test-invoice-table.php
+```
+
+این اسکریپت:
+- ✅ اتصال به دیتابیس را تست می‌کند
+- ✅ تمام ستون‌های جدول `invoice` را نمایش می‌دهد
+- ✅ ستون‌های مرتبط با service را مشخص می‌کند
+
+#### راه‌حل 2: اضافه کردن ستون در دیتابیس XMPlus
+
+اگر ستون `serviceid` وجود ندارد، در MySQL دیتابیس XMPlus این دستور را اجرا کنید:
+
+```sql
+ALTER TABLE `invoice` 
+ADD COLUMN `serviceid` VARCHAR(50) DEFAULT NULL 
+AFTER `userid`;
+```
+
+یا اگر می‌خواهید نام ستون `service_id` باشد:
+```sql
+ALTER TABLE `invoice` 
+ADD COLUMN `service_id` INT DEFAULT NULL 
+AFTER `userid`;
+```
+
+#### راه‌حل 3: بررسی نام ستون موجود
+
+ممکن است ستون با نام دیگری وجود داشته باشد. کد به‌روزرسانی شده این variant ها را امتحان می‌کند:
+- `serviceid`
+- `service_id`
+- `sid`
+
+برای بررسی دستی:
+```sql
+SHOW COLUMNS FROM `invoice` LIKE '%service%';
+```
+
 ### مشکل: "serviceid هنوز NULL است"
 - بررسی کنید که `xmplus_invoice_db_sync_enabled` فعال باشد
 - بررسی کنید که اطلاعات دیتابیس صحیح است
 - لاگ‌ها را بررسی کنید: `storage/logs/xmplus-*.log`
+- اسکریپت تست را اجرا کنید: `php test-invoice-table.php`
 
 ### مشکل: "UPDATE اجرا شد اما هیچ ردیفی تغییر نکرد"
 - `inv_id` در دیتابیس XMPlus وجود ندارد

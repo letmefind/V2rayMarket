@@ -57,6 +57,42 @@ final class XmplusInvoiceDatabaseSyncService
     }
 
     /**
+     * بررسی ساختار جدول invoice و نمایش ستون‌های موجود
+     *
+     * @return array{ok: bool, columns: array<string>, message: string}
+     */
+    public static function inspectInvoiceTable(Collection $settings): array
+    {
+        try {
+            $pdo = self::createPdoConnection($settings);
+            $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
+            
+            $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}`");
+            $columns = [];
+            while ($row = $stmt->fetch()) {
+                $columns[] = $row['Field'] ?? '';
+            }
+            
+            $hasServiceId = in_array('serviceid', $columns, true) || 
+                           in_array('service_id', $columns, true) ||
+                           in_array('sid', $columns, true);
+            
+            return [
+                'ok' => true,
+                'columns' => $columns,
+                'message' => 'جدول '.$table.' دارای '.count($columns).' ستون است. '.
+                            ($hasServiceId ? '✅ ستون service پیدا شد.' : '❌ ستون service یافت نشد!'),
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'ok' => false,
+                'columns' => [],
+                'message' => 'خطا در بررسی جدول: '.$e->getMessage(),
+            ];
+        }
+    }
+
+    /**
      * توضیح فارسی برای خطاهای رایجٔ اتصال (فایروال، bind-address، …).
      */
     public static function formatMysqlConnectionFailureMessage(string $pdoMessage, string $host, int $port): string
@@ -160,40 +196,44 @@ final class XmplusInvoiceDatabaseSyncService
         $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
 
         $affected = 0;
-        foreach (['inv_id', 'invioce_id'] as $col) {
-            try {
-                $sql = "UPDATE `{$table}` SET `serviceid` = :service_id WHERE `{$col}` = :inv_match";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([
-                    'service_id' => $serviceId,
-                    'inv_match' => $invId,
-                ]);
-                $affected = $stmt->rowCount();
-                if ($affected > 0) {
-                    Log::channel('xmplus')->info('XMPlus invoice DB sync: serviceid در فاکتور تمدید set شد', [
-                        'inv_id' => $invId,
+        $columnVariants = ['serviceid', 'service_id', 'sid'];
+        $invIdVariants = ['inv_id', 'invioce_id'];
+        
+        // امتحان کردن تمام ترکیبات ستون‌ها
+        foreach ($invIdVariants as $invCol) {
+            foreach ($columnVariants as $serviceCol) {
+                try {
+                    $sql = "UPDATE `{$table}` SET `{$serviceCol}` = :service_id WHERE `{$invCol}` = :inv_match";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([
                         'service_id' => $serviceId,
-                        'table' => $table,
-                        'column' => $col,
+                        'inv_match' => $invId,
                     ]);
-                    break;
+                    $affected = $stmt->rowCount();
+                    if ($affected > 0) {
+                        Log::channel('xmplus')->info('XMPlus invoice DB sync: serviceid در فاکتور تمدید set شد', [
+                            'inv_id' => $invId,
+                            'service_id' => $serviceId,
+                            'table' => $table,
+                            'inv_column' => $invCol,
+                            'service_column' => $serviceCol,
+                        ]);
+                        return $affected;
+                    }
+                } catch (\Throwable $e) {
+                    // ستون وجود ندارد، امتحان variant بعدی
+                    continue;
                 }
-            } catch (\Throwable $e) {
-                Log::channel('xmplus')->warning('XMPlus invoice DB sync: خطا در set کردن serviceid', [
-                    'error' => $e->getMessage(),
-                    'inv_id' => $invId,
-                    'service_id' => $serviceId,
-                ]);
             }
         }
 
-        if ($affected === 0) {
-            Log::channel('xmplus')->warning('XMPlus invoice DB sync: serviceid set نشد (inv_id پیدا نشد)', [
-                'inv_id' => $invId,
-                'service_id' => $serviceId,
-                'table' => $table,
-            ]);
-        }
+        Log::channel('xmplus')->warning('XMPlus invoice DB sync: serviceid set نشد (inv_id پیدا نشد یا ستون service وجود ندارد)', [
+            'inv_id' => $invId,
+            'service_id' => $serviceId,
+            'table' => $table,
+            'tried_service_columns' => $columnVariants,
+            'tried_inv_columns' => $invIdVariants,
+        ]);
 
         return $affected;
     }
