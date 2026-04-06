@@ -3,11 +3,12 @@
 namespace App\Actions;
 
 use App\Events\OrderPaid;
+use App\Jobs\PollXmplusOffsitePayment;
 use App\Models\Order;
 use App\Models\Setting;
 use App\Models\Transaction;
-use App\Jobs\PollXmplusOffsitePayment;
 use App\Services\XmplusProvisioningService;
+use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -85,6 +86,12 @@ final class CompleteXmplusGatewayPaymentAction
                                     'text' => '✅ پرداخت کردم، بررسی کن',
                                     'callback_data' => 'xmpgwcheck_'.$orderId,
                                 ]),
+                            ])
+                            ->row([
+                                \Telegram\Bot\Keyboard\Keyboard::inlineButton([
+                                    'text' => '⬅️ بازگشت به لیست درگاه‌ها',
+                                    'callback_data' => 'pay_xmplusgw_'.$orderId,
+                                ]),
                             ]),
                     ]);
                     PollXmplusOffsitePayment::dispatch($orderId, (string) $order->user->telegram_chat_id)->delay(now()->addSeconds(25));
@@ -112,6 +119,12 @@ final class CompleteXmplusGatewayPaymentAction
                                 \Telegram\Bot\Keyboard\Keyboard::inlineButton([
                                     'text' => '✅ پرداخت کردم، بررسی کن',
                                     'callback_data' => 'xmpgwcheck_'.$orderId,
+                                ]),
+                            ])
+                            ->row([
+                                \Telegram\Bot\Keyboard\Keyboard::inlineButton([
+                                    'text' => '⬅️ بازگشت به لیست درگاه‌ها',
+                                    'callback_data' => 'pay_xmplusgw_'.$orderId,
                                 ]),
                             ]),
                     ]);
