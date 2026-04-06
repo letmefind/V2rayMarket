@@ -143,11 +143,36 @@ class XmplusPackageAwareRenewalService
 
     private static function createPdoConnection(Collection $settings): PDO
     {
-        $host = $settings->get('xmplus_mysql_host', '');
+        $hostRaw = $settings->get('xmplus_mysql_host', '');
         $port = (int) $settings->get('xmplus_mysql_port', 3306);
-        $database = $settings->get('xmplus_mysql_database', '');
-        $username = $settings->get('xmplus_mysql_username', '');
+        $databaseRaw = $settings->get('xmplus_mysql_database', '');
+        $usernameRaw = $settings->get('xmplus_mysql_username', '');
         $password = $settings->get('xmplus_mysql_password', '');
+
+        // Hestia format: admin_web.admin_xmplus
+        $database = $databaseRaw;
+        $username = $usernameRaw;
+        
+        if ($databaseRaw === $usernameRaw && str_contains($databaseRaw, '.')) {
+            Log::info('XMPlus package-aware renewal: Hestia format detected', [
+                'mysql_user' => $username,
+                'mysql_database' => $database,
+            ]);
+        }
+
+        // Sanitize host
+        $host = trim(str_replace(['mysql:', 'localhost'], '', $hostRaw));
+        if ($host === '') {
+            $host = 'localhost';
+        }
+
+        Log::info('XMPlus package-aware renewal: connecting to MySQL', [
+            'host_raw' => $hostRaw,
+            'host_used' => $host,
+            'port' => $port,
+            'database' => $database,
+            'username' => $username,
+        ]);
 
         $dsn = "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4";
 
