@@ -604,7 +604,7 @@ class XmplusProvisioningService
         $reuseInvoice = $invid !== '' && trim((string) ($order->config_details ?? '')) === '';
 
         if (! $reuseInvoice) {
-            $inv = $api->invoiceCreate($email, $passwdPlain, $pid, $billing, '', 1);
+            $inv = self::invoiceCreateWithBillingFallback($api, $email, $passwdPlain, $pid, $billing, (int) $order->id);
             if (! self::apiOk($inv)) {
                 if (
                     $allowXmplusStaleCredentialReset
@@ -1260,21 +1260,90 @@ class XmplusProvisioningService
     }
 
     /**
-     * XMPlus Client API معمولاً 208 برمی‌گرداند وقتی ایمیل در پنل نیست (حساب حذف شده و VPNMarket هنوز creds قدیمی دارد).
+     * فقط وقتی true که پاسخ API واقعاً یعنی «این ایمیل/حساب در پنل Client دیگر وجود ندارد».
+     *
+     * نکته: XMPlus برای کد ۲۰۸ چند خطای متفاوت می‌دهد (billing unavailable، already registered، invalid password، …).
+     * اگر هر ۲۰۸ را «حساب نیست» فرض کنیم، بعد از register موفق و شکست invoice/create، creds کاربر پاک می‌شود — دقیقاً باگ گزارش‌شده.
      *
      * @param  array<string, mixed>  $row
      */
     protected static function apiIsEmailNotFoundOnClient(array $row): bool
     {
-        if ((int) ($row['code'] ?? 0) === 208) {
-            return true;
+        $msg = strtolower((string) ($row['message'] ?? ''));
+        $code = (int) ($row['code'] ?? 0);
+
+        if ($code === 208) {
+            if (self::apiIsEmailAlreadyRegistered($row)) {
+                return false;
+            }
+            if (str_contains($msg, 'billing') && str_contains($msg, 'unavailable')) {
+                return false;
+            }
+            if (
+                str_contains($msg, 'password')
+                && (str_contains($msg, 'invalid') || str_contains($msg, 'incorrect') || str_contains($msg, 'wrong'))
+            ) {
+                return false;
+            }
+            foreach ([
+                'does not exist', 'not found', 'could not be found', 'no such user',
+                'user not found', 'account not found', 'email not found',
+            ] as $needle) {
+                if (str_contains($msg, $needle)) {
+                    return true;
+                }
+            }
+
+            return false;
         }
+
         $st = strtolower((string) ($row['status'] ?? ''));
         if ($st === 'error' && stripos((string) ($row['message'] ?? ''), 'does not exist') !== false) {
             return true;
         }
 
         return false;
+    }
+
+    /**
+     * اگر billing انتخاب‌شده در پنل غیرفعال باشد، XMPlus «billing unavailable» می‌دهد؛ چند سیکل متداول را امتحان می‌کنیم.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function invoiceCreateWithBillingFallback(
+        XmplusService $api,
+        string $email,
+        string $passwd,
+        int $pid,
+        string $preferredBilling,
+        int $orderIdForLog = 0
+    ): array {
+        $candidates = [$preferredBilling, 'month', 'quater', 'quarter', 'semiannual', 'annual'];
+        $candidates = array_values(array_unique(array_filter($candidates, fn ($b) => is_string($b) && $b !== '')));
+        $last = ['status' => 'error', 'code' => 0, 'message' => 'invoice create: no attempt'];
+        foreach ($candidates as $b) {
+            $inv = $api->invoiceCreate($email, $passwd, $pid, $b, '', 1);
+            $last = $inv;
+            if (self::apiOk($inv)) {
+                if ($b !== $preferredBilling) {
+                    $api->log('info', 'XMPlus invoice/create: از billing جایگزین استفاده شد', [
+                        'preferred' => $preferredBilling,
+                        'used' => $b,
+                        'pid' => $pid,
+                        'order_id' => $orderIdForLog,
+                    ]);
+                }
+
+                return $inv;
+            }
+            $msg = strtolower((string) ($inv['message'] ?? ''));
+            $onlyBillingUnavailable = str_contains($msg, 'billing') && str_contains($msg, 'unavailable');
+            if (! $onlyBillingUnavailable) {
+                break;
+            }
+        }
+
+        return $last;
     }
 
     /**
@@ -2186,7 +2255,7 @@ class XmplusProvisioningService
             }
         }
 
-        $inv = $api->invoiceCreate($email, $passwdPlain, $pid, $billing, '', 1);
+        $inv = self::invoiceCreateWithBillingFallback($api, $email, $passwdPlain, $pid, $billing, (int) $order->id);
         if (! self::apiOk($inv)) {
             if (
                 $allowXmplusStaleCredentialReset
