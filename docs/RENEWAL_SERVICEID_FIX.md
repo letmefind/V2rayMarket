@@ -235,7 +235,7 @@ Table Name:
 php artisan tinker
 
 App\Services\XmplusInvoiceDatabaseSyncService::testConnection(
-    app(\App\Models\Settings::class)
+    App\Models\Setting::all()->pluck('value', 'key')
 );
 ```
 

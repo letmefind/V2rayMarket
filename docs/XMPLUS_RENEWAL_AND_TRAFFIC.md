@@ -330,7 +330,8 @@ if (preg_match('/^buy_traffic_(\d+)_(\d+)$/', $data, $m)) {
 # در Tinker:
 php artisan tinker
 
-$api = new \App\Services\XmplusService(app(\App\Models\Settings::class));
+$settings = \App\Models\Setting::all()->pluck('value', 'key');
+$api = new \App\Services\XmplusService($settings);
 $result = $api->serviceAddTraffic(
     'test@example.com',
     'password',

@@ -13,13 +13,13 @@ $app = require_once __DIR__.'/bootstrap/app.php';
 $app->make(\Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 
 use App\Services\XmplusInvoiceDatabaseSyncService;
-use App\Models\Settings;
+use App\Models\Setting;
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 echo "🔍 بررسی ساختار جدول invoice در XMPlus\n";
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
 
-$settings = app(Settings::class);
+$settings = Setting::all()->pluck('value', 'key');
 
 // 1. بررسی اتصال
 echo "1️⃣ تست اتصال به دیتابیس...\n";
