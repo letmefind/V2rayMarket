@@ -1301,7 +1301,31 @@ class XmplusProvisioningService
                             return ['sublink' => $sl, 'sid' => $sidFromInv];
                         }
                     } catch (\Throwable $e) {
-                        $api->log('debug', 'XMPlus poll service_info (sid از فاکتور)', ['error' => $e->getMessage(), 'sid' => $sidFromInv]);
+                        $errMsg = strtolower((string) ($e->getMessage() ?? ''));
+                        if (str_contains($errMsg, 'service not found') || str_contains($errMsg, 'not found')) {
+                            $api->log('warning', 'XMPlus: سرویس با sid از فاکتور در پنل یافت نشد (احتمالاً حذف شده)', [
+                                'error' => $e->getMessage(),
+                                'sid' => $sidFromInv,
+                                'invid' => $invid,
+                                'attempt' => $i + 1,
+                            ]);
+                            if (($i + 1) >= 5) {
+                                throw new RuntimeException(
+                                    \App\Models\BotMessage::get(
+                                        'err_service_not_found',
+                                        "❌ فاکتور «{invoice_id}» با وضعیت Paid است و serviceid={service_id} دارد، اما سرویس در پنل XMPlus یافت نشد.\n\nاین معمولاً به یکی از دلایل زیر است:\n▫️ سرویس از پنل XMPlus حذف شده است\n▫️ سرویس متعلق به کاربر دیگری است (userid mismatch)\n▫️ مشکلی در API پنل XMPlus وجود دارد\n\n🔧 راه‌حل:\n1. وارد پنل XMPlus شوید و بخش «سرویس‌ها» را چک کنید\n2. سرویس با sid={service_id} را جستجو کنید\n3. اگر سرویس وجود دارد، لینک را دستی کپی کنید\n4. اگر سرویس حذف شده، با پشتیبانی XMPlus تماس بگیرید\n\n🌐 ورود به پنل: {panel_url}\n📧 ایمیل: {email}",
+                                        [
+                                            'invoice_id' => $invid,
+                                            'service_id' => $sidFromInv,
+                                            'panel_url' => $paidWithoutSublinkFallbackContext['panel_base'] ?? 'https://www.symmetricnet.com',
+                                            'email' => $email,
+                                        ]
+                                    )
+                                );
+                            }
+                        } else {
+                            $api->log('debug', 'XMPlus poll service_info (sid از فاکتور)', ['error' => $e->getMessage(), 'sid' => $sidFromInv]);
+                        }
                     }
                 }
 

@@ -305,6 +305,22 @@ class BotMessageSeeder extends Seeder
                 'content' => '❌ در حال حاضر هیچ پلنی برای خرید موجود نیست.',
                 'description' => 'پیام خطا برای عدم وجود پلن',
             ],
+
+            // خطاهای سرویس - Service Errors
+            [
+                'key' => 'err_service_not_found',
+                'category' => 'errors',
+                'title' => 'خطا: سرویس در پنل یافت نشد',
+                'content' => "❌ فاکتور «{invoice_id}» با وضعیت Paid است و serviceid={service_id} دارد، اما سرویس در پنل XMPlus یافت نشد.\n\nاین معمولاً به یکی از دلایل زیر است:\n▫️ سرویس از پنل XMPlus حذف شده است\n▫️ سرویس متعلق به کاربر دیگری است (userid mismatch)\n▫️ مشکلی در API پنل XMPlus وجود دارد\n\n🔧 راه‌حل:\n1. وارد پنل XMPlus شوید و بخش «سرویس‌ها» را چک کنید\n2. سرویس با sid={service_id} را جستجو کنید\n3. اگر سرویس وجود دارد، لینک را دستی کپی کنید\n4. اگر سرویس حذف شده، با پشتیبانی XMPlus تماس بگیرید\n\n🌐 ورود به پنل: {panel_url}\n📧 ایمیل: {email}",
+                'description' => 'پیام خطای Service not found. متغیرها: {invoice_id}, {service_id}, {panel_url}, {email}',
+            ],
+            [
+                'key' => 'err_paid_without_service',
+                'category' => 'errors',
+                'title' => 'خطا: Paid بدون سرویس',
+                'content' => "⚠️ فاکتور در XMPlus با وضعیت Paid ثبت شده، اما API هنوز لینک اشتراک (subscription) را برنمی‌گرداند.\n\nاحتمالاً سرویس در پنل هنوز ساخته نشده، نیاز به تأیید دستی دارد، یا نسخهٔ پنل با Client API هم‌خوان نیست.\n\nاگر فاکتور فقط با ویرایش مستقیم دیتابیس به Paid رسیده (بدون تکمیل مسیر پرداخت داخل پنل)، XMPlus معمولاً سرویس و لینک نمی‌سازد؛ باید از مسیر پنل یا invoice/pay با درگاه نمایندگی تسویه شود.\n\n🌐 ورود به پنل کاربری: {panel_url}\n📧 ایمیل پنل: {email}\n📄 شناسه فاکتور (invid): {invoice_id}\n🛒 شماره سفارش فروشگاه: #{order_id}\n\nلطفاً از بخش «سرویس‌ها / اشتراک» همان پنل لینک را بردارید. اگر سرویسی دیده نمی‌شود با پشتیبانی هاست XMPlus تماس بگیرید.",
+                'description' => 'پیام خطای Paid without service. متغیرها: {panel_url}, {email}, {invoice_id}, {order_id}',
+            ],
         ];
 
         foreach ($messages as $message) {
