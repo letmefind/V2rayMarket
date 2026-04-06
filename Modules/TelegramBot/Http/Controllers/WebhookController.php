@@ -1454,25 +1454,25 @@ class WebhookController extends Controller
         $keyboard = Keyboard::make()->inline();
 
         if (!$order->discount_code_id) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '🎫 ثبت کد تخفیف', 'callback_data' => "enter_discount_{$order->id}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_discount_enter', '🎫 ثبت کد تخفیف'), 'callback_data' => "enter_discount_{$order->id}"])]);
         } else {
-            $keyboard->row([Keyboard::inlineButton(['text' => '❌ حذف کد تخفیف', 'callback_data' => "remove_discount_{$order->id}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_discount_remove', '❌ حذف کد تخفیف'), 'callback_data' => "remove_discount_{$order->id}"])]);
         }
 
         if (! $xmplus && $balance >= $order->amount) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '✅ پرداخت با کیف پول', 'callback_data' => "pay_wallet_order_{$order->id}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_payment_wallet', '✅ پرداخت با کیف پول'), 'callback_data' => "pay_wallet_order_{$order->id}"])]);
         }
-        $keyboard->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "pay_card_{$order->id}"])]);
+        $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_payment_card', '💳 کارت به کارت'), 'callback_data' => "pay_card_{$order->id}"])]);
         if ($xmplus) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 پرداخت آنلاین ارزی / کریپتو', 'callback_data' => "pay_xmplusgw_{$order->id}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_payment_online', '🌐 پرداخت آنلاین ارزی / کریپتو'), 'callback_data' => "pay_xmplusgw_{$order->id}"])]);
         }
         if ($this->isPlisioActive()) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '💎 پرداخت Plisio (کریپتو)', 'callback_data' => "pay_plisio_{$order->id}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_payment_plisio', '💎 پرداخت Plisio (کریپتو)'), 'callback_data' => "pay_plisio_{$order->id}"])]);
         }
         if ($this->isManualCryptoActive()) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '💠 USDT / USDC (دستی)', 'callback_data' => "pay_mc_{$order->id}"])]);
+            $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_manual_crypto', '💠 USDT / USDC (دستی)'), 'callback_data' => "pay_mc_{$order->id}"])]);
         }
-        $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به پلن‌ها', 'callback_data' => '/plans'])]);
+        $keyboard->row([Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_back_to_plans', '⬅️ بازگشت به پلن‌ها'), 'callback_data' => '/plans'])]);
 
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
@@ -1993,12 +1993,16 @@ class WebhookController extends Controller
             return (int) ($pl->xmplus_package_id ?? 0) > 0;
         })->values();
 
-        $message = "🛒 خرید سرویس VPN (XMPlus)\n\n";
-        $message .= "یک پکیج را از دکمه‌های زیر انتخاب کنید.\n";
-        $message .= 'قیمت نهایی به تومان مطابق «پلن فروشگاه» است (نه قیمت خام پنل).';
+        $message = \App\Models\BotMessage::get(
+            'msg_select_plan',
+            "🛒 خرید سرویس VPN (XMPlus)\n\nیک پکیج را از دکمه‌های زیر انتخاب کنید.\nقیمت نهایی به تومان مطابق «پلن فروشگاه» است (نه قیمت خام پنل)."
+        );
 
         if (! empty($catalog['error']) && empty($catalog['full']) && empty($catalog['traffic'])) {
-            $message .= "\n\n⚠️ لیست پکیج‌های پنل موقتاً در دسترس نیست؛ اگر پلن‌ها pid دارند باز هم می‌توانید خرید کنید.";
+            $message .= "\n\n".\App\Models\BotMessage::get(
+                'msg_plans_unavailable',
+                '⚠️ لیست پکیج‌های پنل موقتاً در دسترس نیست؛ اگر پلن‌ها pid دارند باز هم می‌توانید خرید کنید.'
+            );
         }
 
         $keyboard = Keyboard::make()->inline();

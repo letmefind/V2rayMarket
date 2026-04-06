@@ -19,6 +19,20 @@ class BotMessageSeeder extends Seeder
                 'description' => 'متن دکمه پرداخت کارت به کارت در صفحه انتخاب روش پرداخت',
             ],
             [
+                'key' => 'btn_payment_wallet',
+                'category' => 'buttons',
+                'title' => 'دکمه: پرداخت با کیف پول',
+                'content' => '✅ پرداخت با کیف پول',
+                'description' => 'متن دکمه پرداخت با موجودی کیف پول',
+            ],
+            [
+                'key' => 'btn_manual_crypto',
+                'category' => 'buttons',
+                'title' => 'دکمه: پرداخت کریپتو دستی',
+                'content' => '💠 USDT / USDC (دستی)',
+                'description' => 'متن دکمه پرداخت با کریپتو به صورت دستی',
+            ],
+            [
                 'key' => 'btn_payment_online',
                 'category' => 'buttons',
                 'title' => 'دکمه: پرداخت آنلاین',
@@ -267,6 +281,29 @@ class BotMessageSeeder extends Seeder
                 'title' => 'دکمه: انصراف',
                 'content' => '❌ انصراف',
                 'description' => 'متن دکمه انصراف',
+            ],
+
+            // پیام‌های خرید و انتخاب پلن - Purchase Messages
+            [
+                'key' => 'msg_select_plan',
+                'category' => 'messages',
+                'title' => 'پیام: انتخاب پلن برای خرید',
+                'content' => "🛒 خرید سرویس VPN (XMPlus)\n\nیک پکیج را از دکمه‌های زیر انتخاب کنید.\nقیمت نهایی به تومان مطابق «پلن فروشگاه» است (نه قیمت خام پنل).",
+                'description' => 'پیام لیست پلن‌ها برای خرید',
+            ],
+            [
+                'key' => 'msg_plans_unavailable',
+                'category' => 'errors',
+                'title' => 'خطا: پلن‌ها در دسترس نیست',
+                'content' => '⚠️ لیست پکیج‌های پنل موقتاً در دسترس نیست؛ اگر پلن‌ها pid دارند باز هم می‌توانید خرید کنید.',
+                'description' => 'پیام خطا برای عدم دسترسی به لیست پلن‌ها',
+            ],
+            [
+                'key' => 'msg_no_plans',
+                'category' => 'errors',
+                'title' => 'خطا: هیچ پلنی موجود نیست',
+                'content' => '❌ در حال حاضر هیچ پلنی برای خرید موجود نیست.',
+                'description' => 'پیام خطا برای عدم وجود پلن',
             ],
         ];
 
