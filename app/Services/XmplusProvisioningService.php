@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\XmplusInvoiceDatabaseSyncService;
+use App\Services\XmplusServiceRenewalService;
 use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -1032,6 +1033,30 @@ class XmplusProvisioningService
             $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
+
+            // ✅ تمدید مستقیم service در دیتابیس XMPlus
+            if ($shopPaymentAlreadyCollected) {
+                try {
+                    $invoiceViewForRenewal = $api->invoiceView($email, $passwdPlain, $invid);
+                    $invoiceData = $invoiceViewForRenewal['invoice'] ?? [];
+                    
+                    if (self::invoiceViewResponseIsPaid($invoiceViewForRenewal)) {
+                        $renewed = XmplusServiceRenewalService::renewServiceDirectly($settings, $sid, $invoiceData);
+                        if ($renewed) {
+                            $api->log('info', 'XMPlus تمدید: ✅ service مستقیماً در DB تمدید شد', [
+                                'invid' => $invid,
+                                'service_id' => $sid,
+                            ]);
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus تمدید: خطا در تمدید مستقیم service', [
+                        'error' => $e->getMessage(),
+                        'invid' => $invid,
+                        'sid' => $sid,
+                    ]);
+                }
+            }
 
             return [
                 'final_config' => $sublink,
