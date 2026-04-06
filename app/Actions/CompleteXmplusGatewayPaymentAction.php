@@ -6,6 +6,7 @@ use App\Events\OrderPaid;
 use App\Models\Order;
 use App\Models\Setting;
 use App\Models\Transaction;
+use App\Jobs\PollXmplusOffsitePayment;
 use App\Services\XmplusProvisioningService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -86,6 +87,7 @@ final class CompleteXmplusGatewayPaymentAction
                                 ]),
                             ]),
                     ]);
+                    PollXmplusOffsitePayment::dispatch($orderId, (string) $order->user->telegram_chat_id)->delay(now()->addSeconds(25));
                 } catch (\Throwable $e) {
                     Log::warning('CompleteXmplusGatewayPayment telegram redirect msg: '.$e->getMessage());
                 }
@@ -113,6 +115,7 @@ final class CompleteXmplusGatewayPaymentAction
                                 ]),
                             ]),
                     ]);
+                    PollXmplusOffsitePayment::dispatch($orderId, (string) $order->user->telegram_chat_id)->delay(now()->addSeconds(25));
                 } catch (\Throwable $e) {
                     Log::warning('CompleteXmplusGatewayPayment telegram await msg: '.$e->getMessage());
                 }
