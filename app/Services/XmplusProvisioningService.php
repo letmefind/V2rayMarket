@@ -579,6 +579,12 @@ class XmplusProvisioningService
                     'xmplus_client_email' => $email,
                     'xmplus_client_password' => $passwdPlain,
                 ])->save();
+                
+                // بلافاصله flush کن تا مطمئن شوی ذخیره شده
+                $api->log('info', 'XMPlus: password ذخیره شد', [
+                    'email' => $email,
+                    'user_id' => $user->id,
+                ]);
             }
 
             $credentialsMessage = self::formatCredentialsMessage($email, $passwdPlain, $panelBase);
