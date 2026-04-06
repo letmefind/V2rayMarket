@@ -9,10 +9,12 @@ use App\Models\Setting;
 use App\Models\Transaction;
 use App\Services\XmplusProvisioningService;
 use App\Support\XmplusGatewayTelegram;
+use App\Support\XmplusServerHelper;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Telegram\Bot\Laravel\Facades\Telegram;
+use Telegram\Bot\Keyboard\Keyboard;
 
 /**
  * ادامهٔ سفارش XMPlus پس از انتخاب درگاه (تلگرام یا وب).
@@ -500,6 +502,27 @@ final class CompleteXmplusGatewayPaymentAction
 
         Cache::forget($ctxKey);
 
+        // دریافت اطلاعات سرورها از XMPlus برای نمایش دکمه‌ها
+        $servers = [];
+        if (! empty($prov['panel_client_id']) && ! empty($ctx['email']) && ! empty($ctx['passwd'])) {
+            try {
+                $api = XmplusProvisioningService::fromSettings($settings);
+                $serviceInfo = $api->serviceInfo(
+                    (string) $ctx['email'],
+                    (string) $ctx['passwd'],
+                    (int) $prov['panel_client_id']
+                );
+                
+                if (! empty($serviceInfo['servers']) && is_array($serviceInfo['servers'])) {
+                    $servers = $serviceInfo['servers'];
+                    // Cache کردن سرورها برای استفاده بعدی
+                    XmplusServerHelper::cacheServers($order->id, $servers);
+                }
+            } catch (\Throwable $e) {
+                Log::debug('CompleteXmplusGatewayPayment: خطا در دریافت servers', ['error' => $e->getMessage()]);
+            }
+        }
+
         if ($user->telegram_chat_id) {
             try {
                 Telegram::setAccessToken($settings->get('telegram_bot_token'));
@@ -509,11 +532,41 @@ final class CompleteXmplusGatewayPaymentAction
                 if ($telegramAppend) {
                     $telegramMessage .= "\n\n".$telegramAppend;
                 }
-                Telegram::sendMessage([
+                
+                // ساخت دکمه‌های سرورها
+                $keyboard = null;
+                if (! empty($servers)) {
+                    $serverButtons = XmplusServerHelper::buildServerButtons($order->id, $servers);
+                    
+                    // اضافه کردن دکمه‌های پایین پیام
+                    $serverButtons[] = [
+                        ['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services'],
+                        ['text' => '🏠 منوی اصلی', 'callback_data' => '/start'],
+                    ];
+                    
+                    $keyboard = Keyboard::make()->inline()->setResizeKeyboard(true);
+                    foreach ($serverButtons as $row) {
+                        $buttons = [];
+                        foreach ($row as $btn) {
+                            $buttons[] = Keyboard::inlineButton($btn);
+                        }
+                        $keyboard->row(...$buttons);
+                    }
+                    
+                    $telegramMessage .= "\n\n━━━━━━━━━━━━━━━━━\n🖥 <b>سرورهای موجود</b>\n\n📍 برای مشاهده جزئیات و QR Code هر سرور، روی دکمه آن کلیک کنید:";
+                }
+                
+                $messageParams = [
                     'chat_id' => $user->telegram_chat_id,
                     'text' => $telegramMessage,
-                    'parse_mode' => 'Markdown',
-                ]);
+                    'parse_mode' => 'HTML',
+                ];
+                
+                if ($keyboard) {
+                    $messageParams['reply_markup'] = $keyboard;
+                }
+                
+                Telegram::sendMessage($messageParams);
             } catch (\Throwable $e) {
                 Log::warning('CompleteXmplusGatewayPayment Telegram: '.$e->getMessage());
             }

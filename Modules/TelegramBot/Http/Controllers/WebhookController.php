@@ -10,6 +10,7 @@ use App\Models\Setting;
 use App\Support\AdminOrderCallback;
 use App\Support\XmplusCatalog;
 use App\Support\XmplusGatewayTelegram;
+use App\Support\XmplusServerHelper;
 use App\Support\AdminTicketCallback;
 use App\Models\TelegramBotSetting;
 use App\Services\ManualCryptoService;
@@ -783,6 +784,13 @@ class WebhookController extends Controller
         }
         if (preg_match('/^trep_(\d+)_([a-f0-9]{8})$/', $data, $adm) && AdminTicketCallback::verify((int) $adm[1], $adm[2])) {
             $this->handleAdminTicketReplyStart($callbackQuery, (int) $adm[1]);
+
+            return;
+        }
+        
+        // نمایش جزئیات سرور XMPlus
+        if (preg_match('/^server_(\d+)_(\d+)$/', $data, $srv)) {
+            $this->handleShowServerDetails($callbackQuery, (int) $srv[1], (int) $srv[2]);
 
             return;
         }
@@ -4451,5 +4459,108 @@ class WebhookController extends Controller
             'resize_keyboard' => true,
             'one_time_keyboard' => false
         ]);
+    }
+
+    /**
+     * نمایش جزئیات یک سرور XMPlus + QR Code
+     */
+    protected function handleShowServerDetails($callbackQuery, int $orderId, int $serverIndex): void
+    {
+        $chatId = $callbackQuery->getMessage()->getChat()->getId();
+        
+        try {
+            Telegram::answerCallbackQuery([
+                'callback_query_id' => $callbackQuery->getId(),
+                'text' => '🔄 در حال بارگذاری...',
+            ]);
+        } catch (\Throwable $e) {
+        }
+
+        // بررسی اینکه سرویس متعلق به این کاربر است
+        $order = Order::with('user')->find($orderId);
+        if (! $order || ! $order->user || (string) $order->user->telegram_chat_id !== (string) $chatId) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => '❌ خطا: این سرویس متعلق به شما نیست.',
+                ]);
+            } catch (\Throwable $e) {
+            }
+            return;
+        }
+
+        // دریافت اطلاعات سرورها از Cache
+        $servers = XmplusServerHelper::getCachedServers($orderId);
+        
+        if (empty($servers) || ! isset($servers[$serverIndex])) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => '❌ خطا: اطلاعات سرور یافت نشد. لطفاً دوباره سرویس را از منو باز کنید.',
+                ]);
+            } catch (\Throwable $e) {
+            }
+            return;
+        }
+
+        $server = $servers[$serverIndex];
+        $uri = $server['uri'] ?? '';
+        
+        if (empty($uri)) {
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => '❌ خطا: لینک کانفیگ این سرور موجود نیست.',
+                ]);
+            } catch (\Throwable $e) {
+            }
+            return;
+        }
+
+        // فرمت کردن اطلاعات سرور
+        $message = XmplusServerHelper::formatServerInfo($server, $serverIndex);
+
+        // ساخت QR Code
+        try {
+            $qrPath = XmplusServerHelper::generateQrCode($uri);
+            
+            // ارسال QR Code + پیام
+            Telegram::sendPhoto([
+                'chat_id' => $chatId,
+                'photo' => InputFile::create($qrPath),
+                'caption' => $message,
+                'parse_mode' => 'HTML',
+                'reply_markup' => Keyboard::make()->inline()
+                    ->row([
+                        Keyboard::inlineButton(['text' => '🔗 کپی لینک', 'url' => 'https://t.me/share/url?url='.urlencode($uri)]),
+                    ])
+                    ->row([
+                        Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => '/my_services']),
+                        Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start']),
+                    ]),
+            ]);
+            
+            // پاکسازی QR Code های قدیمی
+            XmplusServerHelper::cleanupOldQrCodes();
+            
+        } catch (\Throwable $e) {
+            Log::error('handleShowServerDetails: خطا در ارسال QR', ['error' => $e->getMessage()]);
+            
+            // اگر QR Code ارسال نشد، فقط پیام را بفرست
+            try {
+                Telegram::sendMessage([
+                    'chat_id' => $chatId,
+                    'text' => $message,
+                    'parse_mode' => 'HTML',
+                    'reply_markup' => Keyboard::make()->inline()
+                        ->row([
+                            Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => '/my_services']),
+                            Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start']),
+                        ]),
+                ]);
+            } catch (\Throwable $e2) {
+                Log::error('handleShowServerDetails: خطا در ارسال پیام', ['error' => $e2->getMessage()]);
+            }
+        }
     }
 }
