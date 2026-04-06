@@ -884,6 +884,32 @@ class XmplusProvisioningService
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
 
         $invid = trim((string) ($renewalOrder->xmplus_inv_id ?? ''));
+        
+        // بررسی می‌کنیم که آیا service اصلی هنوز وجود دارد یا خیر
+        $serviceExists = false;
+        if ($invid !== '') {
+            try {
+                $svcCheck = $api->serviceInfo($email, $passwdPlain, $sid);
+                if (self::apiOk($svcCheck)) {
+                    $serviceExists = true;
+                }
+            } catch (\Throwable $e) {
+                $errMsg = strtolower((string) ($e->getMessage() ?? ''));
+                if (str_contains($errMsg, 'service not found') || str_contains($errMsg, 'not found')) {
+                    $api->log('warning', 'XMPlus تمدید: service اصلی یافت نشد؛ فاکتور قبلی نامعتبر شد', [
+                        'sid' => $sid,
+                        'old_invid' => $invid,
+                        'order_id' => $renewalOrder->id,
+                    ]);
+                    // فاکتور قبلی را پاک می‌کنیم تا یک فاکتور جدید بسازیم
+                    $invid = '';
+                    $renewalOrder->forceFill(['xmplus_inv_id' => null])->save();
+                } else {
+                    $api->log('debug', 'XMPlus تمدید: خطا در بررسی service', ['error' => $e->getMessage(), 'sid' => $sid]);
+                }
+            }
+        }
+        
         if ($invid === '') {
             $renew = $api->serviceRenew($email, $passwdPlain, $sid);
             if (! self::apiOk($renew)) {
@@ -908,6 +934,7 @@ class XmplusProvisioningService
             $api->log('info', 'XMPlus تمدید بدون serviceRenew جدید (همان فاکتور)', [
                 'invid' => $invid,
                 'order_id' => $renewalOrder->id,
+                'service_exists' => $serviceExists,
             ]);
         }
 
