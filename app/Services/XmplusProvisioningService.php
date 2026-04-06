@@ -1262,11 +1262,13 @@ class XmplusProvisioningService
                 $attemptLimit = max($attemptLimit, 45);
             }
 
-            $sublink = self::pickSublinkFromServices($services, $expectPid, $knownSid);
-            if ($sublink !== null) {
-                $sid = self::pickSidFromServices($services, $expectPid, $knownSid);
+            if ($paidNow) {
+                $sublink = self::pickSublinkFromServices($services, $expectPid, $knownSid);
+                if ($sublink !== null) {
+                    $sid = self::pickSidFromServices($services, $expectPid, $knownSid);
 
-                return ['sublink' => $sublink, 'sid' => $sid];
+                    return ['sublink' => $sublink, 'sid' => $sid];
+                }
             }
 
             if ($paidNow) {
