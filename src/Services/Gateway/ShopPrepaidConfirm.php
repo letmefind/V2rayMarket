@@ -485,9 +485,22 @@ final class ShopPrepaidConfirmKernel
     public static function hookPanelFulfill(object $invoice, string $invId, array $order, ?int $gatewayId, array $config): void
     {
         // symmetricnet: Guest\CallbackController نشان می‌دهد مسیر واقعی ساخت سرویس این فراخوانی است.
-        self::tryInvoiceHelperPay($invoice, $config, $invId);
+        $helperBuiltService = self::tryInvoiceHelperPay($invoice, $config, $invId);
         self::tryConfiguredAfterPaidStatic($config, $invoice, $invId, $gatewayId);
         self::tryDomainInvoiceAfterPaidStatics($invoice, $invId, $gatewayId);
+
+        // Fail-safe: اگر invoice/pay موفق اعلام شد ولی serviceid ساخته نشد، موفقیت فیک برنگردان.
+        $reloaded = self::firstInvoiceByPublicKey(self::INVOICE_MODEL, $invId);
+        $effective = $reloaded ?? $invoice;
+        if (! self::invoiceHasServiceId($effective)) {
+            $why = $helperBuiltService
+                ? 'helper reported success but serviceid still empty'
+                : 'InvoiceHelper::pay did not build service';
+            throw new RuntimeException(
+                'ShopPrepaidConfirmKernel: invoice paid but service was not provisioned ('.$why.'). '
+                .'Avoid returning success without serviceid for inv_id='.$invId
+            );
+        }
     }
 
     /**
@@ -852,7 +865,7 @@ final class ShopPrepaidConfirmKernel
      * \App\Application\Controller\Guest\CallbackController::handle()
      *   $service = InvoiceHelper::pay($invoice, $user)
      */
-    private static function tryInvoiceHelperPay(object $invoice, array $config, string $invId): void
+    private static function tryInvoiceHelperPay(object $invoice, array $config, string $invId): bool
     {
         $helper = 'App\\Utility\\InvoiceHelper';
         $userModel = 'App\\Application\\Models\\User';
@@ -863,20 +876,20 @@ final class ShopPrepaidConfirmKernel
                 'helper_pay_callable' => is_callable([$helper, 'pay']),
                 'user_model_exists' => class_exists($userModel),
             ]);
-            return;
+            return false;
         }
 
         $uidRaw = $invoice->userid ?? $invoice->user_id ?? null;
         if (! is_numeric($uidRaw) || (int) $uidRaw <= 0 || ! method_exists($userModel, 'find')) {
             self::debugLog($config, 'invoice_helper:invalid_uid', ['inv_id' => $invId, 'uid_raw' => $uidRaw]);
-            return;
+            return false;
         }
 
         try {
             $user = $userModel::find((int) $uidRaw);
             if (! is_object($user)) {
                 self::debugLog($config, 'invoice_helper:user_not_found', ['inv_id' => $invId, 'uid' => (int) $uidRaw]);
-                return;
+                return false;
             }
             $ret = $helper::pay($invoice, $user);
             self::debugLog($config, 'invoice_helper:pay_called', [
@@ -886,8 +899,27 @@ final class ShopPrepaidConfirmKernel
                 'ret_is_object' => is_object($ret),
                 'ret_is_array' => is_array($ret),
             ]);
+
+            if (is_object($ret) && isset($ret->id) && is_numeric($ret->id) && (int) $ret->id > 0) {
+                // خیلی از پیاده‌سازی‌ها Service object برمی‌گردانند ولی serviceid روی invoice هنوز ست نشده.
+                try {
+                    $invoice->serviceid = (int) $ret->id;
+                    if (method_exists($invoice, 'save')) {
+                        $invoice->save();
+                    }
+                } catch (Throwable $e) {
+                }
+            }
+
+            if (self::invoiceHasServiceId($invoice)) {
+                return true;
+            }
+            $fresh = self::firstInvoiceByPublicKey(self::INVOICE_MODEL, $invId);
+
+            return $fresh !== null && self::invoiceHasServiceId($fresh);
         } catch (Throwable $e) {
             self::debugLog($config, 'invoice_helper:exception', ['inv_id' => $invId, 'error' => $e->getMessage()]);
+            return false;
         }
     }
 
