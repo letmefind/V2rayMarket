@@ -21,6 +21,10 @@
  *   در یک کلاس استاتیک کوچک بگذارید و در تنظیمات درگاه after_paid_class / after_paid_method را پر کنید،
  *   یا در hookPanelFulfill() صدا بزنید.
  *
+ *   نکتهٔ تکنیکی: اگر ابتدا فقط status/paid_date بدون pay($gatewayId) ست شود، fulfillAfterPaid
+ *   دوباره همان pay را با «حتی اگر از قبل Paid» صدا می‌زند تا serviceid پر شود؛ در غیر این صورت API با
+ *   services: [] می‌ماند.
+ *
  * قرارداد pay() برای Client API / VPNMarket:
  *   ret=1, code=100, status=success, gateway=ShopPrepaidConfirm, data=''
  */
@@ -671,16 +675,23 @@ final class ShopPrepaidConfirmKernel
     /**
      * بسیاری از پنل‌ها با یک متد pay(int $gatewayId) یا مشابه، هم Paid و هم سرویس را جلو می‌برند.
      *
+     * مهم: اگر قبلاً با forcePaidRow فقط status/paid_date عوض شده باشد، فاکتور Paid است اما سرویس ساخته نشده.
+     * در آن حالت باید همان pay($gatewayId) دوباره (یا برای اولین بار) صدا زده شود؛ پس پارامتر
+     * $invokeEvenIfAlreadyPaid در فاز fulfillAfterPaid مقدار true می‌گیرد.
+     *
      * @param  class-string  $fqcn
      */
-    private static function tryPayWithGatewayId(string $fqcn, string $invId, ?int $gatewayId): void
+    private static function tryPayWithGatewayId(string $fqcn, string $invId, ?int $gatewayId, bool $invokeEvenIfAlreadyPaid = false): void
     {
         if ($gatewayId === null || $gatewayId <= 0) {
             return;
         }
         $methodNames = ['pay', 'checkout', 'completePay', 'gatewayPay', 'payWithGateway', 'executeGatewayPay'];
         $inv = self::firstInvoiceByPublicKey($fqcn, $invId);
-        if ($inv === null || self::rowIsPaid($inv)) {
+        if ($inv === null) {
+            return;
+        }
+        if (! $invokeEvenIfAlreadyPaid && self::rowIsPaid($inv)) {
             return;
         }
         foreach ($methodNames as $m) {
@@ -696,10 +707,84 @@ final class ShopPrepaidConfirmKernel
             } catch (Throwable $e) {
             }
             $inv = self::firstInvoiceByPublicKey($fqcn, $invId);
-            if ($inv !== null && self::rowIsPaid($inv)) {
+            if ($inv !== null && self::rowIsPaid($inv) && self::invoiceHasServiceId($inv)) {
+                return;
+            }
+            if ($inv !== null && self::rowIsPaid($inv) && ! $invokeEvenIfAlreadyPaid) {
                 return;
             }
         }
+
+        if ($invokeEvenIfAlreadyPaid) {
+            self::tryInvoiceSingleIntGatewayMethods($fqcn, $invId, $gatewayId);
+        }
+    }
+
+    /**
+     * متدهای نمونه با دقیقاً یک پارامتر اجباری (معمولاً gateway id) — وقتی نام متد از لیست ثابت نیست.
+     *
+     * @param  class-string  $fqcn
+     */
+    private static function tryInvoiceSingleIntGatewayMethods(string $fqcn, string $invId, int $gatewayId): void
+    {
+        try {
+            $ref = new ReflectionClass($fqcn);
+        } catch (Throwable $e) {
+            return;
+        }
+
+        foreach ($ref->getMethods(ReflectionMethod::IS_PUBLIC) as $rm) {
+            if ($rm->isStatic() || $rm->getNumberOfRequiredParameters() !== 1) {
+                continue;
+            }
+            if ($rm->getDeclaringClass()->getName() !== $fqcn) {
+                continue;
+            }
+            $name = $rm->getName();
+            if (str_starts_with($name, '__')) {
+                continue;
+            }
+            if (preg_match('/pay|gateway|checkout|complete|confirm|finalize|settle|activate|provision|execute/i', $name) !== 1) {
+                continue;
+            }
+            if (preg_match('/^(get|set|is|has|to|new|delete|find|all|where|query)/i', $name) === 1) {
+                continue;
+            }
+
+            $inv = self::firstInvoiceByPublicKey($fqcn, $invId);
+            if ($inv === null) {
+                return;
+            }
+            try {
+                $inv->{$name}($gatewayId);
+            } catch (Throwable $e) {
+            }
+            $inv = self::firstInvoiceByPublicKey($fqcn, $invId);
+            if ($inv !== null && self::invoiceHasServiceId($inv)) {
+                return;
+            }
+        }
+    }
+
+    private static function invoiceHasServiceId(object $invoice): bool
+    {
+        foreach (['serviceid', 'service_id', 'sid'] as $k) {
+            if (! isset($invoice->{$k})) {
+                continue;
+            }
+            $v = $invoice->{$k};
+            if ($v === null || $v === '') {
+                continue;
+            }
+            if (is_numeric($v) && (int) $v > 0) {
+                return true;
+            }
+            if (is_string($v) && trim($v) !== '' && strtolower(trim($v)) !== 'null') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -768,7 +853,8 @@ final class ShopPrepaidConfirmKernel
             return;
         }
 
-        self::tryPayWithGatewayId($fqcn, $invId, $gatewayId);
+        // اگر فقط ردیف «دستی» Paid شده، pay($gatewayId) قبل‌تر به‌خاطر rowIsPaid اجرا نشده است.
+        self::tryPayWithGatewayId($fqcn, $invId, $gatewayId, true);
         self::tryMethodsOnInvoice($fqcn, $invId, self::FULFILL_INSTANCE_METHODS);
 
         try {
