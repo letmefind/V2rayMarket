@@ -1318,9 +1318,11 @@ class XmplusProvisioningService
         string $preferredBilling,
         int $orderIdForLog = 0
     ): array {
+        $preferredBilling = self::canonicalXmplusBillingForApi($preferredBilling);
         $candidates = self::resolveInvoiceCreateBillingCandidates($api, $pid, $preferredBilling);
         $last = ['status' => 'error', 'code' => 0, 'message' => 'invoice create: no attempt'];
         foreach ($candidates as $b) {
+            $b = self::canonicalXmplusBillingForApi((string) $b);
             $inv = $api->invoiceCreate($email, $passwd, $pid, $b, '', 1);
             $last = $inv;
             if (self::apiOk($inv)) {
@@ -1353,7 +1355,9 @@ class XmplusProvisioningService
      */
     protected static function resolveInvoiceCreateBillingCandidates(XmplusService $api, int $pid, string $preferred): array
     {
-        $defaults = [$preferred, 'month', 'quater', 'quarter', 'semiannual', 'annual'];
+        $preferred = self::canonicalXmplusBillingForApi($preferred);
+        // هرگز «quarter» نفرستید: در بسیاری از نسخه‌های XMPlus match() فقط «quater» (املای API) را دارد و quarter → HTTP 500 UnhandledMatchError
+        $defaults = [$preferred, 'month', 'quater', 'semiannual', 'annual'];
         $defaults = array_values(array_unique(array_filter($defaults, fn ($b) => is_string($b) && $b !== '')));
         try {
             $pinfo = $api->packageInfo($pid);
@@ -1367,9 +1371,9 @@ class XmplusProvisioningService
                 return $defaults;
             }
             $enabled = [];
-            foreach (['month', 'quater', 'quarter', 'semiannual', 'annual'] as $key) {
+            foreach (['month', 'quater', 'semiannual', 'annual'] as $key) {
                 $cell = $billing[$key] ?? null;
-                if (is_array($cell) && strtolower((string) ($cell['status'] ?? '')) === 'on') {
+                if (is_array($cell) && self::xmplusBillingCellLooksEnabled($cell)) {
                     $enabled[] = $key;
                 }
             }
@@ -1405,6 +1409,34 @@ class XmplusProvisioningService
     }
 
     /**
+     * املای رسمی Client API برای سه‌ماهه «quater» است؛ بعضی پنل‌ها با «quarter» کرش می‌کنند.
+     */
+    protected static function canonicalXmplusBillingForApi(string $billing): string
+    {
+        $b = strtolower(trim($billing));
+
+        return $b === 'quarter' ? 'quater' : $billing;
+    }
+
+    /**
+     * @param  array<string, mixed>  $cell
+     */
+    protected static function xmplusBillingCellLooksEnabled(array $cell): bool
+    {
+        if (strtolower((string) ($cell['status'] ?? '')) === 'on') {
+            return true;
+        }
+        if (isset($cell['price']) && $cell['price'] !== '' && $cell['price'] !== null) {
+            return true;
+        }
+        if (isset($cell['days']) && is_numeric($cell['days']) && (int) $cell['days'] > 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * @param  array<string, mixed>  $pkg
      */
     protected static function assertPackageSuitableForNewServiceInvoice(array $pkg, int $pid): void
@@ -1421,15 +1453,15 @@ class XmplusProvisioningService
             return;
         }
         $fullOn = false;
-        foreach (['month', 'quater', 'quarter', 'semiannual', 'annual'] as $key) {
+        foreach (['month', 'quater', 'semiannual', 'annual'] as $key) {
             $cell = $billing[$key] ?? null;
-            if (is_array($cell) && strtolower((string) ($cell['status'] ?? '')) === 'on') {
+            if (is_array($cell) && self::xmplusBillingCellLooksEnabled($cell)) {
                 $fullOn = true;
                 break;
             }
         }
         $topCell = $billing['topup_traffic'] ?? null;
-        $topOn = is_array($topCell) && strtolower((string) ($topCell['status'] ?? '')) === 'on';
+        $topOn = is_array($topCell) && self::xmplusBillingCellLooksEnabled($topCell);
         if ($topOn && ! $fullOn) {
             throw new InvalidArgumentException(
                 'XMPlus pid='.$pid.' فقط «topup_traffic» دارد و دورهٔ month/quater/… برای ساخت سرویس جدید در پنل روشن نیست؛ '
