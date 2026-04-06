@@ -52,6 +52,32 @@ class UserResource extends Resource
                     ->maxLength(255),
                 Forms\Components\Toggle::make('is_admin')
                     ->label('کاربر ادمین است؟'),
+                
+                Forms\Components\Section::make('🔐 اطلاعات پنل XMPlus')
+                    ->schema([
+                        Forms\Components\Placeholder::make('xmplus_info')
+                            ->hiddenLabel()
+                            ->content('این اطلاعات برای اتصال به XMPlus Client API استفاده می‌شود. اگر کاربر قبلاً در XMPlus register شده، password را از Admin Panel XMPlus بگیرید و اینجا ذخیره کنید.')
+                            ->extraAttributes(['class' => 'text-blue-600 bg-blue-50 p-3 rounded-lg border border-blue-200']),
+                        
+                        Forms\Components\TextInput::make('xmplus_client_email')
+                            ->label('ایمیل XMPlus')
+                            ->email()
+                            ->maxLength(255)
+                            ->helperText('معمولاً به صورت tg{user_id}@domain است')
+                            ->columnSpan(1),
+                        
+                        Forms\Components\TextInput::make('xmplus_client_password')
+                            ->label('رمز XMPlus')
+                            ->password()
+                            ->revealable()
+                            ->maxLength(255)
+                            ->helperText('رمز Client API برای اتصال به پنل XMPlus')
+                            ->columnSpan(1),
+                    ])
+                    ->columns(2)
+                    ->collapsible()
+                    ->collapsed(true),
             ]);
     }
 

@@ -546,38 +546,29 @@ class XmplusProvisioningService
                         $passwdPlain = $existingPassword;
                         // از loop register خارج شو و ادامه بده
                     } else {
-                        // کاربر در XMPlus موجود است اما رمز ذخیره نشده → خودکار password جدید set کن
-                        $api->log('warning', 'XMPlus: کاربر موجود است اما password ذخیره نشده، خودکار password جدید set می‌شود', [
-                            'email' => $email,
-                        ]);
+                        // کاربر در XMPlus موجود است اما رمز ذخیره نشده
+                        // سعی کن از orders موفق قبلی password را پیدا کنی
+                        $successfulOrder = Order::where('user_id', $user->id)
+                            ->where('status', 'paid')
+                            ->whereNotNull('panel_username')
+                            ->whereNotNull('panel_client_id')
+                            ->latest()
+                            ->first();
                         
-                        // password جدید رندوم بساز
-                        $newPassword = Str::password(16, symbols: false);
-                        
-                        // در XMPlus database مستقیماً update کن
-                        try {
-                            self::updateXmplusUserPassword($settings, $email, $newPassword);
-                            $passwdPlain = $newPassword;
-                            
-                            // در VPNMarket ذخیره کن
-                            $user->forceFill([
-                                'xmplus_client_email' => $email,
-                                'xmplus_client_password' => $passwdPlain,
-                            ])->save();
-                            
-                            $api->log('info', 'XMPlus: password کاربر موجود با موفقیت update شد', [
+                        if ($successfulOrder && $successfulOrder->panel_username === $email) {
+                            // این کاربر قبلاً خرید موفق داشته، اما password در user table ذخیره نشده
+                            // احتمالاً در زمان تمدید استفاده شده
+                            $api->log('warning', 'XMPlus: کاربر موجود است اما password در user ذخیره نشده. لطفاً password را در admin panel وارد کنید.', [
                                 'email' => $email,
+                                'user_id' => $user->id,
                             ]);
-                        } catch (\Throwable $e) {
-                            $api->log('error', 'XMPlus: خطا در update password کاربر موجود', [
-                                'email' => $email,
-                                'error' => $e->getMessage(),
-                            ]);
-                            throw new RuntimeException(
-                                'XMPlus: ایمیل '.$email.' از قبل در پنل ثبت است ولی فروشگاه رمز Client API این کاربر را ندارد و نتوانست خودکار update کند. '
-                                .'در پروفایل/ادمین همان رمز پنل را ذخیره کنید یا کاربر را در XMPlus حذف کنید. خطا: '.$e->getMessage()
-                            );
                         }
+                        
+                        throw new RuntimeException(
+                            'XMPlus: ایمیل '.$email.' از قبل در پنل ثبت است ولی فروشگاه هنوز رمز Client API این کاربر را ندارد. '
+                            .'لطفاً از پنل Admin XMPlus، password کاربر '.$email.' را ببینید یا reset کنید، سپس در پروفایل کاربر VPNMarket (User ID: '.$user->id.') ذخیره کنید. '
+                            .'یا کاربر را در XMPlus حذف کنید تا دوباره ثبت‌نام شود.'
+                        );
                     }
                 } else {
                     throw new RuntimeException('XMPlus ثبت‌نام ناموفق: '.json_encode($reg, JSON_UNESCAPED_UNICODE));
@@ -2363,69 +2354,5 @@ class XmplusProvisioningService
             'panel_username' => $email,
             'panel_client_id' => $sid !== null ? (string) $sid : null,
         ];
-    }
-
-    /**
-     * مستقیماً در XMPlus database password کاربر را update کند (برای کاربران موجود که password ذخیره نشده)
-     */
-    protected static function updateXmplusUserPassword(Collection $settings, string $email, string $newPassword): void
-    {
-        $mysqlEnabled = filter_var($settings->get('xmplus_mysql_direct_enabled', false), FILTER_VALIDATE_BOOLEAN);
-        if (! $mysqlEnabled) {
-            throw new RuntimeException('XMPlus MySQL direct access is disabled. Enable xmplus_mysql_direct_enabled setting.');
-        }
-
-        $host = trim((string) $settings->get('xmplus_mysql_host', ''));
-        $port = (int) ($settings->get('xmplus_mysql_port') ?? 3306);
-        $database = trim((string) $settings->get('xmplus_mysql_database', ''));
-        $username = trim((string) $settings->get('xmplus_mysql_username', ''));
-        $password = trim((string) $settings->get('xmplus_mysql_password', ''));
-
-        if ($host === '' || $database === '' || $username === '') {
-            throw new RuntimeException('XMPlus MySQL connection settings are incomplete.');
-        }
-
-        // اگر username شامل "." است، احتمالاً HestiaCP format است
-        if (str_contains($username, '.')) {
-            [$db, $usr] = explode('.', $username, 2);
-            $database = $username;
-            $username = $username;
-        }
-
-        // حذف پیشوند mysql: از host
-        if (str_starts_with($host, 'mysql:')) {
-            $host = substr($host, 6);
-        }
-
-        $dsn = "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4";
-
-        try {
-            $pdo = new \PDO($dsn, $username, $password, [
-                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
-                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
-            ]);
-
-            // bcrypt hash password
-            $hashedPassword = password_hash($newPassword, PASSWORD_BCRYPT);
-
-            // Update password in user table
-            $stmt = $pdo->prepare('UPDATE `user` SET `password` = :password WHERE `email` = :email');
-            $stmt->execute([
-                'password' => $hashedPassword,
-                'email' => $email,
-            ]);
-
-            $affected = $stmt->rowCount();
-            if ($affected === 0) {
-                throw new RuntimeException("XMPlus: کاربر با ایمیل {$email} در database یافت نشد.");
-            }
-
-            Log::channel('xmplus')->info('XMPlus: password کاربر در database update شد', [
-                'email' => $email,
-                'affected_rows' => $affected,
-            ]);
-        } catch (\PDOException $e) {
-            throw new RuntimeException('XMPlus MySQL error: '.$e->getMessage());
-        }
     }
 }
