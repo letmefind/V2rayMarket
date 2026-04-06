@@ -412,6 +412,7 @@ final class ShopPrepaidConfirmKernel
     public static function settle(array $order, array $config): void
     {
         $gatewayId = self::numericGatewayId($order, $config);
+        self::debugLog($config, 'settle:start', ['gateway_id' => $gatewayId, 'order_keys' => array_keys($order)]);
 
         $fqcn = self::INVOICE_MODEL;
         if (! class_exists($fqcn)) {
@@ -434,6 +435,7 @@ final class ShopPrepaidConfirmKernel
         if ($invId === '') {
             throw new RuntimeException('ShopPrepaidConfirmKernel: loaded invoice has empty inv_id.');
         }
+        self::debugLog($config, 'settle:invoice_loaded', ['inv_id' => $invId, 'status' => $invoice->status ?? null]);
 
         self::tryPayWithGatewayId($fqcn, $invId, $gatewayId);
 
@@ -453,6 +455,13 @@ final class ShopPrepaidConfirmKernel
         self::fulfillAfterPaid($fqcn, $invId, $order, $gatewayId);
         self::tryUtilityHelpers($invoice, $invId, $gatewayId);
         self::hookPanelFulfill($invoice, $invId, $order, $gatewayId, $config);
+
+        $after = self::firstInvoiceByPublicKey($fqcn, $invId);
+        self::debugLog($config, 'settle:after_hooks', [
+            'inv_id' => $invId,
+            'status' => $after->status ?? null,
+            'serviceid' => $after->serviceid ?? ($after->service_id ?? null),
+        ]);
     }
 
     /**
@@ -464,7 +473,7 @@ final class ShopPrepaidConfirmKernel
     public static function hookPanelFulfill(object $invoice, string $invId, array $order, ?int $gatewayId, array $config): void
     {
         // symmetricnet: Guest\CallbackController نشان می‌دهد مسیر واقعی ساخت سرویس این فراخوانی است.
-        self::tryInvoiceHelperPay($invoice);
+        self::tryInvoiceHelperPay($invoice, $config, $invId);
         self::tryConfiguredAfterPaidStatic($config, $invoice, $invId, $gatewayId);
         self::tryDomainInvoiceAfterPaidStatics($invoice, $invId, $gatewayId);
     }
@@ -831,25 +840,64 @@ final class ShopPrepaidConfirmKernel
      * \App\Application\Controller\Guest\CallbackController::handle()
      *   $service = InvoiceHelper::pay($invoice, $user)
      */
-    private static function tryInvoiceHelperPay(object $invoice): void
+    private static function tryInvoiceHelperPay(object $invoice, array $config, string $invId): void
     {
         $helper = 'App\\Utility\\InvoiceHelper';
         $userModel = 'App\\Application\\Models\\User';
         if (! class_exists($helper) || ! is_callable([$helper, 'pay']) || ! class_exists($userModel)) {
+            self::debugLog($config, 'invoice_helper:missing', [
+                'inv_id' => $invId,
+                'helper_exists' => class_exists($helper),
+                'helper_pay_callable' => is_callable([$helper, 'pay']),
+                'user_model_exists' => class_exists($userModel),
+            ]);
             return;
         }
 
         $uidRaw = $invoice->userid ?? $invoice->user_id ?? null;
         if (! is_numeric($uidRaw) || (int) $uidRaw <= 0 || ! method_exists($userModel, 'find')) {
+            self::debugLog($config, 'invoice_helper:invalid_uid', ['inv_id' => $invId, 'uid_raw' => $uidRaw]);
             return;
         }
 
         try {
             $user = $userModel::find((int) $uidRaw);
             if (! is_object($user)) {
+                self::debugLog($config, 'invoice_helper:user_not_found', ['inv_id' => $invId, 'uid' => (int) $uidRaw]);
                 return;
             }
-            $helper::pay($invoice, $user);
+            $ret = $helper::pay($invoice, $user);
+            self::debugLog($config, 'invoice_helper:pay_called', [
+                'inv_id' => $invId,
+                'uid' => (int) $uidRaw,
+                'ret_type' => gettype($ret),
+                'ret_is_object' => is_object($ret),
+                'ret_is_array' => is_array($ret),
+            ]);
+        } catch (Throwable $e) {
+            self::debugLog($config, 'invoice_helper:exception', ['inv_id' => $invId, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * برای دیباگ عملی روی پنل XMPlus: در config درگاه مقدار debug_log را 1/true بگذارید.
+     *
+     * @param  array<string, mixed>  $config
+     * @param  array<string, mixed>  $context
+     */
+    private static function debugLog(array $config, string $message, array $context = []): void
+    {
+        $enabledRaw = $config['debug_log'] ?? false;
+        $enabled = $enabledRaw === true
+            || $enabledRaw === 1
+            || $enabledRaw === '1'
+            || (is_string($enabledRaw) && strcasecmp($enabledRaw, 'true') === 0);
+        if (! $enabled) {
+            return;
+        }
+
+        try {
+            error_log('ShopPrepaidConfirm DEBUG: '.$message.' '.json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         } catch (Throwable $e) {
         }
     }
