@@ -289,6 +289,10 @@ class XmplusService
     }
 
     /**
+     * تمدید سرویس — POST /api/client/service/renew
+     *
+     * @see https://docs.xmplus.dev/api/client.html#_10-service-renewal
+     *
      * @return array<string, mixed>
      */
     public function serviceRenew(string $email, string $passwd, int $sid): array
@@ -298,6 +302,23 @@ class XmplusService
             'passwd' => $passwd,
             'sid' => $sid,
         ], 'service_renew');
+    }
+
+    /**
+     * افزودن ترافیک به سرویس — POST /api/client/service/addtraffic
+     *
+     * @see https://docs.xmplus.dev/api/client.html#_11-service-add-traffic
+     *
+     * @return array<string, mixed> شامل invid فاکتور جدید برای خرید ترافیک
+     */
+    public function serviceAddTraffic(string $email, string $passwd, int $sid, int $pid): array
+    {
+        return $this->postClient('/api/client/service/addtraffic', [
+            'email' => $email,
+            'passwd' => $passwd,
+            'sid' => $sid,
+            'pid' => $pid,
+        ], 'service_addtraffic');
     }
 
     /**
