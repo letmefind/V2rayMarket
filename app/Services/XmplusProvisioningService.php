@@ -1409,13 +1409,18 @@ class XmplusProvisioningService
     }
 
     /**
-     * املای رسمی Client API برای سه‌ماهه «quater» است؛ بعضی پنل‌ها با «quarter» کرش می‌کنند.
+     * املای رسمی Client API برای سه‌ماهه «quater» است؛ «quarter» یا «Quarter» روی بعضی پنل‌ها → HTTP 500 (UnhandledMatchError).
+     * بقیهٔ کلیدها را lowercase می‌کنیم تا با match پنل هم‌خوان باشد.
      */
     protected static function canonicalXmplusBillingForApi(string $billing): string
     {
-        $b = strtolower(trim($billing));
+        $trim = trim($billing);
+        if ($trim === '') {
+            return '';
+        }
+        $b = strtolower($trim);
 
-        return $b === 'quarter' ? 'quater' : $billing;
+        return $b === 'quarter' ? 'quater' : $b;
     }
 
     /**

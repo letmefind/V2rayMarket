@@ -382,7 +382,33 @@ class XmplusService
     }
 
     /**
-     * لیست packages — POST /api/client/packages
+     * لیست بسته‌های کامل — POST /api/client/packages
+     *
+     * مستندات: فقط Bearer token؛ برای نمایش در ادمین VPNMarket از همین استفاده کنید.
+     *
+     * @see https://docs.xmplus.dev/api/client.html#_5-packages-full-packages
+     *
+     * @return array<string, mixed>
+     */
+    public function listFullPackages(): array
+    {
+        return $this->postClient('/api/client/packages', [], 'packages_list');
+    }
+
+    /**
+     * لیست بسته‌های ترافیک (Top-up) — POST /api/client/packages/traffic
+     *
+     * @see https://docs.xmplus.dev/api/client.html#_6-packages-traffic-packages
+     *
+     * @return array<string, mixed>
+     */
+    public function listTrafficPackages(): array
+    {
+        return $this->postClient('/api/client/packages/traffic', [], 'packages_traffic_list');
+    }
+
+    /**
+     * لیست packages — POST /api/client/packages (با email/pass برای سازگاری با نسخه‌های قدیمی‌تر پنل)
      *
      * @return array<string, mixed>
      */
@@ -391,7 +417,7 @@ class XmplusService
         return $this->postClient('/api/client/packages', [
             'email' => $email,
             'passwd' => $passwd,
-        ], 'packages_list');
+        ], 'packages_list_with_user');
     }
 
     /**

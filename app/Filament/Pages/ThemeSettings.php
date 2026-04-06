@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\Inbound;
 use App\Models\Setting;
 use App\Services\XmplusInvoiceDatabaseSyncService;
+use App\Services\XmplusService;
 use Filament\Forms\Components\Actions;
 use Filament\Forms\Components\Actions\Action as FormAction;
 use Filament\Forms\Components\FileUpload;
@@ -545,6 +546,90 @@ class ThemeSettings extends Page implements HasForms
                                         ->label('شناسه بسته پیش‌فرض (pid)')
                                         ->numeric()
                                         ->helperText('اگر برای پلن مقدار «شناسه بسته XMPlus» نگذارید از این عدد استفاده می‌شود.'),
+                                    Actions::make([
+                                        FormAction::make('xmplus_fetch_packages')
+                                            ->label('دریافت لیست بسته‌ها از XMPlus (API)')
+                                            ->icon('heroicon-o-arrow-down-tray')
+                                            ->color('gray')
+                                            ->visible(fn (Get $get) => $get('panel_type') === 'xmplus')
+                                            ->tooltip('از آدرس پنل و Client API Key همین صفحه استفاده می‌شود؛ نتیجه در اعلان زیر نمایش داده می‌شود.')
+                                            ->action(function (): void {
+                                                $data = $this->form->getState();
+                                                $base = rtrim((string) ($data['xmplus_panel_url'] ?? ''), '/');
+                                                $key = (string) ($data['xmplus_client_api_key'] ?? '');
+                                                if ($base === '' || $key === '') {
+                                                    Notification::make()
+                                                        ->title('ابتدا آدرس پایه پنل و Client API Key را در همین تب پر کنید')
+                                                        ->danger()
+                                                        ->send();
+
+                                                    return;
+                                                }
+                                                try {
+                                                    $api = new XmplusService($base, $key);
+                                                    $full = $api->listFullPackages();
+                                                    $pkgs = $full['packages'] ?? [];
+                                                    if (! is_array($pkgs)) {
+                                                        throw new \RuntimeException('پاسخ packages آرایه نیست.');
+                                                    }
+                                                    $rows = [];
+                                                    $max = 100;
+                                                    foreach (array_slice($pkgs, 0, $max) as $p) {
+                                                        if (! is_array($p)) {
+                                                            continue;
+                                                        }
+                                                        $id = $p['id'] ?? '?';
+                                                        $name = (string) ($p['name'] ?? '');
+                                                        $bill = $p['billing'] ?? [];
+                                                        $billStr = is_array($bill) ? implode(', ', array_keys($bill)) : '-';
+                                                        $rows[] = '<tr><td class="border px-2 py-1">'.e((string) $id).'</td><td class="border px-2 py-1">'.e($name).'</td><td class="border px-2 py-1 text-xs">'.e($billStr).'</td></tr>';
+                                                    }
+                                                    $more = count($pkgs) > $max ? '<p class="mt-1 text-gray-500">… و '.(count($pkgs) - $max).' بستهٔ دیگر (فقط '.$max.' اول نمایش داده شد).</p>' : '';
+                                                    $html = '<div class="text-xs max-h-[28rem] overflow-y-auto text-right" dir="rtl">'
+                                                        .'<p class="mb-2 font-medium">بسته‌های کامل (Full) — برای خرید اول / invoice/create</p>'
+                                                        .'<table class="w-full border-collapse"><thead><tr>'
+                                                        .'<th class="border px-2 py-1">pid</th><th class="border px-2 py-1">نام</th><th class="border px-2 py-1">billing (خلاصهٔ لیست)</th>'
+                                                        .'</tr></thead><tbody>'.implode('', $rows).'</tbody></table>'.$more;
+
+                                                    try {
+                                                        $tr = $api->listTrafficPackages();
+                                                        $tlist = $tr['packages'] ?? [];
+                                                        if (is_array($tlist) && $tlist !== []) {
+                                                            $trows = [];
+                                                            foreach (array_slice($tlist, 0, 50) as $tp) {
+                                                                if (! is_array($tp)) {
+                                                                    continue;
+                                                                }
+                                                                $tid = $tp['id'] ?? '?';
+                                                                $tname = (string) ($tp['name'] ?? '');
+                                                                $trows[] = '<tr><td class="border px-2 py-1">'.e((string) $tid).'</td><td class="border px-2 py-1">'.e($tname).'</td></tr>';
+                                                            }
+                                                            $html .= '<p class="mt-4 mb-2 font-medium">بسته‌های ترافیک (Top-up) — فقط برای سرویس موجود / addtraffic</p>'
+                                                                .'<table class="w-full border-collapse"><thead><tr>'
+                                                                .'<th class="border px-2 py-1">pid</th><th class="border px-2 py-1">نام</th>'
+                                                                .'</tr></thead><tbody>'.implode('', $trows).'</tbody></table>';
+                                                        }
+                                                    } catch (\Throwable $e) {
+                                                        $html .= '<p class="mt-3 text-amber-600 text-xs">لیست ترافیک دریافت نشد: '.e($e->getMessage()).'</p>';
+                                                    }
+
+                                                    $html .= '</div>';
+
+                                                    Notification::make()
+                                                        ->title('لیست بسته‌های XMPlus')
+                                                        ->body(new HtmlString($html))
+                                                        ->success()
+                                                        ->persistent()
+                                                        ->send();
+                                                } catch (\Throwable $e) {
+                                                    Notification::make()
+                                                        ->title('خطا در دریافت لیست بسته‌ها')
+                                                        ->body($e->getMessage())
+                                                        ->danger()
+                                                        ->send();
+                                                }
+                                            }),
+                                    ])->alignStart(),
                                 ]),
                             Section::make('ثبت‌نام، فاکتور و پرداخت خودکار')
                                 ->description(new HtmlString(
