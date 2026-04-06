@@ -2447,27 +2447,6 @@ class WebhookController extends Controller
         }
 
         $servers = $this->resolveXmplusServersForOrder($user, $order);
-        if ($servers !== []) {
-            $message .= "\n\n━━━━━━━━━━━━━━━━━\n🖥 *سرورهای موجود*\n\n";
-            foreach ($servers as $idx => $srv) {
-                if (! is_array($srv)) {
-                    continue;
-                }
-                $remark = trim((string) ($srv['remark'] ?? ('Server #'.($idx + 1))));
-                $addr = trim((string) ($srv['address'] ?? ''));
-                $port = trim((string) ($srv['port'] ?? ''));
-                $message .= '• '.$this->escape($remark);
-                $hostPort = $addr;
-                if ($port !== '') {
-                    $hostPort .= ($hostPort !== '' ? ':' : '').$port;
-                }
-                if ($hostPort !== '') {
-                    $message .= ' — '.$this->escape($hostPort);
-                }
-                $message .= "\n";
-            }
-            $message .= "\n📍 برای *جزئیات کامل* و *QR Code* هر سرور، دکمهٔ همان سرور را بزنید.";
-        }
 
         $keyboard = Keyboard::make()->inline();
 
