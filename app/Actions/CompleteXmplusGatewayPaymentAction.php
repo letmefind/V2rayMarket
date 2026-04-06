@@ -561,11 +561,7 @@ final class CompleteXmplusGatewayPaymentAction
                     
                     $keyboard = Keyboard::make()->inline()->setResizeKeyboard(true);
                     foreach ($serverButtons as $row) {
-                        $buttons = [];
-                        foreach ($row as $btn) {
-                            $buttons[] = Keyboard::inlineButton($btn);
-                        }
-                        $keyboard->row(...$buttons);
+                        $keyboard->row($row);
                     }
                     
                     $telegramMessage .= "\n\n━━━━━━━━━━━━━━━━━\n🖥 <b>سرورهای موجود</b>\n\n📍 برای مشاهده جزئیات و QR Code هر سرور، روی دکمه آن کلیک کنید:";
