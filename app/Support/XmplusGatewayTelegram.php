@@ -76,9 +76,16 @@ final class XmplusGatewayTelegram
      * پس از invoice/pay: QR یا رشتهٔ پرداخت (مثلاً لینک/کیف پول).
      *
      * @param  array<string, mixed>  $pay
+     * @param  string|null  $invid
+     * @param  string|null  $panelBase
      */
-    public static function sendInvoicePayInstructions(array $pay, string $chatId, Collection $settings): void
-    {
+    public static function sendInvoicePayInstructions(
+        array $pay,
+        string $chatId,
+        Collection $settings,
+        ?string $invid = null,
+        ?string $panelBase = null
+    ): void {
         $token = $settings->get('telegram_bot_token');
         if (! $token || $chatId === '') {
             return;
@@ -121,11 +128,26 @@ final class XmplusGatewayTelegram
                 Log::warning('XmplusGatewayTelegram sendMessage data: '.$e->getMessage());
             }
         } elseif (is_array($data) && (($data['object'] ?? '') === 'payment_intent' || isset($data['client_secret']))) {
+            $invUrl = null;
+            if ($invid !== null && $invid !== '' && $panelBase !== null && $panelBase !== '') {
+                $invUrl = rtrim($panelBase, '/').'/client/invoice/'.$invid;
+            }
+
+            $msg = '💳 <b>پرداخت با کارت اعتباری (Stripe)</b>'."\n\n";
+            $msg .= 'این درگاه نیاز به تکمیل فرم کارت در صفحه امن دارد.';
+            if ($invUrl !== null) {
+                $msg .= "\n\n".'🔗 لینک پرداخت:'."\n".'<a href="'.htmlspecialchars($invUrl, ENT_QUOTES, 'UTF-8').'">'.$invUrl.'</a>';
+                $msg .= "\n\n".'بعد از تکمیل پرداخت، دکمهٔ زیر را بزنید.';
+            } else {
+                $msg .= "\n\n".'لطفاً از پنل کاربری XMPlus همان فاکتور را باز کنید و پرداخت را تمام کنید؛ ربات تا تأیید فاکتور منتظر می‌ماند.';
+            }
+
             try {
                 Telegram::sendMessage([
                     'chat_id' => $chatId,
-                    'text' => '💳 این درگاه (کارت) نیاز به تکمیل پرداخت در صفحه امن دارد. لطفاً از پنل کاربری XMPlus همان فاکتور را باز کنید و پرداخت را تمام کنید؛ ربات تا تأیید فاکتور منتظر می‌ماند.',
+                    'text' => $msg,
                     'parse_mode' => 'HTML',
+                    'disable_web_page_preview' => false,
                 ]);
             } catch (\Throwable $e) {
                 Log::warning('XmplusGatewayTelegram sendMessage payment_intent: '.$e->getMessage());

@@ -105,7 +105,9 @@ final class CompleteXmplusGatewayPaymentAction
 
         if ($outcome === 'await_offsite') {
             $pay = is_array($telegramFlow['pay'] ?? null) ? $telegramFlow['pay'] : [];
-            XmplusGatewayTelegram::sendInvoicePayInstructions($pay, $telegramChatId, $settings);
+            $invid = (string) ($ctx['invid'] ?? '');
+            $panelBase = (string) ($ctx['panel_base'] ?? '');
+            XmplusGatewayTelegram::sendInvoicePayInstructions($pay, $telegramChatId, $settings, $invid, $panelBase);
             $ctx['xmplus_web_await_pay'] = $pay;
             Cache::put($ctxKey, $ctx, now()->addHours(48));
             if ($order->user?->telegram_chat_id) {
