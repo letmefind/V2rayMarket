@@ -375,24 +375,18 @@ final class XmplusInvoiceDatabaseSyncService
             return ['', $usernameRaw];
         }
 
-        // Hestia / نام یکسان در هر دو فیلد
+        // Hestia / نام یکسان در هر دو فیلد: استفاده مستقیم بدون parse
         if ($usernameRaw !== '' && strcasecmp($usernameRaw, $databaseRaw) === 0) {
-            // اگر نقطه دارد، احتمالاً فرمت admin_user.database_name است
-            if (str_contains($databaseRaw, '.')) {
-                if (preg_match('/^([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)$/', $databaseRaw, $m) === 1) {
-                    $user = $m[1];
-                    $db = $m[2];
-                    Log::channel('xmplus')->info('XMPlus DB sync: فرمت Hestia (یکسان با نقطه) تفکیک شد', [
-                        'mysql_user' => $user,
-                        'mysql_database' => $db,
-                        'original' => $databaseRaw,
-                    ]);
-                    return [$db, $user];
-                }
-            }
-            
+            // در Hestia بعضی اوقات هر دو نام کاربر و دیتابیس یکسان هستند (با نقطه)
+            // مثل admin_web.admin_xmplus
+            // در این حالت مستقیماً استفاده می‌کنیم
             self::assertLiteralMysqlIdentifier($databaseRaw, 'database');
             self::assertLiteralMysqlIdentifier($usernameRaw, 'username');
+            
+            Log::channel('xmplus')->info('XMPlus DB sync: نام کاربر و دیتابیس یکسان (Hestia format)', [
+                'mysql_user' => $usernameRaw,
+                'mysql_database' => $databaseRaw,
+            ]);
 
             return [$databaseRaw, $usernameRaw];
         }
