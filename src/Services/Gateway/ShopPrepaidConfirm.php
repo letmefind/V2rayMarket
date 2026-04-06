@@ -361,6 +361,18 @@ final class ShopPrepaidConfirmHandler
  */
 final class ShopPrepaidConfirmKernel
 {
+    /**
+     * سازگاری با PHPهای قدیمی‌تر (برای پنل‌هایی که هنوز PHP 7.x دارند).
+     */
+    private static function startsWith(string $haystack, string $needle): bool
+    {
+        if ($needle === '') {
+            return true;
+        }
+
+        return substr($haystack, 0, strlen($needle)) === $needle;
+    }
+
     /** مدل فاکتور XMPlus — در صورت تفاوت نام‌فضا اینجا را عوض کنید. */
     private const INVOICE_MODEL = 'App\\Application\\Models\\Invoice';
 
@@ -752,7 +764,7 @@ final class ShopPrepaidConfirmKernel
                 continue;
             }
             $name = $rm->getName();
-            if (str_starts_with($name, '__')) {
+            if (self::startsWith($name, '__')) {
                 continue;
             }
             if (preg_match('/pay|gateway|checkout|complete|confirm|finalize|settle|activate|provision|execute/i', $name) !== 1) {
@@ -989,7 +1001,7 @@ final class ShopPrepaidConfirmKernel
                 continue;
             }
             $name = $rm->getName();
-            if (str_starts_with($name, '__')) {
+            if (self::startsWith($name, '__')) {
                 continue;
             }
             if (preg_match($rejectPrefix, $name) === 1) {
