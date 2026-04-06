@@ -2107,9 +2107,9 @@ class WebhookController extends Controller
             : 'invoice_methods_'.$order->id;
         $this->sendOrEditMessage(
             $user->telegram_chat_id,
-            "✅ لیست درگاه‌های XMPlus ارسال شد.\n\nاز پیام بعدی یکی از درگاه‌ها (مثل PayPal) را انتخاب کنید.",
+            \App\Models\BotMessage::get('msg_gateway_list_sent', "✅ لیست درگاه‌های پرداخت ارسال شد.\n\nاز پیام بعدی یکی از درگاه‌ها (مثل PayPal، Stripe و...) را انتخاب کنید."),
             Keyboard::make()->inline()->row([
-                Keyboard::inlineButton(['text' => '⬅️ بازگشت به روش‌ها', 'callback_data' => $backCallback]),
+                Keyboard::inlineButton(['text' => \App\Models\BotMessage::get('btn_back_to_methods', '⬅️ بازگشت به روش‌ها'), 'callback_data' => $backCallback]),
             ]),
             $messageId
         );

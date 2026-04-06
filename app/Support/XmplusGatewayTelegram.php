@@ -38,9 +38,11 @@ final class XmplusGatewayTelegram
 
         Telegram::setAccessToken($token);
 
-        $msg = '💳 <b>پرداخت آنلاین</b>'."\n\n";
-        $msg .= 'سفارش #'.$order->id." — یکی از درگاه‌های زیر را بزنید:\n\n";
-        $msg .= '<i>پس از پرداخت موفق، لینک اشتراک ارسال می‌شود.</i>';
+        $msg = \App\Models\BotMessage::get(
+            'msg_online_gateway_picker',
+            "💳 <b>پرداخت آنلاین</b>\n\nسفارش #{order_id} — یکی از درگاه‌های زیر را بزنید:\n\n<i>پس از پرداخت موفق، لینک اشتراک ارسال می‌شود.</i>",
+            ['order_id' => $order->id]
+        );
 
         $keyboard = Keyboard::make()->inline();
         foreach ($gateways as $g) {
@@ -125,7 +127,11 @@ final class XmplusGatewayTelegram
             try {
                 Telegram::sendMessage([
                     'chat_id' => $chatId,
-                    'text' => "💳 اطلاعات پرداخت درگاه:\n<code>".htmlspecialchars($data, ENT_QUOTES, 'UTF-8').'</code>',
+                    'text' => \App\Models\BotMessage::get(
+                        'msg_payment_gateway_data',
+                        "💳 اطلاعات پرداخت درگاه:\n<code>{data}</code>",
+                        ['data' => htmlspecialchars($data, ENT_QUOTES, 'UTF-8')]
+                    ),
                     'parse_mode' => 'HTML',
                 ]);
             } catch (\Throwable $e) {
@@ -137,21 +143,27 @@ final class XmplusGatewayTelegram
                 $invUrl = rtrim($panelBase, '/').'/portal/'.$invid.'/invoice';
             }
 
-            $msg = '💳 <b>پرداخت با کارت اعتباری (Stripe)</b>'."\n\n";
-            $msg .= 'این درگاه نیاز به تکمیل فرم کارت در صفحه امن دارد.';
+            $msg = \App\Models\BotMessage::get('msg_stripe_payment_header', '💳 <b>پرداخت با کارت اعتباری (Stripe)</b>')."\n\n";
+            $msg .= \App\Models\BotMessage::get('msg_stripe_payment_desc', 'این درگاه نیاز به تکمیل فرم کارت در صفحه امن دارد.');
             
             if ($invUrl !== null) {
-                $msg .= "\n\n".'🔗 لینک پرداخت:'."\n".'<a href="'.htmlspecialchars($invUrl, ENT_QUOTES, 'UTF-8').'">'.$invUrl.'</a>';
+                $msg .= "\n\n".\App\Models\BotMessage::get(
+                    'msg_stripe_payment_link',
+                    "🔗 لینک پرداخت:\n{payment_url}",
+                    ['payment_url' => '<a href="'.htmlspecialchars($invUrl, ENT_QUOTES, 'UTF-8').'">'.$invUrl.'</a>']
+                );
             }
             
             if ($email !== null && $email !== '' && $password !== null && $password !== '') {
-                $msg .= "\n\n".'👤 <b>اطلاعات ورود به پنل:</b>'."\n";
-                $msg .= '▫️ ایمیل: <code>'.$email.'</code>'."\n";
-                $msg .= '▫️ رمز: <code>'.$password.'</code>';
+                $msg .= "\n\n".\App\Models\BotMessage::get(
+                    'msg_stripe_login_info',
+                    "👤 <b>اطلاعات ورود به پنل:</b>\n▫️ ایمیل: <code>{email}</code>\n▫️ رمز: <code>{password}</code>",
+                    ['email' => $email, 'password' => $password]
+                );
             }
             
             if ($invUrl !== null) {
-                $msg .= "\n\n".'بعد از تکمیل پرداخت، دکمهٔ زیر را بزنید.';
+                $msg .= "\n\n".\App\Models\BotMessage::get('msg_payment_complete_instruction', 'بعد از تکمیل پرداخت، دکمهٔ زیر را بزنید.');
             } else {
                 $msg .= "\n\n".'لطفاً از پنل کاربری همان فاکتور را باز کنید و پرداخت را تمام کنید؛ ربات تا تأیید فاکتور منتظر می‌ماند.';
             }

@@ -79,17 +79,17 @@ final class CompleteXmplusGatewayPaymentAction
                     ]);
                     Telegram::sendMessage([
                         'chat_id' => $order->user->telegram_chat_id,
-                        'text' => 'بعد از پرداخت، دکمهٔ زیر را بزنید تا فعال‌سازی بررسی شود.',
+                        'text' => \App\Models\BotMessage::get('inst_payment_after_gateway', 'بعد از پرداخت، دکمهٔ زیر را بزنید تا فعال‌سازی بررسی شود.'),
                         'reply_markup' => \Telegram\Bot\Keyboard\Keyboard::make()->inline()
                             ->row([
                                 \Telegram\Bot\Keyboard\Keyboard::inlineButton([
-                                    'text' => '✅ پرداخت کردم، بررسی کن',
+                                    'text' => \App\Models\BotMessage::get('btn_payment_check', '✅ پرداخت کردم، بررسی کن'),
                                     'callback_data' => 'xmpgwcheck_'.$orderId,
                                 ]),
                             ])
                             ->row([
                                 \Telegram\Bot\Keyboard\Keyboard::inlineButton([
-                                    'text' => '⬅️ بازگشت به لیست درگاه‌ها',
+                                    'text' => \App\Models\BotMessage::get('btn_back_to_gateways', '⬅️ بازگشت به لیست درگاه‌ها'),
                                     'callback_data' => 'pay_xmplusgw_'.$orderId,
                                 ]),
                             ]),
@@ -100,7 +100,7 @@ final class CompleteXmplusGatewayPaymentAction
                 }
             }
 
-            return ['ok' => true, 'message' => 'لینک پرداخت ارسال شد؛ بعد از پرداخت «بررسی کن» را بزنید.'];
+            return ['ok' => true, 'message' => \App\Models\BotMessage::get('msg_payment_redirect_sent', 'لینک پرداخت ارسال شد؛ بعد از پرداخت «بررسی کن» را بزنید.')];
         }
 
         if ($outcome === 'await_offsite') {
@@ -117,17 +117,17 @@ final class CompleteXmplusGatewayPaymentAction
                     Telegram::setAccessToken($settings->get('telegram_bot_token'));
                     Telegram::sendMessage([
                         'chat_id' => $order->user->telegram_chat_id,
-                        'text' => 'بعد از پرداخت، دکمهٔ زیر را بزنید تا فعال‌سازی بررسی شود.',
+                        'text' => \App\Models\BotMessage::get('inst_payment_after_gateway', 'بعد از پرداخت، دکمهٔ زیر را بزنید تا فعال‌سازی بررسی شود.'),
                         'reply_markup' => \Telegram\Bot\Keyboard\Keyboard::make()->inline()
                             ->row([
                                 \Telegram\Bot\Keyboard\Keyboard::inlineButton([
-                                    'text' => '✅ پرداخت کردم، بررسی کن',
+                                    'text' => \App\Models\BotMessage::get('btn_payment_check', '✅ پرداخت کردم، بررسی کن'),
                                     'callback_data' => 'xmpgwcheck_'.$orderId,
                                 ]),
                             ])
                             ->row([
                                 \Telegram\Bot\Keyboard\Keyboard::inlineButton([
-                                    'text' => '⬅️ بازگشت به لیست درگاه‌ها',
+                                    'text' => \App\Models\BotMessage::get('btn_back_to_gateways', '⬅️ بازگشت به لیست درگاه‌ها'),
                                     'callback_data' => 'pay_xmplusgw_'.$orderId,
                                 ]),
                             ]),
@@ -201,8 +201,7 @@ final class CompleteXmplusGatewayPaymentAction
                 if (strcasecmp($statusCheck, 'Pending') === 0) {
                     return [
                         'ok' => false,
-                        'message' => '⏳ پرداخت این سفارش هنوز در XMPlus نهایی نشده است.'."\n".
-                            'بعد از تکمیل پرداخت در درگاه (PayPal و...), دوباره دکمهٔ «✅ پرداخت کردم، بررسی کن» را بزنید.',
+                        'message' => \App\Models\BotMessage::get('msg_payment_pending_check', "⏳ پرداخت این سفارش هنوز در XMPlus نهایی نشده است.\nبعد از تکمیل پرداخت، دکمه «✅ پرداخت کردم، بررسی کن» را بزنید."),
                     ];
                 }
             } catch (\Throwable $e) {
