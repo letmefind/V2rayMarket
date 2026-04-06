@@ -480,30 +480,4 @@ class XmplusService
 
         return $out;
     }
-
-    /**
-     * لیست پکیج‌های کامل — POST /api/client/packages
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    public function listFullPackages(): array
-    {
-        $r = $this->postClient('/api/client/packages', [], 'packages_full');
-        $pk = $r['packages'] ?? [];
-
-        return is_array($pk) ? $pk : [];
-    }
-
-    /**
-     * لیست پکیج‌های ترافیک — POST /api/client/packages/traffic
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    public function listTrafficPackages(): array
-    {
-        $r = $this->postClient('/api/client/packages/traffic', [], 'packages_traffic');
-        $pk = $r['packages'] ?? [];
-
-        return is_array($pk) ? $pk : [];
-    }
 }
