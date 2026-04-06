@@ -954,6 +954,15 @@ class WebhookController extends Controller
             $this->promptForUsername($user, $planId, $messageId);
             return;
         }
+        if (Str::startsWith($data, 'invoice_methods_')) {
+            $orderId = (int) Str::after($data, 'invoice_methods_');
+            $ord = Order::with('plan')->find($orderId);
+            if ($ord && (int) $ord->user_id === (int) $user->id && $ord->status === 'pending') {
+                $this->showInvoice($user, $ord, $messageId);
+            }
+
+            return;
+        }
 
         elseif (Str::startsWith($data, 'pay_wallet_')) {
             $input = Str::after($data, 'pay_wallet_');
@@ -961,6 +970,9 @@ class WebhookController extends Controller
         } elseif (Str::startsWith($data, 'pay_card_')) {
             $orderId = Str::after($data, 'pay_card_');
             $this->sendCardPaymentInfo($chatId, $orderId, $messageId);
+        } elseif (Str::startsWith($data, 'pay_xmplusgw_')) {
+            $orderId = (int) Str::after($data, 'pay_xmplusgw_');
+            $this->startXmplusGatewayPayment($user, $orderId, $messageId);
         } elseif (Str::startsWith($data, 'pay_plisio_')) {
             $orderId = (int) Str::after($data, 'pay_plisio_');
             try {
@@ -1052,6 +1064,9 @@ class WebhookController extends Controller
         } elseif (Str::startsWith($data, 'renew_pay_card_')) {
             $originalOrderId = Str::after($data, 'renew_pay_card_');
             $this->handleRenewCardPayment($user, $originalOrderId, $messageId);
+        } elseif (Str::startsWith($data, 'renew_pay_xmplusgw_')) {
+            $originalOrderId = Str::after($data, 'renew_pay_xmplusgw_');
+            $this->handleRenewXmplusGatewayPayment($user, $originalOrderId, $messageId);
         } elseif (Str::startsWith($data, 'renew_pay_plisio_')) {
             $originalOrderId = Str::after($data, 'renew_pay_plisio_');
             try {
@@ -1423,6 +1438,9 @@ class WebhookController extends Controller
             $keyboard->row([Keyboard::inlineButton(['text' => '✅ پرداخت با کیف پول', 'callback_data' => "pay_wallet_order_{$order->id}"])]);
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 کارت به کارت', 'callback_data' => "pay_card_{$order->id}"])]);
+        if ($xmplus) {
+            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 پرداخت آنلاین XMPlus (PayPal و...)', 'callback_data' => "pay_xmplusgw_{$order->id}"])]);
+        }
         if ($this->isPlisioActive()) {
             $keyboard->row([Keyboard::inlineButton(['text' => '💎 پرداخت Plisio (کریپتو)', 'callback_data' => "pay_plisio_{$order->id}"])]);
         }
@@ -2024,6 +2042,52 @@ class WebhookController extends Controller
         $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start'])]);
 
         $this->sendOrEditMessage($chatId, $message, $keyboard, $messageId);
+    }
+
+    /**
+     * شروع پرداخت با درگاه‌های XMPlus (مانند PayPal) از داخل ربات.
+     */
+    protected function startXmplusGatewayPayment(User $user, int $orderId, $messageId): void
+    {
+        if (! $this->isXmplusPanel()) {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ این گزینه فقط برای پنل XMPlus فعال است.', $messageId);
+
+            return;
+        }
+
+        $order = Order::with(['user', 'plan'])->find($orderId);
+        if (! $order || (int) $order->user_id !== (int) $user->id || $order->status !== 'pending' || ! $order->plan_id) {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ سفارش نامعتبر یا دیگر در انتظار پرداخت نیست.', $messageId);
+
+            return;
+        }
+
+        $this->ensureXmplusInvoiceForPendingPlanOrder($order);
+        $prep = XmplusProvisioningService::prepareWebPaymentGateways($order->fresh(['user', 'plan']), $this->settings);
+        if (! ($prep['ok'] ?? false)) {
+            $err = (string) ($prep['error'] ?? 'خطا در دریافت درگاه‌های XMPlus.');
+            $this->sendOrEditMessage(
+                $user->telegram_chat_id,
+                "❌ {$err}",
+                Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => "pay_card_{$order->id}"])]),
+                $messageId
+            );
+
+            return;
+        }
+
+        XmplusGatewayTelegram::sendGatewayPicker($order->fresh(['user', 'plan']), $this->settings);
+        $backCallback = $order->renews_order_id
+            ? 'renew_order_'.$order->renews_order_id
+            : 'invoice_methods_'.$order->id;
+        $this->sendOrEditMessage(
+            $user->telegram_chat_id,
+            "✅ لیست درگاه‌های XMPlus ارسال شد.\n\nاز پیام بعدی یکی از درگاه‌ها (مثل PayPal) را انتخاب کنید.",
+            Keyboard::make()->inline()->row([
+                Keyboard::inlineButton(['text' => '⬅️ بازگشت به روش‌ها', 'callback_data' => $backCallback]),
+            ]),
+            $messageId
+        );
     }
 
     protected function truncateTelegramInlineButtonText(string $text, int $max = 64): string
@@ -3076,6 +3140,9 @@ class WebhookController extends Controller
             $keyboard->row([Keyboard::inlineButton(['text' => '✅ تمدید با کیف پول (آنی)', 'callback_data' => "renew_pay_wallet_{$originalOrderId}"])]);
         }
         $keyboard->row([Keyboard::inlineButton(['text' => '💳 تمدید با کارت به کارت', 'callback_data' => "renew_pay_card_{$originalOrderId}"])]);
+        if ($xmplus) {
+            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 تمدید با درگاه XMPlus (PayPal و...)', 'callback_data' => "renew_pay_xmplusgw_{$originalOrderId}"])]);
+        }
         if ($this->isPlisioActive()) {
             $keyboard->row([Keyboard::inlineButton(['text' => '💎 تمدید با Plisio', 'callback_data' => "renew_pay_plisio_{$originalOrderId}"])]);
         }
@@ -3275,6 +3342,39 @@ class WebhookController extends Controller
 
         $this->ensureXmplusInvoiceForPendingPlanOrder($newRenewalOrder);
         $this->startPlisioPayment($user, $newRenewalOrder->id, $messageId);
+    }
+
+    protected function handleRenewXmplusGatewayPayment($user, $originalOrderId, $messageId)
+    {
+        $originalOrder = $user->orders()->with('plan')->find($originalOrderId);
+        if (! $originalOrder || ! $originalOrder->plan || $originalOrder->status !== 'paid') {
+            $this->sendOrEditMainMenu($user->telegram_chat_id, '❌ سرویس مورد نظر برای تمدید یافت نشد.', $messageId);
+
+            return;
+        }
+        $plan = $originalOrder->plan;
+
+        $newRenewalOrder = $user->orders()
+            ->where('status', 'pending')
+            ->where('source', 'telegram_renewal')
+            ->where('renews_order_id', $originalOrder->id)
+            ->latest('id')
+            ->first();
+
+        if (! $newRenewalOrder) {
+            $newRenewalOrder = $user->orders()->create([
+                'plan_id' => $plan->id,
+                'status' => 'pending',
+                'source' => 'telegram_renewal',
+                'amount' => $plan->price,
+                'expires_at' => null,
+                'panel_username' => $originalOrder->panel_username,
+            ]);
+            $newRenewalOrder->renews_order_id = $originalOrder->id;
+            $newRenewalOrder->save();
+        }
+
+        $this->startXmplusGatewayPayment($user, (int) $newRenewalOrder->id, $messageId);
     }
 
     protected function isPlisioActive(): bool

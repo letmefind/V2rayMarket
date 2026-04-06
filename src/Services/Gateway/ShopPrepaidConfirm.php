@@ -448,6 +448,21 @@ final class ShopPrepaidConfirmKernel
             throw new RuntimeException('ShopPrepaidConfirmKernel: loaded invoice has empty inv_id.');
         }
         self::debugLog($config, 'settle:invoice_loaded', ['inv_id' => $invId, 'status' => $invoice->status ?? null]);
+        $invoiceUserId = self::extractInvoiceUserId($invoice);
+        $userServiceIdsBefore = self::listUserServiceIds($invoiceUserId);
+
+        // برخی پنل‌ها InvoiceHelper::pay را فقط روی فاکتور Pending جلو می‌برند (همان مسیر Callback).
+        // بنابراین قبل از هر Paid دستی/force، یک بار helper را روی وضعیت خام فاکتور امتحان می‌کنیم.
+        if (! self::rowIsPaid($invoice) && ! self::invoiceHasServiceId($invoice)) {
+            $prePayDiag = null;
+            $prePayHelperBuilt = self::tryInvoiceHelperPay($invoice, $config, $invId, $prePayDiag);
+            self::debugLog($config, 'settle:pre_pay_helper', [
+                'inv_id' => $invId,
+                'built_service' => $prePayHelperBuilt,
+                'diag' => $prePayDiag,
+            ]);
+            $invoice = self::firstInvoiceByPublicKey($fqcn, $invId) ?? $invoice;
+        }
 
         self::tryPayWithGatewayId($fqcn, $invId, $gatewayId);
 
@@ -466,7 +481,7 @@ final class ShopPrepaidConfirmKernel
 
         self::fulfillAfterPaid($fqcn, $invId, $order, $gatewayId);
         self::tryUtilityHelpers($invoice, $invId, $gatewayId);
-        self::hookPanelFulfill($invoice, $invId, $order, $gatewayId, $config);
+        self::hookPanelFulfill($invoice, $invId, $order, $gatewayId, $config, $userServiceIdsBefore);
 
         $after = self::firstInvoiceByPublicKey($fqcn, $invId);
         self::debugLog($config, 'settle:after_hooks', [
@@ -482,23 +497,44 @@ final class ShopPrepaidConfirmKernel
      * @param  array<string, mixed>  $order
      * @param  array<string, mixed>  $config
      */
-    public static function hookPanelFulfill(object $invoice, string $invId, array $order, ?int $gatewayId, array $config): void
+    public static function hookPanelFulfill(
+        object $invoice,
+        string $invId,
+        array $order,
+        ?int $gatewayId,
+        array $config,
+        array $userServiceIdsBefore = []
+    ): void
     {
         // symmetricnet: Guest\CallbackController نشان می‌دهد مسیر واقعی ساخت سرویس این فراخوانی است.
-        $helperBuiltService = self::tryInvoiceHelperPay($invoice, $config, $invId);
+        $helperDiag = null;
+        $helperBuiltService = self::tryInvoiceHelperPay($invoice, $config, $invId, $helperDiag);
         self::tryConfiguredAfterPaidStatic($config, $invoice, $invId, $gatewayId);
         self::tryDomainInvoiceAfterPaidStatics($invoice, $invId, $gatewayId);
 
         // Fail-safe: اگر invoice/pay موفق اعلام شد ولی serviceid ساخته نشد، موفقیت فیک برنگردان.
         $reloaded = self::firstInvoiceByPublicKey(self::INVOICE_MODEL, $invId);
         $effective = $reloaded ?? $invoice;
+        self::syncInvoiceServiceIdFromUserServices($effective, $invId, $userServiceIdsBefore, $config, $helperBuiltService);
+        $effective = self::firstInvoiceByPublicKey(self::INVOICE_MODEL, $invId) ?? $effective;
+        if (! self::invoiceHasServiceId($effective) && $helperBuiltService && self::rowIsPaid($effective)) {
+            // برخی فورک‌ها برای renew/new service، serviceid را روی invoice ست نمی‌کنند.
+            // وقتی helper::pay truthy بوده و invoice Paid است، نتیجه را موفق در نظر می‌گیریم.
+            self::debugLog($config, 'hook:accept_paid_without_invoice_serviceid', [
+                'inv_id' => $invId,
+                'reason' => 'helper returned truthy and invoice is paid',
+            ]);
+            return;
+        }
         if (! self::invoiceHasServiceId($effective)) {
             $why = $helperBuiltService
                 ? 'helper reported success but serviceid still empty'
-                : 'InvoiceHelper::pay did not build service';
+                : 'invoice pay helper did not build service';
+            $diag = is_array($helperDiag) ? json_encode($helperDiag, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '';
             throw new RuntimeException(
                 'ShopPrepaidConfirmKernel: invoice paid but service was not provisioned ('.$why.'). '
                 .'Avoid returning success without serviceid for inv_id='.$invId
+                .($diag ? ' | helper_diag='.$diag : '')
             );
         }
     }
@@ -865,22 +901,30 @@ final class ShopPrepaidConfirmKernel
      * \App\Application\Controller\Guest\CallbackController::handle()
      *   $service = InvoiceHelper::pay($invoice, $user)
      */
-    private static function tryInvoiceHelperPay(object $invoice, array $config, string $invId): bool
+    private static function tryInvoiceHelperPay(object $invoice, array $config, string $invId, ?array &$diag = null): bool
     {
-        $helper = 'App\\Utility\\InvoiceHelper';
+        $helper = self::resolveInvoicePayHelperClass();
         $userModel = 'App\\Application\\Models\\User';
-        if (! class_exists($helper) || ! is_callable([$helper, 'pay']) || ! class_exists($userModel)) {
+        if ($helper === null || ! is_callable([$helper, 'pay']) || ! class_exists($userModel)) {
+            $diag = [
+                'stage' => 'missing',
+                'helper_class' => $helper,
+                'helper_pay_callable' => $helper !== null ? is_callable([$helper, 'pay']) : false,
+                'user_model_exists' => class_exists($userModel),
+            ];
             self::debugLog($config, 'invoice_helper:missing', [
                 'inv_id' => $invId,
-                'helper_exists' => class_exists($helper),
-                'helper_pay_callable' => is_callable([$helper, 'pay']),
+                'helper_class' => $helper,
+                'helper_pay_callable' => $helper !== null ? is_callable([$helper, 'pay']) : false,
                 'user_model_exists' => class_exists($userModel),
             ]);
             return false;
         }
 
         $uidRaw = $invoice->userid ?? $invoice->user_id ?? null;
-        if (! is_numeric($uidRaw) || (int) $uidRaw <= 0 || ! method_exists($userModel, 'find')) {
+        // بعضی مدل‌های Eloquent متد find را از __callStatic می‌گیرند و method_exists روی کلاس false می‌دهد.
+        if (! is_numeric($uidRaw) || (int) $uidRaw <= 0) {
+            $diag = ['stage' => 'invalid_uid', 'uid_raw' => $uidRaw];
             self::debugLog($config, 'invoice_helper:invalid_uid', ['inv_id' => $invId, 'uid_raw' => $uidRaw]);
             return false;
         }
@@ -888,10 +932,19 @@ final class ShopPrepaidConfirmKernel
         try {
             $user = $userModel::find((int) $uidRaw);
             if (! is_object($user)) {
+                $diag = ['stage' => 'user_not_found', 'uid' => (int) $uidRaw];
                 self::debugLog($config, 'invoice_helper:user_not_found', ['inv_id' => $invId, 'uid' => (int) $uidRaw]);
                 return false;
             }
             $ret = $helper::pay($invoice, $user);
+            $retTruthy = (bool) $ret;
+            $diag = [
+                'stage' => 'pay_called',
+                'helper' => $helper,
+                'uid' => (int) $uidRaw,
+                'ret_type' => gettype($ret),
+                'ret_truthy' => $retTruthy,
+            ];
             self::debugLog($config, 'invoice_helper:pay_called', [
                 'inv_id' => $invId,
                 'uid' => (int) $uidRaw,
@@ -900,27 +953,237 @@ final class ShopPrepaidConfirmKernel
                 'ret_is_array' => is_array($ret),
             ]);
 
-            if (is_object($ret) && isset($ret->id) && is_numeric($ret->id) && (int) $ret->id > 0) {
-                // خیلی از پیاده‌سازی‌ها Service object برمی‌گردانند ولی serviceid روی invoice هنوز ست نشده.
+            $serviceId = self::extractServiceIdFromHelperReturn($ret);
+            if ($serviceId !== null) {
+                // بعضی فورک‌ها object برنمی‌گردانند (array/int/string). در همهٔ حالت‌ها serviceid را ست می‌کنیم.
                 try {
-                    $invoice->serviceid = (int) $ret->id;
+                    $invoice->serviceid = $serviceId;
                     if (method_exists($invoice, 'save')) {
                         $invoice->save();
                     }
                 } catch (Throwable $e) {
                 }
+                self::updateInvoiceRowByPublicKey(self::INVOICE_MODEL, $invId, ['serviceid' => $serviceId]);
             }
 
             if (self::invoiceHasServiceId($invoice)) {
+                $diag['stage'] = 'service_on_invoice';
                 return true;
             }
             $fresh = self::firstInvoiceByPublicKey(self::INVOICE_MODEL, $invId);
+            $ok = $fresh !== null && self::invoiceHasServiceId($fresh);
+            $paidNow = ($fresh !== null && self::rowIsPaid($fresh)) || self::rowIsPaid($invoice);
+            if ($ok) {
+                $diag['stage'] = 'service_on_reloaded_invoice';
+                $diag['invoice_status'] = $fresh->status ?? ($invoice->status ?? null);
+                $diag['invoice_serviceid'] = $fresh->serviceid ?? ($fresh->service_id ?? ($invoice->serviceid ?? ($invoice->service_id ?? null)));
 
-            return $fresh !== null && self::invoiceHasServiceId($fresh);
+                return true;
+            }
+            if ($retTruthy && $paidNow) {
+                // طبق Client API docs ممکن است invoice Paid باشد ولی serviceid خالی بماند.
+                $diag['stage'] = 'paid_without_serviceid_but_helper_truthy';
+                $diag['invoice_status'] = $fresh->status ?? ($invoice->status ?? null);
+                $diag['invoice_serviceid'] = $fresh->serviceid ?? ($fresh->service_id ?? ($invoice->serviceid ?? ($invoice->service_id ?? null)));
+
+                return true;
+            }
+
+            $diag['stage'] = 'no_service_after_pay';
+            $diag['invoice_status'] = $fresh->status ?? ($invoice->status ?? null);
+            $diag['invoice_serviceid'] = $fresh->serviceid ?? ($fresh->service_id ?? ($invoice->serviceid ?? ($invoice->service_id ?? null)));
+
+            return false;
         } catch (Throwable $e) {
+            $diag = ['stage' => 'exception', 'error' => $e->getMessage(), 'helper' => $helper];
             self::debugLog($config, 'invoice_helper:exception', ['inv_id' => $invId, 'error' => $e->getMessage()]);
             return false;
         }
+    }
+
+    /**
+     * استخراج service id از خروجی‌های متنوع InvoiceHelper::pay در فورک‌های مختلف XMPlus.
+     *
+     * @param  mixed  $ret
+     */
+    private static function extractServiceIdFromHelperReturn($ret): ?int
+    {
+        if (is_object($ret) && isset($ret->id) && is_numeric($ret->id) && (int) $ret->id > 0) {
+            return (int) $ret->id;
+        }
+        if (is_numeric($ret) && (int) $ret > 0) {
+            return (int) $ret;
+        }
+        if (is_string($ret) && ctype_digit(trim($ret)) && (int) trim($ret) > 0) {
+            return (int) trim($ret);
+        }
+        if (! is_array($ret)) {
+            return null;
+        }
+
+        $directKeys = ['id', 'serviceid', 'service_id', 'sid'];
+        foreach ($directKeys as $k) {
+            if (isset($ret[$k]) && is_numeric($ret[$k]) && (int) $ret[$k] > 0) {
+                return (int) $ret[$k];
+            }
+        }
+
+        $nestedCandidates = ['service', 'data', 'result', 'payload'];
+        foreach ($nestedCandidates as $nk) {
+            if (! isset($ret[$nk]) || ! is_array($ret[$nk])) {
+                continue;
+            }
+            foreach ($directKeys as $k) {
+                if (isset($ret[$nk][$k]) && is_numeric($ret[$nk][$k]) && (int) $ret[$nk][$k] > 0) {
+                    return (int) $ret[$nk][$k];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * از روی ردیف invoice، uid را استخراج می‌کند.
+     */
+    private static function extractInvoiceUserId(object $invoice): ?int
+    {
+        foreach (['userid', 'user_id', 'uid'] as $k) {
+            if (! isset($invoice->{$k})) {
+                continue;
+            }
+            $v = $invoice->{$k};
+            if (is_numeric($v) && (int) $v > 0) {
+                return (int) $v;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * لیست id سرویس‌های فعلی کاربر از جدول service.
+     *
+     * @return list<int>
+     */
+    private static function listUserServiceIds(?int $userId): array
+    {
+        if ($userId === null || $userId <= 0) {
+            return [];
+        }
+        $serviceModel = 'App\\Application\\Models\\Service';
+        if (! class_exists($serviceModel) || ! method_exists($serviceModel, 'query')) {
+            return [];
+        }
+        try {
+            $rows = $serviceModel::query()
+                ->where('userid', $userId)
+                ->orderByDesc('id')
+                ->limit(30)
+                ->get(['id']);
+            if (! is_iterable($rows)) {
+                return [];
+            }
+            $ids = [];
+            foreach ($rows as $row) {
+                $id = $row->id ?? null;
+                if (is_numeric($id) && (int) $id > 0) {
+                    $ids[] = (int) $id;
+                }
+            }
+
+            return array_values(array_unique($ids));
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * اگر helper سرویس ساخته ولی invoice.serviceid خالی مانده باشد، از جدول service پیدا کرده و sync می‌کند.
+     *
+     * @param  list<int>  $beforeServiceIds
+     */
+    private static function syncInvoiceServiceIdFromUserServices(
+        object $invoice,
+        string $invId,
+        array $beforeServiceIds,
+        array $config,
+        bool $allowReuseExistingService = false
+    ): void {
+        if (self::invoiceHasServiceId($invoice)) {
+            return;
+        }
+        $uid = self::extractInvoiceUserId($invoice);
+        $afterIds = self::listUserServiceIds($uid);
+        if ($afterIds === []) {
+            self::debugLog($config, 'service_sync:no_services_found', ['inv_id' => $invId, 'uid' => $uid]);
+            return;
+        }
+
+        $candidate = null;
+        $beforeMap = [];
+        foreach ($beforeServiceIds as $id) {
+            $beforeMap[$id] = true;
+        }
+        foreach ($afterIds as $id) {
+            if (! isset($beforeMap[$id])) {
+                $candidate = $id;
+                break;
+            }
+        }
+        if ($candidate === null && $beforeServiceIds === [] && isset($afterIds[0]) && $afterIds[0] > 0) {
+            // خرید اول کاربر: همان آخرین service به invoice وصل شود.
+            $candidate = $afterIds[0];
+        }
+        if ($candidate === null && $allowReuseExistingService && isset($afterIds[0]) && $afterIds[0] > 0) {
+            // حالت renew/فورک‌هایی که serviceid را روی invoice ست نمی‌کنند: آخرین سرویس کاربر را attach کن.
+            $candidate = $afterIds[0];
+        }
+        if ($candidate === null || $candidate <= 0) {
+            self::debugLog($config, 'service_sync:no_new_candidate', [
+                'inv_id' => $invId,
+                'uid' => $uid,
+                'before' => $beforeServiceIds,
+                'after' => $afterIds,
+            ]);
+            return;
+        }
+
+        try {
+            $invoice->serviceid = $candidate;
+            if (method_exists($invoice, 'save')) {
+                $invoice->save();
+            }
+        } catch (Throwable $e) {
+        }
+        self::updateInvoiceRowByPublicKey(self::INVOICE_MODEL, $invId, ['serviceid' => $candidate]);
+        self::debugLog($config, 'service_sync:attached', [
+            'inv_id' => $invId,
+            'uid' => $uid,
+            'serviceid' => $candidate,
+        ]);
+    }
+
+    /**
+     * پیدا کردن helper صحیح پنل برای pay(invoice,user).
+     *
+     * @return class-string|null
+     */
+    private static function resolveInvoicePayHelperClass(): ?string
+    {
+        $candidates = [
+            // الگوی observed در symmetricnet (Guest\CallbackController)
+            'App\\Domain\\Invoice',
+            // برخی فورک‌ها
+            'App\\Utility\\InvoiceHelper',
+        ];
+        foreach ($candidates as $cls) {
+            if (class_exists($cls) && is_callable([$cls, 'pay'])) {
+                return $cls;
+            }
+        }
+
+        return null;
     }
 
     /**
