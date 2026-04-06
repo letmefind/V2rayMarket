@@ -410,6 +410,68 @@ class XmplusProvisioningService
             return $pay;
         }
 
+        // برخی نصب‌های XMPlus در اولین فراخوانی invoice/pay بدنه خالی می‌دهند و حتی Pending می‌مانند.
+        // در این حالت یک retry کنترل‌شده روی خود invoice/pay انجام می‌دهیم (نه فقط invoice/view).
+        if (self::invoicePayResponseBodyEmptyOrUnstructured($pay)) {
+            $maxPayRetries = 3;
+            for ($retry = 1; $retry <= $maxPayRetries; $retry++) {
+                usleep(400_000);
+                try {
+                    $view = $api->invoiceView($email, $passwd, $invid);
+                    if (self::invoiceViewResponseIsPaid($view)) {
+                        $api->log('info', 'XMPlus invoice/pay خالی بود اما invoice/view آن را Paid گزارش کرد (بدون retry بیشتر)', [
+                            'step' => 'invoice_pay_empty_body_paid_before_retry',
+                            'invid' => $invid,
+                            'retry' => $retry,
+                        ]);
+
+                        return array_merge($pay, [
+                            'code' => 100,
+                            'status' => 'success',
+                            'gateway' => 'ShopPrepaidConfirm',
+                            '_empty_pay_body_recovered_via_invoice_view' => true,
+                        ]);
+                    }
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus invoice/view قبل از retry invoice/pay خطا', [
+                        'invid' => $invid,
+                        'retry' => $retry,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+
+                try {
+                    $payRetry = $invoicePay();
+                    if (self::invoicePayResponseLooksSuccessful($payRetry)) {
+                        $api->log('info', 'XMPlus invoice/pay پس از retry موفق شد', [
+                            'step' => 'invoice_pay_retry_success',
+                            'invid' => $invid,
+                            'retry' => $retry,
+                        ]);
+
+                        return $payRetry;
+                    }
+                    if (! self::invoicePayResponseBodyEmptyOrUnstructured($payRetry)) {
+                        $pay = $payRetry;
+                        break;
+                    }
+                    $pay = $payRetry;
+                    $api->log('warning', 'XMPlus invoice/pay retry هنوز بدنه خالی داد', [
+                        'step' => 'invoice_pay_retry_still_empty',
+                        'invid' => $invid,
+                        'retry' => $retry,
+                    ]);
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus invoice/pay retry خطا داد', [
+                        'step' => 'invoice_pay_retry_error',
+                        'invid' => $invid,
+                        'retry' => $retry,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
         $recovered = self::recoverShopInvoicePayAfterEmptyResponse($api, $email, $passwd, $invid, $pay);
         if ($recovered !== null) {
             return $recovered;
