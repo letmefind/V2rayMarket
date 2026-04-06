@@ -136,6 +136,32 @@ class XmplusProvisioningService
     }
 
     /**
+     * @param  array<string, mixed>  $invoiceView
+     */
+    protected static function invoiceViewResponseHasServiceId(array $invoiceView): bool
+    {
+        $inv = $invoiceView['invoice'] ?? null;
+        if (! is_array($inv)) {
+            return false;
+        }
+
+        foreach (['serviceid', 'service_id', 'sid'] as $k) {
+            $v = $inv[$k] ?? null;
+            if ($v === null || $v === '') {
+                continue;
+            }
+            if (is_numeric($v) && (int) $v > 0) {
+                return true;
+            }
+            if (is_string($v) && trim($v) !== '' && strtolower(trim($v)) !== 'null' && trim($v) !== '0') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * پس از انتخاب درگاه توسط کاربر در ربات: invoice/pay و polling تا sublink.
      *
      * @param  array<string, mixed>  $ctx
@@ -535,16 +561,37 @@ class XmplusProvisioningService
                 );
             }
             $alreadyPaid = false;
+            $alreadyPaidHasServiceId = false;
             try {
                 $viewPre = $api->invoiceView($email, $passwdPlain, $invid);
                 $alreadyPaid = self::invoiceViewResponseIsPaid($viewPre);
+                $alreadyPaidHasServiceId = self::invoiceViewResponseHasServiceId($viewPre);
             } catch (\Throwable $e) {
                 $api->log('warning', 'XMPlus invoice/view قبل از pay (فروشگاه)', ['error' => $e->getMessage(), 'invid' => $invid]);
             }
             if ($alreadyPaid) {
-                $pay = [];
-                $customerCheckout = false;
-                $api->log('info', 'XMPlus فاکتور از قبل Paid است؛ invoice/pay فراخوانی نشد', ['invid' => $invid, 'order_id' => $order->id]);
+                if ($alreadyPaidHasServiceId) {
+                    $pay = [];
+                    $customerCheckout = false;
+                    $api->log('info', 'XMPlus فاکتور از قبل Paid (با serviceid) است؛ invoice/pay فراخوانی نشد', ['invid' => $invid, 'order_id' => $order->id]);
+                } else {
+                    // در برخی پنل‌ها Paid بدون serviceid با یک بار invoice/pay مجدد (درگاه نمایندگی) اصلاح می‌شود.
+                    $api->log('warning', 'XMPlus فاکتور از قبل Paid ولی بدون serviceid است؛ تلاش برای invoice/pay مجدد', [
+                        'invid' => $invid,
+                        'order_id' => $order->id,
+                        'gatewayid' => (int) $gatewayId,
+                    ]);
+                    $pay = self::runInvoicePayStrictForShopCollected(
+                        $api,
+                        function () use ($api, $email, $passwdPlain, $invid, $gatewayId) {
+                            return $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                        },
+                        $email,
+                        $passwdPlain,
+                        $invid
+                    );
+                    $customerCheckout = self::invoicePayLooksCustomerSideCheckout($pay);
+                }
             } else {
                 $pay = self::runInvoicePayStrictForShopCollected(
                     $api,
@@ -614,9 +661,11 @@ class XmplusProvisioningService
 
         if ($autoPayConfigured) {
             $alreadyPaid = false;
+            $alreadyPaidHasServiceId = false;
             try {
                 $viewPre = $api->invoiceView($email, $passwdPlain, $invid);
                 $alreadyPaid = self::invoiceViewResponseIsPaid($viewPre);
+                $alreadyPaidHasServiceId = self::invoiceViewResponseHasServiceId($viewPre);
             } catch (\Throwable $e) {
                 $api->log('warning', 'XMPlus invoice/view قبل از pay', ['error' => $e->getMessage(), 'invid' => $invid]);
             }
@@ -632,7 +681,21 @@ class XmplusProvisioningService
                     ]);
                 }
             } else {
-                $api->log('info', 'XMPlus فاکتور از قبل Paid؛ invoice/pay رد شد', ['invid' => $invid]);
+                if ($alreadyPaidHasServiceId) {
+                    $api->log('info', 'XMPlus فاکتور از قبل Paid (با serviceid)؛ invoice/pay رد شد', ['invid' => $invid]);
+                } else {
+                    $api->log('warning', 'XMPlus فاکتور از قبل Paid ولی بدون serviceid؛ تلاش برای invoice/pay مجدد', ['invid' => $invid, 'gatewayid' => (int) $gatewayId]);
+                    try {
+                        $pay = $api->invoicePay($email, $passwdPlain, $invid, (int) $gatewayId);
+                        $api->log('info', 'XMPlus invoice/pay مجدد برای Paid بدون serviceid فراخوانی شد', ['step' => 'invoice_pay_retry_paid_without_service']);
+                    } catch (\Throwable $e) {
+                        $api->log('warning', 'XMPlus invoice/pay مجدد برای Paid بدون serviceid خطا (ادامه با polling)', [
+                            'step' => 'invoice_pay_retry_paid_without_service_error',
+                            'error' => $e->getMessage(),
+                            'invid' => $invid,
+                        ]);
+                    }
+                }
             }
             $async = self::invoicePayLooksAsync($pay);
             $maxAttempts = $async ? 72 : 18;
