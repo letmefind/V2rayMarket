@@ -1247,6 +1247,20 @@ class XmplusProvisioningService
                 );
             }
 
+            if (
+                $lastStatus === 'Pending'
+                && $autoPayGatewayConfigured
+                && ! $shopCollectedCustomerGateway
+                && ($i + 1) >= 10
+            ) {
+                throw new RuntimeException(
+                    '⏳ پرداخت این سفارش هنوز در XMPlus نهایی نشده است (فاکتور «'.$invid.'» همچنان Pending است).'."\n\n".
+                    'این معمولاً به این دلیل است که پرداخت در درگاه (PayPal، Stripe و...) هنوز تکمیل نشده یا callback به پنل ارسال نشده است.'."\n\n".
+                    '▫️ اگر پرداخت را در درگاه تکمیل کردید، لطفاً چند دقیقه صبر کنید و سپس دکمهٔ «✅ پرداخت کردم، بررسی کن» را دوباره بزنید.'."\n".
+                    '▫️ اگر پرداخت را تکمیل نکردید، به لینک پرداخت برگردید و آن را تمام کنید.'
+                );
+            }
+
             $accRaw = $api->accountInfo($email, $passwd);
             if (self::apiIsEmailNotFoundOnClient($accRaw)) {
                 throw new RuntimeException(

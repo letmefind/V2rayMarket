@@ -21,9 +21,9 @@ class PollXmplusOffsitePayment implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 420;
+    public int $timeout = 300;
 
-    public int $tries = 10;
+    public int $tries = 5;
 
     public function __construct(
         protected int $orderId,

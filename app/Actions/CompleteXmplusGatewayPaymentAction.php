@@ -174,6 +174,25 @@ final class CompleteXmplusGatewayPaymentAction
         $pollCtx = $ctx;
         unset($pollCtx['xmplus_web_await_pay'], $pollCtx['gateway_options']);
 
+        $email = (string) ($ctx['email'] ?? '');
+        $passwd = (string) ($ctx['passwd'] ?? '');
+        $invid = (string) ($ctx['invid'] ?? '');
+        if ($email !== '' && $passwd !== '' && $invid !== '') {
+            try {
+                $invCheck = $api->invoiceView($email, $passwd, $invid);
+                $statusCheck = (string) ($invCheck['invoice']['status'] ?? '');
+                if (strcasecmp($statusCheck, 'Pending') === 0) {
+                    return [
+                        'ok' => false,
+                        'message' => '⏳ پرداخت این سفارش هنوز در XMPlus نهایی نشده است.'."\n".
+                            'بعد از تکمیل پرداخت در درگاه (PayPal و...), دوباره دکمهٔ «✅ پرداخت کردم، بررسی کن» را بزنید.',
+                    ];
+                }
+            } catch (\Throwable $e) {
+                Log::channel('xmplus')->debug('finalizeTelegramAfterOffsite quick check: '.$e->getMessage());
+            }
+        }
+
         try {
             $prov = XmplusProvisioningService::pollXmplusWebAfterOffsitePayment($api, $pollCtx);
         } catch (\Throwable $e) {
