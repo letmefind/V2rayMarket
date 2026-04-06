@@ -6,6 +6,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\XmplusInvoiceDatabaseSyncService;
+use App\Services\XmplusPackageAwareRenewalService;
 use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -1032,6 +1033,39 @@ class XmplusProvisioningService
             $poll = self::pollForSublink($api, $email, $passwdPlain, $invid, $pid, $sid, true, $maxAttempts, $sleepSeconds, false, $pollFb);
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
+
+            // ✅ تمدید service بر اساس package تعریف شده در XMPlus
+            if ($shopPaymentAlreadyCollected) {
+                try {
+                    $invoiceViewForRenewal = $api->invoiceView($email, $passwdPlain, $invid);
+                    
+                    if (self::invoiceViewResponseIsPaid($invoiceViewForRenewal)) {
+                        $renewed = XmplusPackageAwareRenewalService::renewServiceFromPackage(
+                            $api,
+                            $email,
+                            $passwdPlain,
+                            $sid,
+                            $pid,
+                            $settings
+                        );
+                        
+                        if ($renewed) {
+                            $api->log('info', 'XMPlus تمدید: ✅ service با package تمدید شد', [
+                                'invid' => $invid,
+                                'service_id' => $sid,
+                                'package_id' => $pid,
+                            ]);
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus تمدید: خطا در تمدید با package', [
+                        'error' => $e->getMessage(),
+                        'invid' => $invid,
+                        'sid' => $sid,
+                        'pid' => $pid,
+                    ]);
+                }
+            }
 
             return [
                 'final_config' => $sublink,

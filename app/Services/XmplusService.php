@@ -322,6 +322,19 @@ class XmplusService
     }
 
     /**
+     * لیست packages — POST /api/client/packages
+     *
+     * @return array<string, mixed>
+     */
+    public function listPackages(string $email, string $passwd): array
+    {
+        return $this->postClient('/api/client/packages', [
+            'email' => $email,
+            'passwd' => $passwd,
+        ], 'packages_list');
+    }
+
+    /**
      * لیست درگاه‌های پرداخت — POST /api/client/gateways
      *
      * @see https://docs.xmplus.dev/api/client.html#_12-gateway-lists
