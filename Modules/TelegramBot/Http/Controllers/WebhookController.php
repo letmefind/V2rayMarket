@@ -504,10 +504,19 @@ class WebhookController extends Controller
 
         $order = Order::find($orderId);
         if (! $order || $order->status !== 'pending') {
+            $retryHint = null;
+            if (
+                $order
+                && $order->status === 'paid'
+                && $order->plan_id
+                && (! is_string($order->config_details) || trim($order->config_details) === '' || str_starts_with(trim($order->config_details), '⚠️'))
+            ) {
+                $retryHint = 'این سفارش Paid شده ولی خروجی سرویس/کانفیگ ندارد. برای اجرای مجدد، وضعیت سفارش را در پنل ادمین به pending برگردانید و دوباره تایید بزنید.';
+            }
             try {
                 Telegram::answerCallbackQuery([
                     'callback_query_id' => $callbackQuery->getId(),
-                    'text' => 'سفارش نامعتبر یا قبلاً پردازش شده.',
+                    'text' => $retryHint ?? 'سفارش نامعتبر یا قبلاً پردازش شده.',
                     'show_alert' => true,
                 ]);
             } catch (\Throwable $e) {

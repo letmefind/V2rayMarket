@@ -1207,7 +1207,11 @@ class XmplusProvisioningService
                     'early_after' => $earlyPaidNoServiceAfter,
                 ]);
 
-                return ['sublink' => $notice, 'sid' => null];
+                throw new RuntimeException(
+                    $notice."\n\n"
+                    .'❗️سفارش در VPNMarket در وضعیت pending نگه داشته شد تا اشتباهاً Paid بدون سرویس ثبت نشود. '
+                    .'بعد از رفع منطق ساخت سرویس در پنل XMPlus دوباره «تأیید و اجرا» را بزنید.'
+                );
             }
 
             if ($lastStatus === 'Paid' && $knownSid !== null) {
@@ -1261,7 +1265,11 @@ class XmplusProvisioningService
                     'wait_seconds' => $totalWait,
                 ]);
 
-                return ['sublink' => $notice, 'sid' => null];
+                throw new RuntimeException(
+                    $notice."\n\n"
+                    .'❗️سفارش در VPNMarket در وضعیت pending نگه داشته شد تا اشتباهاً Paid بدون سرویس ثبت نشود. '
+                    .'بعد از رفع منطق ساخت سرویس در پنل XMPlus دوباره «تأیید و اجرا» را بزنید.'
+                );
             }
             throw new RuntimeException(
                 'XMPlus: فاکتور در API با وضعیت Paid است اما پس از '.$totalWait.' ثانیه هنوز لینک اشتراک از account/info / service/info دیده نشد. '.
