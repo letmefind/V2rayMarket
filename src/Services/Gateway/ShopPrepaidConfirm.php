@@ -607,13 +607,10 @@ final class ShopPrepaidConfirmKernel
             }
             
             // تمدید service
-            $currentValidity = isset($service->validity) ? (int)$service->validity : 0;
-            $newValidity = $currentValidity + $packageExpire;
-            
             $currentDueDate = trim((string)($service->due_date ?? ''));
             $newDueDate = self::calculateNewDueDate($currentDueDate, $packageExpire);
             
-            $service->validity = $newValidity;
+            // validity ثابت می‌ماند، فقط due_date تمدید می‌شود
             $service->due_date = $newDueDate;
             
             // اگر service منقضی شده، فعال کن
@@ -637,8 +634,6 @@ final class ShopPrepaidConfirmKernel
             
             self::debugLog($config, 'renewal:service_renewed', [
                 'service_id' => $serviceId,
-                'old_validity' => $currentValidity,
-                'new_validity' => $newValidity,
                 'old_due_date' => $currentDueDate,
                 'new_due_date' => $newDueDate,
                 'added_days' => $packageExpire,

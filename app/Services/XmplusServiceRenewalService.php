@@ -53,16 +53,12 @@ class XmplusServiceRenewalService
                 return false;
             }
 
-            // محاسبه validity و due_date جدید
-            $currentValidity = (int) ($service['validity'] ?? 0);
-            $newValidity = $currentValidity + $addDays;
-            
+            // محاسبه due_date جدید (validity ثابت می‌ماند)
             $currentDueDate = trim((string) ($service['due_date'] ?? ''));
             $newDueDate = self::calculateNewDueDate($currentDueDate, $addDays);
 
             // تمدید service
             $updated = self::updateService($pdo, $serviceId, [
-                'validity' => $newValidity,
                 'due_date' => $newDueDate,
                 'status' => 1, // Active
             ]);
@@ -70,8 +66,6 @@ class XmplusServiceRenewalService
             if ($updated) {
                 Log::info('XMPlus direct renewal: ✅ service renewed', [
                     'service_id' => $serviceId,
-                    'old_validity' => $currentValidity,
-                    'new_validity' => $newValidity,
                     'old_due_date' => $currentDueDate,
                     'new_due_date' => $newDueDate,
                     'added_days' => $addDays,
