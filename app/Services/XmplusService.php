@@ -115,22 +115,31 @@ class XmplusService
             ->post($url, $body);
 
         $rawBody = $response->body();
-        if (self::responseLooksLikeHtml($rawBody)) {
-            $this->log('error', "XMPlus response: POST {$path} (HTML بدنه، نه JSON)", [
-                'step' => $step,
-                'http_status' => $response->status(),
-                'hint' => 'پنل XMPlus صفحه خطای PHP/Whoops برگردانده (مثلاً ionCube Loader یا باگ داخل پنل). Client API باید JSON بدهد؛ مستندات: https://docs.xmplus.dev/api/client.html',
-                'body_preview' => substr(preg_replace('/\s+/', ' ', $rawBody), 0, 500),
-            ]);
-            throw new RuntimeException(
-                "XMPlus {$step}: panel returned an HTML error page instead of JSON (HTTP {$response->status()}). "
-                .'Fix the XMPlus host: PHP error logs, ionCube Loader, and PHP version must match the panel.'
-            );
-        }
 
         $parsed = $response->json();
         if (! is_array($parsed)) {
+            $parsed = self::extractXmplusClientJson($rawBody);
+        }
+        if (! is_array($parsed)) {
+            if (self::responseLooksLikeHtml($rawBody)) {
+                $this->log('error', "XMPlus response: POST {$path} (HTML بدنه، نه JSON)", [
+                    'step' => $step,
+                    'http_status' => $response->status(),
+                    'hint' => 'پنل XMPlus صفحه خطای PHP/Whoops برگردانده (مثلاً ionCube Loader یا باگ داخل پنل). Client API باید JSON بدهد؛ مستندات: https://docs.xmplus.dev/api/client.html',
+                    'body_preview' => substr(preg_replace('/\s+/', ' ', $rawBody), 0, 500),
+                ]);
+                throw new RuntimeException(
+                    "XMPlus {$step}: panel returned an HTML error page instead of JSON (HTTP {$response->status()}). "
+                    .'Fix the XMPlus host: PHP error logs, ionCube Loader, and PHP version must match the panel.'
+                );
+            }
             $parsed = self::decodeJsonFromMessyBody($rawBody) ?? ['_raw' => $rawBody];
+        } elseif (preg_match('/^\s*</', $rawBody) === 1) {
+            $this->log('warning', 'XMPlus: خروجی API با هشدار/نویز HTML قبل از JSON (display_errors روی پنل روشن است)', [
+                'step' => $step,
+                'path' => $path,
+                'preview' => substr(preg_replace('/\s+/', ' ', $rawBody), 0, 400),
+            ]);
         }
 
         $this->log('info', "XMPlus response: POST {$path}", [
@@ -169,12 +178,6 @@ class XmplusService
     }
 
     /**
-     * وقتی پنل XMPlus قبل/بعد JSON هشدار PHP یا HTML چاپ کند، json() خالی می‌شود؛
-     * این تابع شیء JSON را از اولین «{» تا آخرین «}» استخراج می‌کند.
-     *
-     * @return array<string, mixed>|null
-     */
-    /**
      * پاسخ Whoops/Slim/HTML به‌جای JSON Client API.
      */
     protected static function responseLooksLikeHtml(string $body): bool
@@ -212,13 +215,72 @@ class XmplusService
         return is_string($enc) ? $enc : 'unserializable response';
     }
 
-    protected static function decodeJsonFromMessyBody(string $body): ?array
+    /**
+     * وقتی پنل قبل از JSON هشدار PHP چاپ کند (&lt;br /&gt; Warning ...)، json() خراب می‌شود.
+     * شیء اصلی Client API را از بدنه استخراج می‌کند و فقط اگر شبیه پاسخ XMPlus باشد برمی‌گرداند.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected static function extractXmplusClientJson(string $body): ?array
     {
         $body = trim($body);
         if ($body === '') {
             return null;
         }
-        if (self::responseLooksLikeHtml($body)) {
+        $try = json_decode($body, true);
+        if (is_array($try) && self::looksLikeXmplusClientPayload($try)) {
+            return $try;
+        }
+        $start = strpos($body, '{');
+        if ($start === false) {
+            return null;
+        }
+        $end = strrpos($body, '}');
+        if ($end === false || $end < $start) {
+            return null;
+        }
+        $slice = substr($body, $start, $end - $start + 1);
+        $try = json_decode($slice, true);
+        if (! is_array($try) || ! self::looksLikeXmplusClientPayload($try)) {
+            return null;
+        }
+
+        return $try;
+    }
+
+    /**
+     * @param  array<string, mixed>  $arr
+     */
+    protected static function looksLikeXmplusClientPayload(array $arr): bool
+    {
+        if (! isset($arr['status']) || ! is_string($arr['status'])) {
+            return false;
+        }
+        if (array_key_exists('code', $arr)) {
+            return true;
+        }
+        if (isset($arr['packages']) || isset($arr['package']) || isset($arr['invoice']) || isset($arr['gateways'])) {
+            return true;
+        }
+        if (isset($arr['data']) && is_array($arr['data'])) {
+            return true;
+        }
+        if (isset($arr['orderid']) || isset($arr['invid']) || isset($arr['id'])) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * وقتی پنل قبل/بعد JSON هشدار چاپ کند؛ فقط بعد از رد شدن از صفحهٔ خطای کامل HTML صدا زده می‌شود.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected static function decodeJsonFromMessyBody(string $body): ?array
+    {
+        $body = trim($body);
+        if ($body === '') {
             return null;
         }
         $try = json_decode($body, true);
