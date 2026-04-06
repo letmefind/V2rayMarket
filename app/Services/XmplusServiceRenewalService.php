@@ -188,11 +188,18 @@ class XmplusServiceRenewalService
     private static function calculateNewDueDate(string $currentDueDate, int $addDays): string
     {
         try {
+            $now = new \DateTime();
+            
             if ($currentDueDate === '' || $currentDueDate === '0000-00-00' || $currentDueDate === '0000-00-00 00:00:00') {
                 // اگر due_date خالی است، از امروز شروع کن
-                $base = new \DateTime();
+                $base = clone $now;
             } else {
                 $base = new \DateTime($currentDueDate);
+                
+                // اگر تاریخ در گذشته است (منقضی شده)، از امروز شروع کن
+                if ($base < $now) {
+                    $base = clone $now;
+                }
             }
 
             $base->modify("+{$addDays} days");
