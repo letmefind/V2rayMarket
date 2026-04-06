@@ -78,13 +78,17 @@ final class XmplusGatewayTelegram
      * @param  array<string, mixed>  $pay
      * @param  string|null  $invid
      * @param  string|null  $panelBase
+     * @param  string|null  $email
+     * @param  string|null  $password
      */
     public static function sendInvoicePayInstructions(
         array $pay,
         string $chatId,
         Collection $settings,
         ?string $invid = null,
-        ?string $panelBase = null
+        ?string $panelBase = null,
+        ?string $email = null,
+        ?string $password = null
     ): void {
         $token = $settings->get('telegram_bot_token');
         if (! $token || $chatId === '') {
@@ -130,13 +134,23 @@ final class XmplusGatewayTelegram
         } elseif (is_array($data) && (($data['object'] ?? '') === 'payment_intent' || isset($data['client_secret']))) {
             $invUrl = null;
             if ($invid !== null && $invid !== '' && $panelBase !== null && $panelBase !== '') {
-                $invUrl = rtrim($panelBase, '/').'/client/invoice/'.$invid;
+                $invUrl = rtrim($panelBase, '/').'/portal/'.$invid.'/invoice';
             }
 
             $msg = '💳 <b>پرداخت با کارت اعتباری (Stripe)</b>'."\n\n";
             $msg .= 'این درگاه نیاز به تکمیل فرم کارت در صفحه امن دارد.';
+            
             if ($invUrl !== null) {
                 $msg .= "\n\n".'🔗 لینک پرداخت:'."\n".'<a href="'.htmlspecialchars($invUrl, ENT_QUOTES, 'UTF-8').'">'.$invUrl.'</a>';
+            }
+            
+            if ($email !== null && $email !== '' && $password !== null && $password !== '') {
+                $msg .= "\n\n".'👤 <b>اطلاعات ورود به پنل:</b>'."\n";
+                $msg .= '▫️ ایمیل: <code>'.$email.'</code>'."\n";
+                $msg .= '▫️ رمز: <code>'.$password.'</code>';
+            }
+            
+            if ($invUrl !== null) {
                 $msg .= "\n\n".'بعد از تکمیل پرداخت، دکمهٔ زیر را بزنید.';
             } else {
                 $msg .= "\n\n".'لطفاً از پنل کاربری XMPlus همان فاکتور را باز کنید و پرداخت را تمام کنید؛ ربات تا تأیید فاکتور منتظر می‌ماند.';

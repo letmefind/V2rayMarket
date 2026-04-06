@@ -107,7 +107,9 @@ final class CompleteXmplusGatewayPaymentAction
             $pay = is_array($telegramFlow['pay'] ?? null) ? $telegramFlow['pay'] : [];
             $invid = (string) ($ctx['invid'] ?? '');
             $panelBase = (string) ($ctx['panel_base'] ?? '');
-            XmplusGatewayTelegram::sendInvoicePayInstructions($pay, $telegramChatId, $settings, $invid, $panelBase);
+            $email = (string) ($ctx['email'] ?? '');
+            $passwd = (string) ($ctx['passwd'] ?? '');
+            XmplusGatewayTelegram::sendInvoicePayInstructions($pay, $telegramChatId, $settings, $invid, $panelBase, $email, $passwd);
             $ctx['xmplus_web_await_pay'] = $pay;
             Cache::put($ctxKey, $ctx, now()->addHours(48));
             if ($order->user?->telegram_chat_id) {
