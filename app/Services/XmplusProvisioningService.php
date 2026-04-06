@@ -1636,8 +1636,8 @@ class XmplusProvisioningService
             rsort($candidates);
 
             return $candidates[0];
-            }
         }
+
         foreach ($services as $s) {
             if (is_array($s) && self::xmplusServiceRowLooksActive($s) && isset($s['sid'])) {
                 $sid = (int) $s['sid'];
