@@ -115,6 +115,19 @@ class XmplusService
             ->post($url, $body);
 
         $rawBody = $response->body();
+        if (self::responseLooksLikeHtml($rawBody)) {
+            $this->log('error', "XMPlus response: POST {$path} (HTML بدنه، نه JSON)", [
+                'step' => $step,
+                'http_status' => $response->status(),
+                'hint' => 'پنل XMPlus صفحه خطای PHP/Whoops برگردانده (مثلاً ionCube Loader یا باگ داخل پنل). Client API باید JSON بدهد؛ مستندات: https://docs.xmplus.dev/api/client.html',
+                'body_preview' => substr(preg_replace('/\s+/', ' ', $rawBody), 0, 500),
+            ]);
+            throw new RuntimeException(
+                "XMPlus {$step}: panel returned an HTML error page instead of JSON (HTTP {$response->status()}). "
+                .'Fix the XMPlus host: PHP error logs, ionCube Loader, and PHP version must match the panel.'
+            );
+        }
+
         $parsed = $response->json();
         if (! is_array($parsed)) {
             $parsed = self::decodeJsonFromMessyBody($rawBody) ?? ['_raw' => $rawBody];
@@ -127,7 +140,9 @@ class XmplusService
         ]);
 
         if (! $response->successful()) {
-            throw new RuntimeException("XMPlus {$step}: HTTP {$response->status()} — ".json_encode($parsed, JSON_UNESCAPED_UNICODE));
+            throw new RuntimeException(
+                "XMPlus {$step}: HTTP {$response->status()} — ".self::summarizeParsedForException($parsed)
+            );
         }
 
         return $parsed;
@@ -145,6 +160,10 @@ class XmplusService
                 $out[$k] = '***REDACTED(len='.strlen($out[$k]).')';
             }
         }
+        if (isset($out['_raw']) && is_string($out['_raw']) && strlen($out['_raw']) > 2000) {
+            $rawLen = strlen($out['_raw']);
+            $out['_raw'] = substr($out['_raw'], 0, 2000).'… [truncated, '.$rawLen.' bytes total]';
+        }
 
         return $out;
     }
@@ -155,10 +174,51 @@ class XmplusService
      *
      * @return array<string, mixed>|null
      */
+    /**
+     * پاسخ Whoops/Slim/HTML به‌جای JSON Client API.
+     */
+    protected static function responseLooksLikeHtml(string $body): bool
+    {
+        $t = ltrim($body);
+        if ($t === '') {
+            return false;
+        }
+        $head = strtolower(substr($t, 0, 800));
+
+        return str_starts_with($t, '<')
+            || str_contains($head, '<!doctype html')
+            || str_contains($head, '<html')
+            || str_contains($head, 'prettypagehandler')
+            || str_contains($head, 'whoops\\')
+            || str_contains($head, 'class="whoops');
+    }
+
+    /**
+     * @param  array<string, mixed>  $parsed
+     */
+    protected static function summarizeParsedForException(array $parsed): string
+    {
+        if (isset($parsed['_raw']) && is_string($parsed['_raw'])) {
+            $raw = $parsed['_raw'];
+            if (self::responseLooksLikeHtml($raw)) {
+                return 'HTML error page from XMPlus panel (PHP crash); check ionCube and panel logs.';
+            }
+
+            return 'non-JSON body preview: '.substr(preg_replace('/\s+/', ' ', $raw), 0, 400);
+        }
+
+        $enc = json_encode($parsed, JSON_UNESCAPED_UNICODE);
+
+        return is_string($enc) ? $enc : 'unserializable response';
+    }
+
     protected static function decodeJsonFromMessyBody(string $body): ?array
     {
         $body = trim($body);
         if ($body === '') {
+            return null;
+        }
+        if (self::responseLooksLikeHtml($body)) {
             return null;
         }
         $try = json_decode($body, true);
