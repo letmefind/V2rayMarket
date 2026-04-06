@@ -395,6 +395,20 @@ class XmplusService
     }
 
     /**
+     * جزئیات بسته — POST /api/client/package/info
+     *
+     * @see https://docs.xmplus.dev/api/client.html#_7-package-info
+     *
+     * @return array<string, mixed>
+     */
+    public function packageInfo(int $pid): array
+    {
+        return $this->postClient('/api/client/package/info', [
+            'pid' => (string) $pid,
+        ], 'package_info');
+    }
+
+    /**
      * لیست درگاه‌های پرداخت — POST /api/client/gateways
      *
      * @see https://docs.xmplus.dev/api/client.html#_12-gateway-lists

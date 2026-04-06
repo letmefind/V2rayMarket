@@ -1318,8 +1318,7 @@ class XmplusProvisioningService
         string $preferredBilling,
         int $orderIdForLog = 0
     ): array {
-        $candidates = [$preferredBilling, 'month', 'quater', 'quarter', 'semiannual', 'annual'];
-        $candidates = array_values(array_unique(array_filter($candidates, fn ($b) => is_string($b) && $b !== '')));
+        $candidates = self::resolveInvoiceCreateBillingCandidates($api, $pid, $preferredBilling);
         $last = ['status' => 'error', 'code' => 0, 'message' => 'invoice create: no attempt'];
         foreach ($candidates as $b) {
             $inv = $api->invoiceCreate($email, $passwd, $pid, $b, '', 1);
@@ -1344,6 +1343,99 @@ class XmplusProvisioningService
         }
 
         return $last;
+    }
+
+    /**
+     * قبل از invoice/create نوع بسته و billingهای فعال را از package/info می‌خوانیم تا pid اشتباه (فقط ترافیک) زود مشخص شود
+     * و ترتیب امتحان billing با همان چیزی که در پنل روشن است هم‌خوان باشد.
+     *
+     * @return list<string>
+     */
+    protected static function resolveInvoiceCreateBillingCandidates(XmplusService $api, int $pid, string $preferred): array
+    {
+        $defaults = [$preferred, 'month', 'quater', 'quarter', 'semiannual', 'annual'];
+        $defaults = array_values(array_unique(array_filter($defaults, fn ($b) => is_string($b) && $b !== '')));
+        try {
+            $pinfo = $api->packageInfo($pid);
+            $pkg = $pinfo['package'] ?? null;
+            if (! is_array($pkg)) {
+                return $defaults;
+            }
+            self::assertPackageSuitableForNewServiceInvoice($pkg, $pid);
+            $billing = $pkg['billing'] ?? null;
+            if (! is_array($billing)) {
+                return $defaults;
+            }
+            $enabled = [];
+            foreach (['month', 'quater', 'quarter', 'semiannual', 'annual'] as $key) {
+                $cell = $billing[$key] ?? null;
+                if (is_array($cell) && strtolower((string) ($cell['status'] ?? '')) === 'on') {
+                    $enabled[] = $key;
+                }
+            }
+            if ($enabled === []) {
+                return $defaults;
+            }
+            $out = [];
+            if (in_array($preferred, $enabled, true)) {
+                $out[] = $preferred;
+            }
+            foreach ($enabled as $e) {
+                if (! in_array($e, $out, true)) {
+                    $out[] = $e;
+                }
+            }
+            foreach ($defaults as $d) {
+                if (! in_array($d, $out, true)) {
+                    $out[] = $d;
+                }
+            }
+
+            return $out;
+        } catch (InvalidArgumentException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            $api->log('info', 'XMPlus package/info برای ترتیب billing در دسترس نبود', [
+                'pid' => $pid,
+                'message' => $e->getMessage(),
+            ]);
+
+            return $defaults;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $pkg
+     */
+    protected static function assertPackageSuitableForNewServiceInvoice(array $pkg, int $pid): void
+    {
+        $type = strtolower((string) ($pkg['type'] ?? ''));
+        if ($type !== '' && str_contains($type, 'traffic') && ! str_contains($type, 'full')) {
+            throw new InvalidArgumentException(
+                'پلن VPNMarket به XMPlus pid='.$pid.' اشاره می‌کند که نوع «ترافیک / Top-up» است، نه «Full Package». '
+                .'برای خرید اول باید pid یک بستهٔ کامل از پنل XMPlus بگذارید (بسته‌هایی با دورهٔ month یا quater؛ نه بستهٔ «فقط افزودن حجم» برای کاربر دارای سرویس).'
+            );
+        }
+        $billing = $pkg['billing'] ?? null;
+        if (! is_array($billing)) {
+            return;
+        }
+        $fullOn = false;
+        foreach (['month', 'quater', 'quarter', 'semiannual', 'annual'] as $key) {
+            $cell = $billing[$key] ?? null;
+            if (is_array($cell) && strtolower((string) ($cell['status'] ?? '')) === 'on') {
+                $fullOn = true;
+                break;
+            }
+        }
+        $topCell = $billing['topup_traffic'] ?? null;
+        $topOn = is_array($topCell) && strtolower((string) ($topCell['status'] ?? '')) === 'on';
+        if ($topOn && ! $fullOn) {
+            throw new InvalidArgumentException(
+                'XMPlus pid='.$pid.' فقط «topup_traffic» دارد و دورهٔ month/quater/… برای ساخت سرویس جدید در پنل روشن نیست؛ '
+                .'این بسته برای افزودن ترافیک به سرویس موجود است. در ادمین VPNMarket pid را با یک Full Package عوض کنید.'
+            );
+        }
     }
 
     /**

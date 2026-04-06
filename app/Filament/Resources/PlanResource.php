@@ -66,7 +66,7 @@ class PlanResource extends Resource
                         Forms\Components\TextInput::make('xmplus_package_id')
                             ->label('شناسه بسته در XMPlus (pid)')
                             ->numeric()
-                            ->helperText('طبق لیست بسته‌ها در پنل XMPlus؛ اگر خالی باشد از «شناسه بسته پیش‌فرض» در تب XMPlus استفاده می‌شود.'),
+                            ->helperText('فقط شناسهٔ بستهٔ «کامل» (Full Package) همان‌طور که در Client API لیست /api/client/packages می‌آید. بستهٔ «فقط ترافیک» (Top-up، لیست /api/client/packages/traffic) برای خرید اول با invoice/create مناسب نیست و ممکن است پنل خطا بدهد. اگر خالی باشد از «شناسه بسته پیش‌فرض» در تب XMPlus استفاده می‌شود.'),
                         Forms\Components\Select::make('xmplus_billing')
                             ->label('دوره صورت‌حساب (billing)')
                             ->options([
