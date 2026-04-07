@@ -2642,15 +2642,18 @@ class WebhookController extends Controller
             default => null
         };
 
-        $message = $settingKey ? ($telegramSettings->get($settingKey) ?? "آموزشی برای این پلتفرم یافت نشد.")
-            : "پلتفرم نامعتبر است.";
+        $fallbackTutorials = [
+            'android' => \App\Support\TelegramConnectionTutorials::androidHtml(),
+            'ios' => \App\Support\TelegramConnectionTutorials::iosHtml(),
+            'windows' => \App\Support\TelegramConnectionTutorials::windowsHtml(),
+        ];
 
-        if ($message === "آموزشی برای این پلتفرم یافت نشد.") {
-            $fallbackTutorials = [
-                'android' => \App\Support\TelegramConnectionTutorials::androidHtml(),
-                'ios' => \App\Support\TelegramConnectionTutorials::iosHtml(),
-                'windows' => \App\Support\TelegramConnectionTutorials::windowsHtml(),
-            ];
+        $storedMessage = $settingKey ? (string) ($telegramSettings->get($settingKey) ?? '') : '';
+        $message = trim($storedMessage);
+
+        if ($settingKey === null) {
+            $message = "پلتفرم نامعتبر است.";
+        } elseif ($message === '' || $this->isLegacyTutorialMessage($platform, $message)) {
             $message = $fallbackTutorials[$platform] ?? "آموزشی برای این پلتفرم یافت نشد.";
         }
 
@@ -2680,6 +2683,33 @@ class WebhookController extends Controller
                 }
             }
         }
+    }
+
+    protected function isLegacyTutorialMessage(string $platform, string $message): bool
+    {
+        $legacyMarkers = [
+            'android' => [
+                'Import config from Clipboard',
+                'راهنمای اندروید \\(V2rayNG\\)',
+            ],
+            'ios' => [
+                'راهنمای آیفون \\(V2Box\\)',
+                'Import from clipboard',
+            ],
+            'windows' => [
+                'v2rayN-With-Core.zip',
+                'Set system proxy',
+                'راهنمای ویندوز \\(V2rayN\\)',
+            ],
+        ];
+
+        foreach ($legacyMarkers[$platform] ?? [] as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function provisionUserAccount(Order $order, Plan $plan, bool $shopPaymentAlreadyCollected = false)
