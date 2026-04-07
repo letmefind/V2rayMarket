@@ -1718,11 +1718,15 @@ class WebhookController extends Controller
         $cardHolder = $this->settings->get('payment_card_holder_name', 'صاحب حسابی تنظیم نشده');
         $amountToPay = number_format($order->amount);
 
-        $message = "💳 *پرداخت کارت به کارت*\n\n";
-        $message .= "لطفاً مبلغ *" . $this->escape($amountToPay) . " تومان* را به حساب زیر واریز نمایید:\n\n";
-        $message .= "👤 *به نام:* " . $this->escape($cardHolder) . "\n";
-        $message .= "💳 *شماره کارت:*\n`" . $this->escape($cardNumber) . "`\n\n";
-        $message .= "🔔 *مهم:* پس از واریز، *فقط عکس رسید* را در همین چت ارسال کنید\\.";
+        $message = \App\Models\BotMessage::get(
+            'msg_card_payment_info',
+            "💳 *پرداخت کارت به کارت*\n\nلطفاً مبلغ *{amount} تومان* را به حساب زیر واریز نمایید:\n\n👤 *به نام:* {card_holder}\n💳 *شماره کارت:*\n`{card_number}`\n\n🔔 *مهم:* پس از واریز، *فقط عکس رسید* را در همین چت ارسال کنید\\.",
+            [
+                'amount' => $this->escape($amountToPay),
+                'card_holder' => $this->escape((string) $cardHolder),
+                'card_number' => $this->escape((string) $cardNumber),
+            ]
+        );
 
         $keyboard = Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '❌ انصراف از پرداخت', 'callback_data' => '/cancel_action'])]);
 

@@ -154,6 +154,13 @@ class BotMessageSeeder extends Seeder
                 'description' => 'پیام بعد از کسر مبلغ از کیف پول در تمدید',
             ],
             [
+                'key' => 'msg_card_payment_info',
+                'category' => 'messages',
+                'title' => 'پیام: اطلاعات پرداخت کارت به کارت',
+                'content' => "💳 *پرداخت کارت به کارت*\n\nلطفاً مبلغ *{amount} تومان* را به حساب زیر واریز نمایید:\n\n👤 *به نام:* {card_holder}\n💳 *شماره کارت:*\n`{card_number}`\n\n🔔 *مهم:* پس از واریز، *فقط عکس رسید* را در همین چت ارسال کنید\\.",
+                'description' => 'نمایش اطلاعات کارت برای پرداخت دستی. متغیرها: {amount}, {card_holder}, {card_number}',
+            ],
+            [
                 'key' => 'msg_wallet_xmplus_intro',
                 'category' => 'messages',
                 'title' => 'پیام: توضیح کیف پول XMPlus',
