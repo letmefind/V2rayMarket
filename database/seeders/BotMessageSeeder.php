@@ -153,6 +153,34 @@ class BotMessageSeeder extends Seeder
                 'content' => '✅ مبلغ تمدید از کیف پول کسر شد. برای تکمیل پرداخت، *پیام بعدی* (دکمه‌های درگاه) را ببینید.',
                 'description' => 'پیام بعد از کسر مبلغ از کیف پول در تمدید',
             ],
+            [
+                'key' => 'msg_wallet_xmplus_intro',
+                'category' => 'messages',
+                'title' => 'پیام: توضیح کیف پول XMPlus',
+                'content' => "در حالت *XMPlus* موجودی طبق API (`/api/client/account/info` → `money`) است، نه کیف پول VPNMarket.\n\n",
+                'description' => 'متن توضیح ابتدای صفحه کیف پول در حالت XMPlus',
+            ],
+            [
+                'key' => 'msg_wallet_xmplus_not_linked',
+                'category' => 'messages',
+                'title' => 'پیام: کیف پول XMPlus هنوز لینک نشده',
+                'content' => 'پس از اولین خرید، حساب شما به XMPlus وصل می‌شود و موجودی اینجا نمایش داده می‌شود.',
+                'description' => 'وقتی کاربر هنوز حساب لینک‌شده در XMPlus ندارد',
+            ],
+            [
+                'key' => 'msg_wallet_xmplus_error',
+                'category' => 'errors',
+                'title' => 'خطا: دریافت موجودی XMPlus',
+                'content' => '⚠️ خطا در دریافت موجودی از XMPlus.',
+                'description' => 'وقتی API پنل خطا می‌دهد',
+            ],
+            [
+                'key' => 'msg_wallet_xmplus_balance',
+                'category' => 'messages',
+                'title' => 'پیام: نمایش موجودی XMPlus',
+                'content' => 'موجودی (XMPlus): *{balance}*',
+                'description' => 'نمایش موجودی با متغیر {balance}',
+            ],
 
             // راهنماها - Instructions
             [

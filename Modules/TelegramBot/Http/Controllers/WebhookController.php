@@ -2494,14 +2494,27 @@ class WebhookController extends Controller
             if ($panel === '') {
                 $panel = rtrim((string) $this->settings->get('xmplus_panel_url', ''), '/');
             }
-            $message .= "در حالت *XMPlus* موجودی طبق API (`/api/client/account/info` → `money`) است، نه کیف پول VPNMarket.\n\n";
+            $message .= \App\Models\BotMessage::get(
+                'msg_wallet_xmplus_intro',
+                "در حالت *XMPlus* موجودی طبق API (`/api/client/account/info` → `money`) است، نه کیف پول VPNMarket.\n\n"
+            );
             if (is_array($snap) && empty($snap['linked'])) {
-                $message .= 'پس از اولین خرید، حساب شما به XMPlus وصل می‌شود و موجودی اینجا نمایش داده می‌شود.';
+                $message .= \App\Models\BotMessage::get(
+                    'msg_wallet_xmplus_not_linked',
+                    'پس از اولین خرید، حساب شما به XMPlus وصل می‌شود و موجودی اینجا نمایش داده می‌شود.'
+                );
             } elseif (is_array($snap) && ! empty($snap['error'])) {
-                $message .= '⚠️ خطا در دریافت موجودی از XMPlus.';
+                $message .= \App\Models\BotMessage::get(
+                    'msg_wallet_xmplus_error',
+                    '⚠️ خطا در دریافت موجودی از XMPlus.'
+                );
             } elseif (is_array($snap)) {
                 $m = $this->escape((string) ($snap['money'] ?? '—'));
-                $message .= "موجودی (XMPlus): *{$m}*";
+                $message .= \App\Models\BotMessage::get(
+                    'msg_wallet_xmplus_balance',
+                    'موجودی (XMPlus): *{balance}*',
+                    ['balance' => $m]
+                );
                 if (! empty($snap['username'])) {
                     $message .= "\n▫️ کاربر: ".$this->escape((string) $snap['username']);
                 }
