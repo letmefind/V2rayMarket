@@ -2647,9 +2647,9 @@ class WebhookController extends Controller
 
         if ($message === "آموزشی برای این پلتفرم یافت نشد.") {
             $fallbackTutorials = [
-                'android' => "*راهنمای اندروید \\(V2rayNG\\)*\n\n1\\. برنامه V2rayNG را از [این لینک](https://github.com/2dust/v2rayNG/releases ) دانلود و نصب کنید\\.\n2\\. لینک کانفیگ را از بخش *سرویس‌های من* کپی کنید\\.\n3\\. در برنامه، روی علامت `+` بزنید و `Import config from Clipboard` را انتخاب کنید\\.\n4\\. کانفیگ اضافه شده را انتخاب و دکمه اتصال \\(V شکل\\) پایین صفحه را بزنید\\.",
-                'ios' => "*راهنمای آیفون \\(V2Box\\)*\n\n1\\. برنامه V2Box را از [اپ استور](https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690 ) نصب کنید\\.\n2\\. لینک کانفیگ را از بخش *سرویس‌های من* کپی کنید\\.\n3\\. در برنامه، وارد بخش `Configs` شوید، روی `+` بزنید و `Import from clipboard` را انتخاب کنید\\.\n4\\. برای اتصال، به بخش `Home` بروید و دکمه اتصال را بزنید \\(ممکن است نیاز به تایید VPN در تنظیمات گوشی باشد\\)\\.",
-                'windows' => "*راهنمای ویندوز \\(V2rayN\\)*\n\n1\\. برنامه v2rayN را از [این لینک](https://github.com/2dust/v2rayN/releases ) دانلود \\(فایل `v2rayN-With-Core.zip`\\) و از حالت فشرده خارج کنید\\.\n2\\. فایل `v2rayN.exe` را اجرا کنید\\.\n3\\. لینک کانفیگ را از بخش *سرویس‌های من* کپی کنید\\.\n4\\. در برنامه V2RayN، کلیدهای `Ctrl+V` را فشار دهید تا سرور اضافه شود\\.\n5\\. روی آیکون برنامه در تسک‌بار \\(کنار ساعت\\) راست کلیک کرده، از منوی `System Proxy` گزینه `Set system proxy` را انتخاب کنید تا تیک بخورد\\.\n6\\. برای اتصال، دوباره روی آیکون راست کلیک کرده و از منوی `Servers` کانفیگ اضافه شده را انتخاب کنید\\.",
+                'android' => \App\Support\TelegramConnectionTutorials::androidHtml(),
+                'ios' => \App\Support\TelegramConnectionTutorials::iosHtml(),
+                'windows' => \App\Support\TelegramConnectionTutorials::windowsHtml(),
             ];
             $message = $fallbackTutorials[$platform] ?? "آموزشی برای این پلتفرم یافت نشد.";
         }
@@ -2659,9 +2659,9 @@ class WebhookController extends Controller
         $payload = [
             'chat_id'      => $chatId,
             'text'         => $message,
-            'parse_mode'   => 'MarkdownV2',
+            'parse_mode'   => 'HTML',
             'reply_markup' => $keyboard,
-            'disable_web_page_preview' => true
+            'disable_web_page_preview' => false,
         ];
 
         try {

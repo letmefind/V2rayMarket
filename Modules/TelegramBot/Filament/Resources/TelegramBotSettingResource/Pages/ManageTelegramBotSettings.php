@@ -50,11 +50,24 @@ class ManageTelegramBotSettings extends Page implements HasForms
     {
         return $form
             ->schema([
-                Section::make('آموزش‌های اتصال')->schema([
-                    Textarea::make('tutorial_android')->label('راهنمای اندروید (V2RayNG)')->rows(8),
-                    Textarea::make('tutorial_ios')->label('راهنمای آیفون (V2Box/Streisand)')->rows(8),
-                    Textarea::make('tutorial_windows')->label('راهنمای ویندوز (V2RayN)')->rows(8),
-                ])->columnSpan('full')->hidden(fn() => $this->activeTab !== 'tutorials'),
+                Section::make('آموزش‌های اتصال')
+                    ->description('ارسال در ربات با حالت HTML تلگرام است (پررنگ، ایتالیک، لینک، code). برای پر کردن خودکار فقط فیلدهای خالی: php artisan db:seed --class=TelegramBotTutorialSeeder')
+                    ->schema([
+                        Textarea::make('tutorial_android')
+                            ->label('راهنمای اندروید (V2RayNG)')
+                            ->rows(14)
+                            ->columnSpanFull(),
+                        Textarea::make('tutorial_ios')
+                            ->label('راهنمای آیفون (V2Box / Streisand)')
+                            ->rows(14)
+                            ->columnSpanFull(),
+                        Textarea::make('tutorial_windows')
+                            ->label('راهنمای ویندوز (V2RayN)')
+                            ->rows(14)
+                            ->columnSpanFull(),
+                    ])
+                    ->columnSpan('full')
+                    ->hidden(fn () => $this->activeTab !== 'tutorials'),
 
 
                 Section::make('پیام‌های عمومی')->schema([
