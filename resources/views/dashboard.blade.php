@@ -545,38 +545,62 @@
                                 <button @click="app = 'windows'" :class="app === 'windows' ? 'bg-white dark:bg-gray-700 shadow' : ''" class="w-full text-center py-2 px-4 rounded-lg transition">ویندوز</button>
                             </div>
 
-                            <div x-show="app === 'android'" class="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-fadeIn">
-                                <h3 class="font-bold text-lg mb-3">راهنمای اندروید (V2RayNG)</h3>
-                                <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300">
-                                    <li>ابتدا نرم‌افزار <a href="https://github.com/2dust/v2rayNG/releases" target="_blank" class="text-blue-500 hover:underline">V2RayNG</a> را از این لینک دانلود و نصب کنید.</li>
-                                    <li>در تب "سرویس‌های من"، روی دکمه "مشاهده کانفیگ" کلیک کرده و سپس دکمه "کپی" را بزنید.</li>
-                                    <li>وارد برنامه V2RayNG شوید و روی علامت بعلاوه (+) در بالای صفحه ضربه بزنید.</li>
-                                    <li>گزینه `Import config from Clipboard` را انتخاب کنید.</li>
-                                    <li>برای اتصال، روی دایره خاکستری در پایین صفحه ضربه بزنید تا سبز شود.</li>
-                                </ol>
+                            <div x-show="app === 'android'" class="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-fadeIn space-y-5">
+                                <div>
+                                    <h3 class="font-bold text-lg mb-2">اندروید — v2rayNG</h3>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">دانلود: <a href="https://github.com/2dust/v2rayNG/releases" target="_blank" rel="noopener" class="text-blue-500 hover:underline">اصلی (GitHub)</a> — <a href="https://help.bale.cyou/downloads/V2rayNG.apk" target="_blank" rel="noopener" class="text-emerald-600 dark:text-emerald-400 hover:underline">آینهٔ ایران</a></p>
+                                    <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300 text-sm">
+                                        <li>پس از نصب، از «سرویس‌های من» لینک را کپی کنید یا QR بگیرید.</li>
+                                        <li>در v2rayNG با <code class="text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">+</code> گزینهٔ Import از کلیپ‌بورد یا QR را بزنید؛ برای اشتراک، منوی Subscription را استفاده کنید.</li>
+                                        <li>کانفیگ را انتخاب و اتصال (V) را فعال کنید.</li>
+                                    </ol>
+                                </div>
+                                <div>
+                                    <h3 class="font-bold text-lg mb-2">اندروید — Happ</h3>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">دانلود: <a href="https://play.google.com/store/apps/details?id=com.happproxy" target="_blank" rel="noopener" class="text-blue-500 hover:underline">اصلی (Play Store)</a> — <a href="https://help.bale.cyou/downloads/Happ.apk" target="_blank" rel="noopener" class="text-emerald-600 dark:text-emerald-400 hover:underline">آینهٔ ایران (APK)</a></p>
+                                    <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300 text-sm">
+                                        <li>با <code class="text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">+</code> معمولاً QR، چسباندن لینک یا Subscription را دارید؛ یکی را مطابق کانفیگ خود انتخاب کنید.</li>
+                                        <li>پروفایل را انتخاب و اتصال را روشن کنید.</li>
+                                    </ol>
+                                </div>
                             </div>
 
-                            <div x-show="app === 'ios'" x-cloak class="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-fadeIn">
-                                <h3 class="font-bold text-lg mb-3">راهنمای آیفون (Streisand / V2Box)</h3>
-                                <p class="mb-2 text-sm">برای iOS می‌توانید از چندین برنامه استفاده کنید. ما V2Box را پیشنهاد می‌کنیم.</p>
-                                <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300">
-                                    <li>ابتدا یکی از نرم‌افزارهای <a href="https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690" target="_blank" class="text-blue-500 hover:underline">V2Box</a> یا <a href="https://apps.apple.com/us/app/streisand/id6450534064" target="_blank" class="text-blue-500 hover:underline">Streisand</a> را از اپ استور نصب کنید.</li>
-                                    <li>در تب "سرویس‌های من"، روی دکمه "مشاهده کانفیگ" کلیک کرده و سپس دکمه "کپی" را بزنید.</li>
-                                    <li>وارد برنامه شده، به بخش کانفیگ‌ها (Configs) بروید.</li>
-                                    <li>روی علامت بعلاوه (+) بزنید و گزینه `Import from Clipboard` را انتخاب کنید.</li>
-                                    <li>برای اتصال، سرویس اضافه شده را انتخاب و آن را فعال کنید.</li>
-                                </ol>
+                            <div x-show="app === 'ios'" x-cloak class="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-fadeIn space-y-5">
+                                <div>
+                                    <h3 class="font-bold text-lg mb-2">آیفون — V2Box / Streisand</h3>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><a href="https://apps.apple.com/app/v2box-v2ray-client/id6446814690" target="_blank" rel="noopener" class="text-blue-500 hover:underline">V2Box</a> — <a href="https://apps.apple.com/app/streisand/id6450534064" target="_blank" rel="noopener" class="text-blue-500 hover:underline">Streisand</a> (فقط App Store)</p>
+                                    <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300 text-sm">
+                                        <li>از «سرویس‌های من» لینک یا QR را بگیرید.</li>
+                                        <li>در V2Box: Configs → + → Import از کلیپ‌بورد یا QR. در Streisand گزینهٔ مشابه وارد کردن.</li>
+                                        <li>برای اشتراک، URL ساب را در بخش مربوطه اضافه کنید. VPN را فعال و در صورت نیاز Allow VPN را بزنید.</li>
+                                    </ol>
+                                </div>
+                                <div>
+                                    <h3 class="font-bold text-lg mb-2">آیفون — Happ</h3>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2"><a href="https://apps.apple.com/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener" class="text-blue-500 hover:underline">Happ - Proxy Utility (App Store)</a></p>
+                                    <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300 text-sm">
+                                        <li>پس از نصب، با افزودن پروفایل معمولاً می‌توانید QR، چسباندن لینک یا subscription را انتخاب کنید.</li>
+                                        <li>پروفایل را انتخاب و اتصال VPN را روشن کنید.</li>
+                                    </ol>
+                                </div>
                             </div>
 
-                            <div x-show="app === 'windows'" x-cloak class="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-fadeIn">
-                                <h3 class="font-bold text-lg mb-3">راهنمای ویندوز (V2RayN)</h3>
-                                <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300">
-                                    <li>ابتدا نرم‌افزار <a href="https://github.com/2dust/v2rayN/releases" target="_blank" class="text-blue-500 hover:underline">V2RayN</a> را از این لینک دانلود و از حالت فشرده خارج کنید.</li>
-                                    <li>در تب "سرویس‌های من"، روی دکمه "مشاهده کانفیگ" کلیک کرده و سپس دکمه "کپی" را بزنید.</li>
-                                    <li>در برنامه V2RayN، کلیدهای `Ctrl+V` را فشار دهید تا کانفیگ به صورت خودکار اضافه شود.</li>
-                                    <li>روی آیکون برنامه در تسک‌بار راست کلیک کرده، از منوی `System proxy` گزینه `Set system proxy` را انتخاب کنید.</li>
-                                    <li>برای اتصال، سرور اضافه شده را انتخاب کرده و کلید `Enter` را بزنید.</li>
-                                </ol>
+                            <div x-show="app === 'windows'" x-cloak class="p-6 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-fadeIn space-y-5">
+                                <div>
+                                    <h3 class="font-bold text-lg mb-2">ویندوز — v2rayN</h3>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">دانلود: <a href="https://github.com/2dust/v2rayN/releases" target="_blank" rel="noopener" class="text-blue-500 hover:underline">اصلی (GitHub)</a> — <a href="https://help.bale.cyou/downloads/V2rayN.zip" target="_blank" rel="noopener" class="text-emerald-600 dark:text-emerald-400 hover:underline">آینهٔ ایران (ZIP)</a></p>
+                                    <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300 text-sm">
+                                        <li><code class="text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">v2rayN.exe</code> را اجرا کنید؛ لینک را کپی و در پنجرهٔ برنامه <code class="text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded">Ctrl+V</code> بزنید.</li>
+                                        <li>برای اشتراک از منوی Subscription استفاده کنید؛ System proxy را از منوی آیکن تسک‌بار فعال کنید.</li>
+                                    </ol>
+                                </div>
+                                <div>
+                                    <h3 class="font-bold text-lg mb-2">ویندوز — Happ</h3>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">دانلود: <a href="https://www.happ.su/main" target="_blank" rel="noopener" class="text-blue-500 hover:underline">اصلی (سایت Happ)</a> — <a href="https://help.bale.cyou/downloads/Happ.exe" target="_blank" rel="noopener" class="text-emerald-600 dark:text-emerald-400 hover:underline">آینهٔ ایران (EXE)</a></p>
+                                    <ol class="list-decimal list-inside space-y-2 text-gray-700 dark:text-gray-300 text-sm">
+                                        <li>پس از اجرا، پروفایل را با لینک، QR یا subscription اضافه کنید و اتصال را فعال کنید.</li>
+                                    </ol>
+                                </div>
                             </div>
                         </div>
                     </div>
