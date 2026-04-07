@@ -1459,11 +1459,11 @@ class WebhookController extends Controller
         if ($xmplus) {
             $snap = XmplusProvisioningService::fetchXmplusWalletDisplay($user, $this->settings);
             if (is_array($snap) && ! empty($snap['linked']) && empty($snap['error'])) {
-                $message .= '▫️ موجودی (XMPlus): *'.$this->escape((string) ($snap['money'] ?? '—'))."*\n";
+                $message .= '▫️ موجودی (BypassNET): *'.$this->escape((string) ($snap['money'] ?? '—'))."*\n";
             } elseif (is_array($snap) && empty($snap['linked'])) {
-                $message .= "▫️ موجودی XMPlus: پس از اتصال حساب\n";
+                $message .= "▫️ موجودی BypassNET: پس از اتصال حساب\n";
             } elseif (is_array($snap) && ! empty($snap['error'])) {
-                $message .= "▫️ موجودی XMPlus: خطا در API\n";
+                $message .= "▫️ موجودی BypassNET: خطا در API\n";
             }
         } else {
             $message .= "▫️ موجودی کیف پول: *" . number_format($balance) . " تومان*\n";
@@ -3272,11 +3272,11 @@ class WebhookController extends Controller
         if ($xmplus) {
             $snap = XmplusProvisioningService::fetchXmplusWalletDisplay($user, $this->settings);
             if (is_array($snap) && ! empty($snap['linked']) && empty($snap['error'])) {
-                $message .= '▫️ موجودی (XMPlus): *'.$this->escape((string) ($snap['money'] ?? '—'))."*\n";
+                $message .= '▫️ موجودی (BypassNET): *'.$this->escape((string) ($snap['money'] ?? '—'))."*\n";
             } elseif (is_array($snap) && empty($snap['linked'])) {
-                $message .= "▫️ موجودی XMPlus: پس از اتصال حساب\n";
+                $message .= "▫️ موجودی BypassNET: پس از اتصال حساب\n";
             } elseif (is_array($snap) && ! empty($snap['error'])) {
-                $message .= "▫️ موجودی XMPlus: خطا در API\n";
+                $message .= "▫️ موجودی BypassNET: خطا در API\n";
             }
         } else {
             $message .= "▫️ موجودی کیف پول: *" . number_format($balance) . " تومان*\n";
