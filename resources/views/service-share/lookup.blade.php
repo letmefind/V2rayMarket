@@ -6,7 +6,7 @@
                 کد ۵ رقمی را وارد کنید تا لینک یا کانفیگ سرویس نمایش داده شود.
             </p>
             <p class="text-xs text-gray-500 dark:text-gray-400 text-center mt-2" dir="ltr">
-                {{ \App\Services\ServiceShareService::publicDisplayHost() }}<span class="font-mono">/c</span>
+                {{ \App\Services\ServiceShareService::publicDisplayTypingPath() }}
             </p>
 
             <form method="POST" action="{{ route('service-share.resolve') }}" class="mt-6">

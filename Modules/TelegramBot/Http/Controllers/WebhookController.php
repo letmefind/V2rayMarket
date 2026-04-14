@@ -2327,7 +2327,7 @@ class WebhookController extends Controller
             return;
         }
 
-        $host = ServiceShareService::publicDisplayHost();
+        $typingPath = ServiceShareService::publicDisplayTypingPath();
         $pageUrl = ServiceShareService::publicPickupPathUrl();
         $lookup = ServiceShareService::publicLookupUrl($share->code);
         $code = $share->code;
@@ -2335,19 +2335,19 @@ class WebhookController extends Controller
         $text = <<<TXT
 ✅ کد برای دریافت داخل ایران ساخته شد.
 
-📱 آدرس سایت (در مرورگر موبایل یا کامپیوتر تایپ کنید):
-{$host}
+📱 این را برای فرد داخل ایران بخوانید (در موبایل یا کامپیوتر در نوار آدرس مرورگر تایپ می‌کند):
+{$typingPath}
 
-یا آدرس کامل صفحه:
+یا آدرس کامل با https:
 {$pageUrl}
 
-🔐 کد رمز (۵ رقم) — این را جدا برای فرد داخل ایران بفرستید یا در تماس بگویید:
+🔐 کد رمز (۵ رقم) — جدا بفرستید یا در تماس بگویید:
 {$code}
 
 📝 راهنما:
-در تماس تلفنی یا هر روش دیگر، همین نام سایت ({$host}) را برای فرد داخل ایران بخوانید؛ آن‌ها در مرورگر همان را تایپ کنند، وارد صفحه شوند و این کد {$code} را در فرم وارد کنند. بعد لینک اشتراک را کپی کنند و در برنامه VPN وارد کنند، یا همان QR را اسکن کنند.
+در تماس تلفنی یا هر روش دیگر، همین آدرس ({$typingPath}) را برای طرف بخوانید؛ در مرورگر همان را تایپ کند، وارد صفحه شود و کد {$code} را بزند. بعد لینک اشتراک را کپی کند و در برنامه VPN وارد کند، یا همان QR را اسکن کند.
 
-🔗 لینک مستقیم (اگر بتوانند باز کنند):
+🔗 لینک مستقیم (اگر باز کردن لینک برایشان راحت‌تر است):
 {$lookup}
 TXT;
 

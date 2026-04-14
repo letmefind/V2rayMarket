@@ -70,12 +70,18 @@ final class ServiceShareService
         return rtrim((string) config('app.url'), '/');
     }
 
-    /** دامنهٔ بدون https برای «در مرورگر تایپ کنید» (مثلاً bale.cyou) */
+    /** دامنهٔ بدون https (مثلاً bale.cyou) */
     public static function publicDisplayHost(): string
     {
         $host = parse_url(self::publicBaseUrl(), PHP_URL_HOST);
 
         return is_string($host) && $host !== '' ? $host : 'bale.cyou';
+    }
+
+    /** برای خواندن در تلفن: host + مسیر صفحه ورود کد (مثلاً bale.cyou/c) */
+    public static function publicDisplayTypingPath(): string
+    {
+        return self::publicDisplayHost().'/c';
     }
 
     /** صفحهٔ ورود کد، بدون query */
