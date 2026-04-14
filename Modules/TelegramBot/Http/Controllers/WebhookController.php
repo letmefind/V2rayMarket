@@ -2328,27 +2328,18 @@ class WebhookController extends Controller
         }
 
         $typingPath = ServiceShareService::publicDisplayTypingPath();
-        $pageUrl = ServiceShareService::publicPickupPathUrl();
-        $lookup = ServiceShareService::publicLookupUrl($share->code);
         $code = $share->code;
 
         $text = <<<TXT
-✅ کد برای دریافت داخل ایران ساخته شد.
+📝 راهنما (برای کسی که داخل ایران است):
 
-📱 این را برای فرد داخل ایران بخوانید (در موبایل یا کامپیوتر در نوار آدرس مرورگر تایپ می‌کند):
+این آدرس را در تماس بخوانید تا در مرورگر تایپ کند:
 {$typingPath}
 
-یا آدرس کامل با https:
-{$pageUrl}
-
-🔐 کد رمز (۵ رقم) — جدا بفرستید یا در تماس بگویید:
+کد ۵ رقمی را بگویید:
 {$code}
 
-📝 راهنما:
-در تماس تلفنی یا هر روش دیگر، همین آدرس ({$typingPath}) را برای طرف بخوانید؛ در مرورگر همان را تایپ کند، وارد صفحه شود و کد {$code} را بزند. بعد لینک اشتراک را کپی کند و در برنامه VPN وارد کند، یا همان QR را اسکن کند.
-
-🔗 لینک مستقیم (اگر باز کردن لینک برایشان راحت‌تر است):
-{$lookup}
+بعد از وارد کردن کد، لینک اشتراک یا QR را می‌گیرد؛ در برنامه VPN وارد کند یا QR را اسکن کند.
 TXT;
 
         Telegram::sendMessage([
