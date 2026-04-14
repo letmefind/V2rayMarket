@@ -69,6 +69,13 @@
         $isXmplusPanel = is_array($xp) && (($xp['mode'] ?? '') === 'xmplus');
         $xpLinked = $isXmplusPanel && ! empty($xp['linked']);
         $xpPanelUrl = $isXmplusPanel ? (string) ($xp['panel_url'] ?? '') : '';
+        $allowedDashTabs = ['my_services', 'order_history', 'new_service', 'referral', 'tutorials'];
+        if (Module::isEnabled('Ticketing')) {
+            $allowedDashTabs[] = 'support';
+        }
+        $initialDashTab = in_array((string) request('tab', 'my_services'), $allowedDashTabs, true)
+            ? (string) request('tab')
+            : 'my_services';
     @endphp
 
     <div class="py-12">
@@ -146,7 +153,7 @@
                 </div>
             @endif
 
-            <div x-data="{ tab: 'my_services' }" class="bg-white/70 dark:bg-gray-900/70 rounded-2xl shadow-lg backdrop-blur-md p-4 sm:p-6">
+            <div x-data="{ tab: @js($initialDashTab) }" class="bg-white/70 dark:bg-gray-900/70 rounded-2xl shadow-lg backdrop-blur-md p-4 sm:p-6">
                 <div class="border-b border-gray-200 dark:border-gray-700">
                     <nav class="-mb-px flex flex-nowrap overflow-x-auto custom-scrollbar sm:space-x-4 sm:space-x-reverse px-4 sm:px-8" aria-label="Tabs">
                         <button @click="tab = 'my_services'" :class="{'border-indigo-500 text-indigo-600 dark:text-indigo-400': tab === 'my_services', 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200': tab !== 'my_services'}" class="whitespace-nowrap py-4 px-3 sm:px-1 border-b-2 font-medium text-sm transition">
@@ -223,6 +230,14 @@
                                                                 <span x-show="!open">لینک اشتراک</span>
                                                                 <span x-show="open">بستن</span>
                                                             </button>
+                                                            <form method="POST" action="{{ route('service-share.store') }}" class="w-full sm:w-auto">
+                                                                @csrf
+                                                                <input type="hidden" name="title" value="{{ $svcPackage !== '' ? $svcPackage : 'سرویس XMPlus' }}">
+                                                                <input type="hidden" name="payload" value="{{ $svcSublink }}">
+                                                                <button type="submit" class="w-full px-3 py-2 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700">
+                                                                    ارسال به ایران
+                                                                </button>
+                                                            </form>
                                                         @endif
                                                     </div>
                                                 </div>
@@ -240,14 +255,6 @@
                                                             <button type="button" @click="$store.qrModal.open(@js($svcSublink), @js($svcPackage))" class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors flex items-center gap-1">
                                                                 📱 QR Code
                                                             </button>
-                                                            <form method="POST" action="{{ route('service-share.store') }}">
-                                                                @csrf
-                                                                <input type="hidden" name="title" value="{{ $svcPackage !== '' ? $svcPackage : 'سرویس XMPlus' }}">
-                                                                <input type="hidden" name="payload" value="{{ $svcSublink }}">
-                                                                <button type="submit" class="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors">
-                                                                    ارسال به ایران
-                                                                </button>
-                                                            </form>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -289,6 +296,15 @@
                                                         <span x-show="!open">کانفیگ</span>
                                                         <span x-show="open">بستن</span>
                                                     </button>
+                                                    <form method="POST" action="{{ route('service-share.store') }}" class="w-full sm:w-auto">
+                                                        @csrf
+                                                        <input type="hidden" name="order_id" value="{{ $order->id }}">
+                                                        <input type="hidden" name="title" value="{{ $order->plan->name }}">
+                                                        <textarea name="payload" class="hidden">{{ $order->config_details }}</textarea>
+                                                        <button type="submit" class="w-full px-3 py-2 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700">
+                                                            ارسال به ایران
+                                                        </button>
+                                                    </form>
                                                 </div>
                                             </div>
                                         </div>
@@ -309,15 +325,6 @@
                                                     <button @click="$store.qrModal.open('{{ $order->config_details }}', '{{ $order->plan->name }}')" class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors flex items-center gap-1">
                                                         📱 QR Code
                                                     </button>
-                                                    <form method="POST" action="{{ route('service-share.store') }}">
-                                                        @csrf
-                                                        <input type="hidden" name="order_id" value="{{ $order->id }}">
-                                                        <input type="hidden" name="title" value="{{ $order->plan->name }}">
-                                                        <textarea name="payload" class="hidden">{{ $order->config_details }}</textarea>
-                                                        <button type="submit" class="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors">
-                                                            ارسال به ایران
-                                                        </button>
-                                                    </form>
                                                 </div>
                                             </div>
                                         </div>

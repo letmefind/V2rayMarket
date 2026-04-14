@@ -49,7 +49,7 @@ class ServiceShareController extends Controller
             ]);
         }
 
-        return redirect()->route('dashboard')->with([
+        return redirect()->route('dashboard', ['tab' => 'my_services'])->with([
             'status' => 'کد اشتراک با موفقیت ساخته شد.',
             'share_code' => $share->code,
             'share_url' => route('service-share.lookup', ['code' => $share->code]),
