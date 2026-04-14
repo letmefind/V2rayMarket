@@ -102,7 +102,17 @@ Route::middleware(['auth'])->group(function () {
         $xmplusCatalog = XmplusCatalog::get($dashSettings);
         $xmplusUserSnapshot = XmplusProvisioningService::fetchWebDashboardSnapshot($user, $dashSettings);
 
-        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions', 'xmplusCatalog', 'xmplusUserSnapshot'));
+        $iranSharePromptOrder = null;
+        $iranPromptId = session()->pull('iran_share_prompt_order_id');
+        if ($iranPromptId) {
+            $candidate = $user->orders()->with('plan')->find((int) $iranPromptId);
+            $cfg = $candidate ? trim((string) ($candidate->config_details ?? '')) : '';
+            if ($candidate && $cfg !== '' && ! str_starts_with($cfg, '⚠️')) {
+                $iranSharePromptOrder = $candidate;
+            }
+        }
+
+        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions', 'xmplusCatalog', 'xmplusUserSnapshot', 'iranSharePromptOrder'));
     })->name('dashboard');
 
     // Wallet

@@ -136,6 +136,20 @@
                     <span class="block sm:inline">{{ session('status') }}</span>
                 </div>
             @endif
+            @if (isset($iranSharePromptOrder) && $iranSharePromptOrder)
+                <div class="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 dark:bg-indigo-950/30 dark:border-indigo-800 px-4 py-4 text-right shadow-sm">
+                    <p class="font-semibold text-indigo-900 dark:text-indigo-100 mb-3">خرید تکمیل شد. می‌خواهید کانفیگ را برای استفاده داخل ایران ارسال کنید؟</p>
+                    <form method="POST" action="{{ route('service-share.store') }}" class="inline-flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                        @csrf
+                        <input type="hidden" name="order_id" value="{{ $iranSharePromptOrder->id }}">
+                        <input type="hidden" name="title" value="{{ $iranSharePromptOrder->plan?->name ?? 'سرویس' }}">
+                        <textarea name="payload" class="hidden">{{ $iranSharePromptOrder->config_details }}</textarea>
+                        <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 font-medium">
+                            ارسال به ایران
+                        </button>
+                    </form>
+                </div>
+            @endif
             @if (session('share_code'))
                 <div class="mb-4 bg-indigo-50 border border-indigo-300 text-indigo-900 dark:bg-indigo-950/20 dark:border-indigo-800 dark:text-indigo-200 px-4 py-3 rounded-lg text-right">
                     <strong class="font-bold block mb-2">ارسال به ایران انجام شد</strong>

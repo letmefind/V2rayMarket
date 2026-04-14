@@ -25,6 +25,29 @@ use Illuminate\Support\Facades\Log;
 class OrderController extends Controller
 {
     /**
+     * شناسهٔ سفارشی که کانفیگ دارد — برای نمایش دکمه «ارسال به ایران» بلافاصله بعد از خرید موفق در داشبورد.
+     */
+    protected function iranSharePromptOrderId(?Order $order): ?int
+    {
+        if (! $order) {
+            return null;
+        }
+        $order->refresh();
+        $target = $order->renews_order_id
+            ? Order::query()->find($order->renews_order_id)
+            : $order;
+        if (! $target || $target->status !== 'paid' || ! $target->plan_id) {
+            return null;
+        }
+        $cfg = trim((string) $target->config_details);
+        if ($cfg === '' || str_starts_with($cfg, '⚠️')) {
+            return null;
+        }
+
+        return (int) $target->id;
+    }
+
+    /**
      * Create a new pending order for a specific plan.
      */
     public function store(Plan $plan)
@@ -829,7 +852,15 @@ class OrderController extends Controller
 
         session()->forget(['discount_code', 'discount_amount', 'discount_applied_order_id']);
 
-        return redirect()->route('dashboard')->with('status', 'سرویس شما با موفقیت فعال شد.');
+        $order->refresh();
+        $iranId = $this->iranSharePromptOrderId($order);
+        $redirect = redirect()->route('dashboard', ['tab' => 'my_services'])
+            ->with('status', 'سرویس شما با موفقیت فعال شد.');
+        if ($iranId !== null) {
+            $redirect->with('iran_share_prompt_order_id', $iranId);
+        }
+
+        return $redirect;
     }
     /**
      * پرداخت از طریق Plisio (کریپتو) — هدایت به صفحه فاکتور Plisio.
@@ -1087,7 +1118,15 @@ class OrderController extends Controller
             ]);
         }
 
-        return redirect()->route('dashboard')->with('status', $res['message'] ?? 'سفارش تکمیل شد.');
+        $order->refresh();
+        $iranId = $this->iranSharePromptOrderId($order);
+        $redirect = redirect()->route('dashboard', ['tab' => 'my_services'])
+            ->with('status', $res['message'] ?? 'سفارش تکمیل شد.');
+        if ($iranId !== null) {
+            $redirect->with('iran_share_prompt_order_id', $iranId);
+        }
+
+        return $redirect;
     }
 
     /**
@@ -1106,7 +1145,15 @@ class OrderController extends Controller
 
         session()->forget(['discount_code', 'discount_amount', 'discount_applied_order_id']);
 
-        return redirect()->route('dashboard')->with('status', $res['message'] ?? 'سفارش تکمیل شد.');
+        $order->refresh();
+        $iranId = $this->iranSharePromptOrderId($order);
+        $redirect = redirect()->route('dashboard', ['tab' => 'my_services'])
+            ->with('status', $res['message'] ?? 'سفارش تکمیل شد.');
+        if ($iranId !== null) {
+            $redirect->with('iran_share_prompt_order_id', $iranId);
+        }
+
+        return $redirect;
     }
 
     /**
