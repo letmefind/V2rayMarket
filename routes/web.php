@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\ServiceShareController;
 use App\Models\Plan;
 use App\Models\Setting;
 use App\Support\XmplusCatalog;
@@ -131,6 +132,17 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/payment/wallet/{order}', [OrderController::class, 'processWalletPayment'])->name('payment.wallet.process');
     Route::post('/payment/xmplus/{order}', [OrderController::class, 'processXmplusGatewayPayment'])->name('payment.xmplus.process');
     Route::post('/payment/xmplus/{order}/finalize', [OrderController::class, 'finalizeXmplusWebPayment'])->name('payment.xmplus.finalize');
+    Route::post('/service-share', [ServiceShareController::class, 'store'])->name('service-share.store');
+});
+
+// مسیر کوتاه برای دیکته از تلفن: bale.cyou/c + کد ۵ رقمی
+Route::get('/c', [ServiceShareController::class, 'lookup'])->name('service-share.lookup');
+Route::post('/c', [ServiceShareController::class, 'resolve'])->middleware('throttle:30,1')->name('service-share.resolve');
+
+Route::get('/iran-access', function (\Illuminate\Http\Request $request) {
+    return redirect()->route('service-share.lookup', array_filter([
+        'code' => $request->query('code'),
+    ]), 301);
 });
 
 Route::post('/webhooks/nowpayments', [NowPaymentsWebhookController::class, 'handle'])->name('webhooks.nowpayments');

@@ -129,6 +129,16 @@
                     <span class="block sm:inline">{{ session('status') }}</span>
                 </div>
             @endif
+            @if (session('share_code'))
+                <div class="mb-4 bg-indigo-50 border border-indigo-300 text-indigo-900 dark:bg-indigo-950/20 dark:border-indigo-800 dark:text-indigo-200 px-4 py-3 rounded-lg text-right">
+                    <strong class="font-bold block mb-2">ارسال به ایران انجام شد</strong>
+                    <p class="text-sm">کد ۵ رقمی: <span dir="ltr" class="font-mono font-bold">{{ session('share_code') }}</span></p>
+                    <p class="text-xs mt-1 opacity-80">
+                        صفحه دریافت:
+                        <a class="underline" href="{{ session('share_url') }}" target="_blank" rel="noopener noreferrer">{{ session('share_url') }}</a>
+                    </p>
+                </div>
+            @endif
             @if (session('error'))
                 <div class="mb-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative text-right" role="alert">
                     <strong class="font-bold block mb-1">خطا!</strong>
@@ -230,6 +240,14 @@
                                                             <button type="button" @click="$store.qrModal.open(@js($svcSublink), @js($svcPackage))" class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors flex items-center gap-1">
                                                                 📱 QR Code
                                                             </button>
+                                                            <form method="POST" action="{{ route('service-share.store') }}">
+                                                                @csrf
+                                                                <input type="hidden" name="title" value="{{ $svcPackage !== '' ? $svcPackage : 'سرویس XMPlus' }}">
+                                                                <input type="hidden" name="payload" value="{{ $svcSublink }}">
+                                                                <button type="submit" class="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors">
+                                                                    ارسال به ایران
+                                                                </button>
+                                                            </form>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -291,6 +309,15 @@
                                                     <button @click="$store.qrModal.open('{{ $order->config_details }}', '{{ $order->plan->name }}')" class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors flex items-center gap-1">
                                                         📱 QR Code
                                                     </button>
+                                                    <form method="POST" action="{{ route('service-share.store') }}">
+                                                        @csrf
+                                                        <input type="hidden" name="order_id" value="{{ $order->id }}">
+                                                        <input type="hidden" name="title" value="{{ $order->plan->name }}">
+                                                        <textarea name="payload" class="hidden">{{ $order->config_details }}</textarea>
+                                                        <button type="submit" class="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors">
+                                                            ارسال به ایران
+                                                        </button>
+                                                    </form>
                                                 </div>
                                             </div>
                                         </div>
