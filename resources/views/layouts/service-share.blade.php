@@ -20,14 +20,22 @@
             tailwind.config = {
                 theme: {
                     extend: {
-                        fontFamily: { sans: ['Figtree', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+                        fontFamily: {
+                            sans: ['Vazirmatn', 'Tahoma', 'Segoe UI', 'system-ui', 'sans-serif'],
+                        },
                     },
                 },
             };
         </script>
     @endif
-    <link rel="preconnect" href="https://fonts.bunny.net">
-    <link href="https://fonts.bunny.net/css?family=figtree:400,500,600,700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.bunny.net" crossorigin>
+    <link href="https://fonts.bunny.net/css?family=vazirmatn:300,400,500,600,700&display=swap" rel="stylesheet">
+    {{-- فونت فارسی؛ با !important روی CSS اپ اصلی هم غلبه می‌کند --}}
+    <style>
+        html, body {
+            font-family: 'Vazirmatn', Tahoma, 'Segoe UI', system-ui, sans-serif !important;
+        }
+    </style>
 </head>
 <body class="font-sans antialiased text-slate-100 min-h-screen selection:bg-indigo-500/30">
     {{ $slot }}
