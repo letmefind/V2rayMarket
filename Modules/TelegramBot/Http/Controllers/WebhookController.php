@@ -19,6 +19,7 @@ use App\Services\XUIService;
 use App\Models\User;
 use App\Services\MarzbanService;
 use App\Services\XmplusProvisioningService;
+use App\Services\ServiceShareService;
 use App\Models\Inbound;
 use Modules\Ticketing\Events\TicketCreated;
 use Modules\Ticketing\Events\TicketReplied;
@@ -38,6 +39,7 @@ use App\Models\DiscountCode;
 use App\Models\DiscountCodeUsage;
 use Carbon\Carbon;
 use Telegram\Bot\FileUpload\InputFile;
+use Illuminate\Auth\Access\AuthorizationException;
 
 class WebhookController extends Controller
 {
@@ -1099,6 +1101,8 @@ class WebhookController extends Controller
                 Log::warning('Could not answer callback query for QR Code: ' . $e->getMessage());
             }
             $this->sendQRCodeForOrder($user, $orderId);
+        } elseif (preg_match('/^sir_(\d+)$/', $data, $sir)) {
+            $this->telegramShareServiceToIran($user, (int) $sir[1]);
         } elseif (Str::startsWith($data, 'renew_order_')) {
             $originalOrderId = Str::after($data, 'renew_order_');
             $this->startRenewalPurchaseProcess($user, $originalOrderId, $messageId);
@@ -1686,7 +1690,13 @@ class WebhookController extends Controller
             if (! empty($walletCredNote)) {
                 $successText .= "\n\n".$walletCredNote;
             }
-            $this->sendOrEditMessage($user->telegram_chat_id, $successText, Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']), Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start'])]), $messageId);
+            $walletSuccessKb = Keyboard::make()->inline()
+                ->row([Keyboard::inlineButton(['text' => '🇮🇷 ارسال به ایران (کد ۵ رقمی)', 'callback_data' => 'sir_'.$order->id])])
+                ->row([
+                    Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+                    Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start']),
+                ]);
+            $this->sendOrEditMessage($user->telegram_chat_id, $successText, $walletSuccessKb, $messageId);
         } catch (\Exception $e) {
             Log::error('Wallet Payment Failed: ' . $e->getMessage(), ['trace' => $e->getTraceAsString(), 'plan_id' => $plan->id ?? null, 'user_id' => $user->id]);
             if ($order && $order->exists) {
@@ -2270,6 +2280,71 @@ class WebhookController extends Controller
         }
     }
 
+    protected function telegramShareServiceToIran(User $user, int $orderId): void
+    {
+        $order = $user->orders()->with('plan')->find($orderId);
+        if (! $order || $order->status !== 'paid') {
+            Telegram::sendMessage([
+                'chat_id' => $user->telegram_chat_id,
+                'text' => '❌ سرویس پیدا نشد یا هنوز فعال نشده است.',
+            ]);
+
+            return;
+        }
+
+        $payload = trim((string) $order->config_details);
+        if ($payload === '' || str_starts_with($payload, '⚠️')) {
+            Telegram::sendMessage([
+                'chat_id' => $user->telegram_chat_id,
+                'text' => '❌ لینک/کانفیگ این سرویس هنوز آماده نیست. بعداً از «سرویس‌های من» دوباره امتحان کنید.',
+            ]);
+
+            return;
+        }
+
+        try {
+            $share = ServiceShareService::storeForUser(
+                (int) $user->id,
+                $payload,
+                (int) $order->id,
+                $order->plan ? $this->planTelegramDisplayName($order->plan) : null
+            );
+        } catch (AuthorizationException) {
+            Telegram::sendMessage([
+                'chat_id' => $user->telegram_chat_id,
+                'text' => '❌ دسترسی به این سفارش ندارید.',
+            ]);
+
+            return;
+        } catch (\Throwable $e) {
+            Log::error('telegramShareServiceToIran: '.$e->getMessage(), ['order_id' => $orderId, 'user_id' => $user->id]);
+
+            Telegram::sendMessage([
+                'chat_id' => $user->telegram_chat_id,
+                'text' => '❌ ساخت کد با خطا مواجه شد. لطفاً دوباره تلاش کنید.',
+            ]);
+
+            return;
+        }
+
+        $lookup = ServiceShareService::publicLookupUrl($share->code);
+        $lines = [
+            '✅ کد برای دریافت داخل ایران ساخته شد.',
+            '',
+            'کد ۵ رقمی (به طرف مقابل بگویید):',
+            $share->code,
+            '',
+            'آدرس سایت (همان را باز کند):',
+            $lookup,
+            '',
+            'طرف مقابل فقط کد را در همان صفحه وارد می‌کند و لینک/QR را می‌بیند.',
+        ];
+        Telegram::sendMessage([
+            'chat_id' => $user->telegram_chat_id,
+            'text' => implode("\n", $lines),
+        ]);
+    }
+
     protected function sendQRCodeForOrder($user, $orderId)
     {
         $order = $user->orders()->find($orderId);
@@ -2325,8 +2400,9 @@ class WebhookController extends Controller
             $keyboard = Keyboard::make()->inline()
                 ->row([
                     Keyboard::inlineButton(['text' => "🔄 تمدید سرویس", 'callback_data' => "renew_order_{$order->id}"]),
-                    Keyboard::inlineButton(['text' => '⬅️ بازگشت به جزئیات', 'callback_data' => "show_service_{$order->id}"])
+                    Keyboard::inlineButton(['text' => '⬅️ بازگشت به جزئیات', 'callback_data' => "show_service_{$order->id}"]),
                 ])
+                ->row([Keyboard::inlineButton(['text' => '🇮🇷 ارسال به ایران (کد ۵ رقمی)', 'callback_data' => 'sir_'.$order->id])])
                 ->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به لیست سرویس‌ها', 'callback_data' => '/my_services'])]);
 
             Telegram::sendPhoto([
@@ -2472,7 +2548,8 @@ class WebhookController extends Controller
 
         if (!empty($order->config_details)) {
             $keyboard->row([
-                Keyboard::inlineButton(['text' => "📱 دریافت QR Code", 'callback_data' => "qrcode_order_{$order->id}"])
+                Keyboard::inlineButton(['text' => "📱 دریافت QR Code", 'callback_data' => "qrcode_order_{$order->id}"]),
+                Keyboard::inlineButton(['text' => '🇮🇷 ارسال به ایران', 'callback_data' => 'sir_'.$order->id]),
             ]);
         }
 
@@ -3407,10 +3484,12 @@ class WebhookController extends Controller
             $successMessage .= "🔗 *لینک اتصال شما (بدون تغییر):*\n";
             $successMessage .= "👇 _برای کپی روی لینک زیر ضربه بزنید_\n";
             $successMessage .= "{$linkCode}";
-            $keyboard = Keyboard::make()->inline()->row([
-                Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
-                Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start'])
-            ]);
+            $keyboard = Keyboard::make()->inline()
+                ->row([Keyboard::inlineButton(['text' => '🇮🇷 ارسال به ایران (کد ۵ رقمی)', 'callback_data' => 'sir_'.$originalOrder->id])])
+                ->row([
+                    Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+                    Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start']),
+                ]);
 
             $this->sendOrEditMessage($user->telegram_chat_id, $successMessage, $keyboard, $messageId);
 

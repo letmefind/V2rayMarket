@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Iran pickup page (short /c URL)
+    |--------------------------------------------------------------------------
+    | If set, Telegram messages and redirects use this base URL (e.g. https://bale.cyou)
+    | instead of APP_URL, so links match the domain people open inside Iran.
+    */
+    'iran_share' => [
+        'base_url' => env('IRAN_SERVICE_SHARE_URL'),
+    ],
+
 ];
