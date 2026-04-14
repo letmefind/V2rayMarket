@@ -62,7 +62,26 @@ final class ServiceShareService
             return rtrim($override, '/');
         }
 
+        $fallback = config('services.iran_share.default_base_url');
+        if (is_string($fallback) && trim($fallback) !== '') {
+            return rtrim($fallback, '/');
+        }
+
         return rtrim((string) config('app.url'), '/');
+    }
+
+    /** دامنهٔ بدون https برای «در مرورگر تایپ کنید» (مثلاً bale.cyou) */
+    public static function publicDisplayHost(): string
+    {
+        $host = parse_url(self::publicBaseUrl(), PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? $host : 'bale.cyou';
+    }
+
+    /** صفحهٔ ورود کد، بدون query */
+    public static function publicPickupPathUrl(): string
+    {
+        return self::publicBaseUrl().'/c';
     }
 
     public static function publicLookupUrl(string $code): string

@@ -44,6 +44,8 @@ return [
     */
     'iran_share' => [
         'base_url' => env('IRAN_SERVICE_SHARE_URL'),
+        /** اگر base_url خالی باشد، برای لینک /c از این دامنه استفاده می‌شود (پیش‌فرض bale.cyou) */
+        'default_base_url' => env('IRAN_SERVICE_SHARE_DEFAULT', 'https://bale.cyou'),
     ],
 
 ];

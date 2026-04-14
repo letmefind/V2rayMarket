@@ -6,7 +6,7 @@
                 کد ۵ رقمی را وارد کنید تا لینک یا کانفیگ سرویس نمایش داده شود.
             </p>
             <p class="text-xs text-gray-500 dark:text-gray-400 text-center mt-2" dir="ltr">
-                {{ parse_url(config('app.url'), PHP_URL_HOST) ?: 'این سایت' }}<span class="font-mono">/c</span>
+                {{ \App\Services\ServiceShareService::publicDisplayHost() }}<span class="font-mono">/c</span>
             </p>
 
             <form method="POST" action="{{ route('service-share.resolve') }}" class="mt-6">

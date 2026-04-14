@@ -2327,21 +2327,33 @@ class WebhookController extends Controller
             return;
         }
 
+        $host = ServiceShareService::publicDisplayHost();
+        $pageUrl = ServiceShareService::publicPickupPathUrl();
         $lookup = ServiceShareService::publicLookupUrl($share->code);
-        $lines = [
-            '✅ کد برای دریافت داخل ایران ساخته شد.',
-            '',
-            'کد ۵ رقمی (به طرف مقابل بگویید):',
-            $share->code,
-            '',
-            'آدرس سایت (همان را باز کند):',
-            $lookup,
-            '',
-            'طرف مقابل فقط کد را در همان صفحه وارد می‌کند و لینک/QR را می‌بیند.',
-        ];
+        $code = $share->code;
+
+        $text = <<<TXT
+✅ کد برای دریافت داخل ایران ساخته شد.
+
+📱 آدرس سایت (در مرورگر موبایل یا کامپیوتر تایپ کنید):
+{$host}
+
+یا آدرس کامل صفحه:
+{$pageUrl}
+
+🔐 کد رمز (۵ رقم) — این را جدا برای فرد داخل ایران بفرستید یا در تماس بگویید:
+{$code}
+
+📝 راهنما:
+در تماس تلفنی یا هر روش دیگر، همین نام سایت ({$host}) را برای فرد داخل ایران بخوانید؛ آن‌ها در مرورگر همان را تایپ کنند، وارد صفحه شوند و این کد {$code} را در فرم وارد کنند. بعد لینک اشتراک را کپی کنند و در برنامه VPN وارد کنند، یا همان QR را اسکن کنند.
+
+🔗 لینک مستقیم (اگر بتوانند باز کنند):
+{$lookup}
+TXT;
+
         Telegram::sendMessage([
             'chat_id' => $user->telegram_chat_id,
-            'text' => implode("\n", $lines),
+            'text' => $text,
         ]);
     }
 
