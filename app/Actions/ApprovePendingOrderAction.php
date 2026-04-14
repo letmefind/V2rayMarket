@@ -473,7 +473,19 @@ if ($success) {
                 $telegramMessage .= "\n\n".$telegramAppend;
             }
             Telegram::setAccessToken($settings->get('telegram_bot_token'));
-            Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => $telegramMessage, 'parse_mode' => 'Markdown']);
+            $shareOid = $isRenewal ? (int) $originalOrder->id : (int) $order->id;
+            $replyMarkup = Keyboard::make()->inline()
+                ->row([Keyboard::inlineButton(['text' => '🇮🇷 ارسال به ایران (کد ۵ رقمی)', 'callback_data' => 'sir_'.$shareOid])])
+                ->row([
+                    Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+                    Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start']),
+                ]);
+            Telegram::sendMessage([
+                'chat_id' => $user->telegram_chat_id,
+                'text' => $telegramMessage,
+                'parse_mode' => 'Markdown',
+                'reply_markup' => $replyMarkup,
+            ]);
         } catch (\Exception $e) {
             Log::error('Failed to send Telegram notification: '.$e->getMessage());
         }
@@ -535,7 +547,7 @@ return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛
             ? (new \DateTime($originalOrder->expires_at))->modify("+{$plan->duration_days} days")
             : now()->addDays($plan->duration_days);
 
-        return DB::transaction(function () use ($order, $plan, $user, $settings, $finalConfig, $isRenewal, $originalOrder, $extraOrderAttrs, $telegramAppend, $newExpiresAt) {
+        return DB::transaction(function () use ($order, $plan, $user, $settings, $finalConfig, $isRenewal, $originalOrder, $extraOrderAttrs, $telegramAppend, $newExpiresAt, $result) {
             $locked = Order::whereKey($order->id)->lockForUpdate()->first();
             if (! $locked || $locked->status !== 'pending') {
                 return ApprovePendingOrderResult::fail('توجه', 'وضعیت سفارش قبلاً تغییر کرده است.');
@@ -612,36 +624,31 @@ return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛
                         $telegramMessage .= "\n\n".$telegramAppend;
                     }
                     
-                    // ساخت دکمه‌های سرورها
-                    $keyboard = null;
+                    $shareOrderId = $isRenewal && $originalOrder ? (int) $originalOrder->id : (int) $order->id;
+
+                    $serverButtons = [];
                     if (! empty($servers)) {
                         $serverButtons = XmplusServerHelper::buildServerButtons($order->id, $servers);
-                        
-                        // اضافه کردن دکمه‌های پایین پیام
-                        $serverButtons[] = [
-                            ['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services'],
-                            ['text' => '🏠 منوی اصلی', 'callback_data' => '/start'],
-                        ];
-                        
-                        $keyboard = Keyboard::make()->inline()->setResizeKeyboard(true);
-                        foreach ($serverButtons as $row) {
-                            $keyboard->row($row);
-                        }
-                        
                         $telegramMessage .= "\n\n━━━━━━━━━━━━━━━━━\n🖥 <b>سرورهای موجود</b>\n\n📍 برای مشاهده جزئیات و QR Code هر سرور، روی دکمه آن کلیک کنید:";
                     }
-                    
+
+                    foreach (XmplusServerHelper::buildIranShareAndNavRows($shareOrderId) as $row) {
+                        $serverButtons[] = $row;
+                    }
+
+                    $keyboard = Keyboard::make()->inline()->setResizeKeyboard(true);
+                    foreach ($serverButtons as $row) {
+                        $keyboard->row($row);
+                    }
+
                     Telegram::setAccessToken($settings->get('telegram_bot_token'));
                     $messageParams = [
                         'chat_id' => $user->telegram_chat_id,
                         'text' => $telegramMessage,
                         'parse_mode' => 'HTML',
+                        'reply_markup' => $keyboard,
                     ];
-                    
-                    if ($keyboard) {
-                        $messageParams['reply_markup'] = $keyboard;
-                    }
-                    
+
                     Telegram::sendMessage($messageParams);
                 } catch (\Exception $e) {
                     Log::error('Failed to send Telegram notification: '.$e->getMessage());

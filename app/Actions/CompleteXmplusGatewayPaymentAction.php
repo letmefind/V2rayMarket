@@ -547,36 +547,31 @@ final class CompleteXmplusGatewayPaymentAction
                 if ($telegramAppend) {
                     $telegramMessage .= "\n\n".$telegramAppend;
                 }
-                
-                // ساخت دکمه‌های سرورها
-                $keyboard = null;
+
+                $shareOrderId = ($isRenewal && $originalOrder) ? (int) $originalOrder->id : (int) $order->id;
+
+                $serverButtons = [];
                 if (! empty($servers)) {
                     $serverButtons = XmplusServerHelper::buildServerButtons($order->id, $servers);
-                    
-                    // اضافه کردن دکمه‌های پایین پیام
-                    $serverButtons[] = [
-                        ['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services'],
-                        ['text' => '🏠 منوی اصلی', 'callback_data' => '/start'],
-                    ];
-                    
-                    $keyboard = Keyboard::make()->inline()->setResizeKeyboard(true);
-                    foreach ($serverButtons as $row) {
-                        $keyboard->row($row);
-                    }
-                    
                     $telegramMessage .= "\n\n━━━━━━━━━━━━━━━━━\n🖥 <b>سرورهای موجود</b>\n\n📍 برای مشاهده جزئیات و QR Code هر سرور، روی دکمه آن کلیک کنید:";
                 }
-                
+
+                foreach (XmplusServerHelper::buildIranShareAndNavRows($shareOrderId) as $row) {
+                    $serverButtons[] = $row;
+                }
+
+                $keyboard = Keyboard::make()->inline()->setResizeKeyboard(true);
+                foreach ($serverButtons as $row) {
+                    $keyboard->row($row);
+                }
+
                 $messageParams = [
                     'chat_id' => $user->telegram_chat_id,
                     'text' => $telegramMessage,
                     'parse_mode' => 'HTML',
+                    'reply_markup' => $keyboard,
                 ];
-                
-                if ($keyboard) {
-                    $messageParams['reply_markup'] = $keyboard;
-                }
-                
+
                 Telegram::sendMessage($messageParams);
             } catch (\Throwable $e) {
                 Log::warning('CompleteXmplusGatewayPayment Telegram: '.$e->getMessage());

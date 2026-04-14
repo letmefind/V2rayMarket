@@ -59,6 +59,24 @@ class XmplusServerHelper
     }
 
     /**
+     * دکمه «ارسال به ایران» و ناوبری پایانی، برای چسباندن بعد از دکمه‌های سرور در پیام موفقیت XMPlus در تلگرام.
+     *
+     * @return list<list<array{text: string, callback_data: string}>>
+     */
+    public static function buildIranShareAndNavRows(int $shareOrderId): array
+    {
+        return [
+            [
+                ['text' => '🇮🇷 ارسال به ایران (کد ۵ رقمی)', 'callback_data' => 'sir_'.$shareOrderId],
+            ],
+            [
+                ['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services'],
+                ['text' => '🏠 منوی اصلی', 'callback_data' => '/start'],
+            ],
+        ];
+    }
+
+    /**
      * ساخت QR Code برای URI سرور
      */
     public static function generateQrCode(string $uri): string

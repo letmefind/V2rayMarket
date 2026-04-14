@@ -14,6 +14,7 @@ use App\Services\XmplusProvisioningService;
 use App\Services\XUIService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Telegram\Bot\Keyboard\Keyboard;
 use Telegram\Bot\Laravel\Facades\Telegram;
 
 /**
@@ -411,9 +412,19 @@ class FulfillOrderAfterPaymentAction
             if ($appendText) {
                 $text .= "\n\n".$appendText;
             }
+            $shareOrderId = $isRenewal && $order->renews_order_id
+                ? (int) $order->renews_order_id
+                : (int) $order->id;
+            $replyMarkup = Keyboard::make()->inline()
+                ->row([Keyboard::inlineButton(['text' => '🇮🇷 ارسال به ایران (کد ۵ رقمی)', 'callback_data' => 'sir_'.$shareOrderId])])
+                ->row([
+                    Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+                    Keyboard::inlineButton(['text' => '🏠 منوی اصلی', 'callback_data' => '/start']),
+                ]);
             Telegram::sendMessage([
                 'chat_id' => $user->telegram_chat_id,
                 'text' => $text,
+                'reply_markup' => $replyMarkup,
             ]);
         } catch (\Throwable $e) {
             Log::warning('Telegram notify plan plisio: '.$e->getMessage());
