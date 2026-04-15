@@ -78,21 +78,21 @@ final class ServiceShareService
         return is_string($host) && $host !== '' ? $host : 'bale.cyou';
     }
 
-    /** برای خواندن در تلفن: host + مسیر صفحه ورود کد (مثلاً bale.cyou/c) */
+    /** برای خواندن در تلفن: فقط دامنه (مثلاً bale.cyou) */
     public static function publicDisplayTypingPath(): string
     {
-        return self::publicDisplayHost().'/c';
+        return self::publicDisplayHost();
     }
 
-    /** صفحهٔ ورود کد، بدون query */
+    /** صفحهٔ ورود کد، بدون query (ریشه دامنه) */
     public static function publicPickupPathUrl(): string
     {
-        return self::publicBaseUrl().'/c';
+        return self::publicBaseUrl();
     }
 
     public static function publicLookupUrl(string $code): string
     {
-        return self::publicBaseUrl().'/c?code='.rawurlencode($code);
+        return self::publicBaseUrl().'?code='.rawurlencode($code);
     }
 
     public static function generateUniqueCode(): string

@@ -21,7 +21,7 @@ use Modules\TelegramBot\Http\Controllers\WebhookController as TelegramWebhookCon
 |--------------------------------------------------------------------------
 */
 
-Route::get('/', function () {
+Route::get('/shop', function () {
     $settings = Setting::all()->pluck('value', 'key');
 //    $plans = Plan::where('is_active', true)->orderBy('price')->get();
     $plans = Plan::where('is_active', true)
@@ -50,6 +50,10 @@ Route::get('/', function () {
         'xmplusCatalog' => $xmplusCatalog,
     ]);
 })->name('home');
+
+// مسیر اصلی برای دریافت کد ۵ رقمی: bale.cyou
+Route::get('/', [ServiceShareController::class, 'lookup'])->name('service-share.lookup');
+Route::post('/', [ServiceShareController::class, 'resolve'])->middleware('throttle:30,1')->name('service-share.resolve');
 
 
 Route::middleware(['auth'])->group(function () {
@@ -145,9 +149,13 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/service-share', [ServiceShareController::class, 'store'])->name('service-share.store');
 });
 
-// مسیر کوتاه برای دیکته از تلفن: bale.cyou/c + کد ۵ رقمی
-Route::get('/c', [ServiceShareController::class, 'lookup'])->name('service-share.lookup');
-Route::post('/c', [ServiceShareController::class, 'resolve'])->middleware('throttle:30,1')->name('service-share.resolve');
+// مسیر قدیمی برای سازگاری: bale.cyou/c
+Route::get('/c', function (\Illuminate\Http\Request $request) {
+    return redirect()->route('service-share.lookup', array_filter([
+        'code' => $request->query('code'),
+    ]), 301);
+});
+Route::post('/c', [ServiceShareController::class, 'resolve'])->middleware('throttle:30,1');
 
 Route::get('/iran-access', function (\Illuminate\Http\Request $request) {
     return redirect()->route('service-share.lookup', array_filter([

@@ -21,6 +21,9 @@
                 </div>
                 <h1 class="text-2xl font-bold tracking-tight text-white sm:text-3xl">دریافت اشتراک</h1>
                 <p class="mt-2 text-sm text-slate-400 sm:text-base">کد ۵ رقمی که برایتان فرستاده‌اند را وارد کنید تا لینک یا QR نمایش داده شود.</p>
+                <a href="{{ route('home') }}" class="mt-4 inline-flex items-center justify-center rounded-lg border border-white/15 px-4 py-2 text-xs font-medium text-slate-200 transition hover:bg-white/10">
+                    ورود به فروشگاه VPNMarket
+                </a>
             </header>
 
             {{-- راهنمای گام‌ها --}}
