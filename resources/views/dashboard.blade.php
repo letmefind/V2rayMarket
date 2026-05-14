@@ -84,7 +84,9 @@
         }
         $initialDashTab = in_array($reqTab, $allowedDashTabs, true) ? $reqTab : 'my_services';
         $dashSideTabId = $isXmplusPanel ? 'xmplus_panel' : 'referral';
-        $dashSideTabLabel = $isXmplusPanel ? 'حساب پنل XMPlus' : 'دعوت از دوستان';
+        $dashSideTabLabel = $isXmplusPanel
+            ? \App\Models\BotMessage::get('btn_xmplus_panel_account', 'حساب پنل XMPlus')
+            : 'دعوت از دوستان';
     @endphp
 
     <div class="py-12">
@@ -663,33 +665,27 @@
                     </div>
 
                     <div x-show="tab === 'xmplus_panel'" x-transition.opacity x-cloak>
-                        <h2 class="text-xl font-bold mb-6 text-gray-900 dark:text-white text-right">حساب پنل XMPlus (SymmetricNet)</h2>
-                        <div class="p-6 rounded-2xl bg-gray-50 dark:bg-gray-800/50 space-y-4 shadow-lg text-right max-w-3xl mx-auto">
-                            <div class="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 p-4 text-sm text-amber-900 dark:text-amber-100">
-                                <p class="font-semibold mb-1">توجه — اینترنت ایران</p>
-                                <p class="text-amber-800 dark:text-amber-200/90">سایت <strong>symmetricnet.com</strong> معمولاً با اینترنت داخل ایران <strong>باز نمی‌شود</strong>. برای ورود از <strong>VPN</strong> استفاده کنید یا از خارج ایران وارد شوید.</p>
-                            </div>
-                            <div>
-                                <a href="{{ $xmplusPanelAccountUrl }}" target="_blank" rel="noopener noreferrer" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ورود به پنل کاربری</a>
-                            </div>
-                            @php
-                                $xmDashEmail = trim((string) (auth()->user()->xmplus_client_email ?? ''));
-                                $xmDashPass = (string) (auth()->user()->xmplus_client_password ?? '');
-                            @endphp
+                        @php
+                            $xmH = fn (string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                            $xmPanelEsc = $xmH((string) ($xmplusPanelAccountUrl ?? ''));
+                            $xmDashEmail = trim((string) (auth()->user()->xmplus_client_email ?? ''));
+                            $xmDashPass = (string) (auth()->user()->xmplus_client_password ?? '');
+                            $xmVarsBase = ['panel_url' => $xmPanelEsc];
+                            $xmDefEmpty = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\nهنوز نام کاربری پنل برای شما ثبت نشده است. معمولاً بعد از <b>اولین خرید</b> یا هنگام انتخاب روش پرداخت، اینجا نمایش داده می‌شود.\n\n🌐 <b>آدرس ورود (با اینترنت ایران معمولاً باز نمی‌شود):</b>\n<a href=\"{panel_url}\">{panel_url}</a>";
+                            $xmDefFull = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n⚠️ <b>توجه:</b> سایت <b>symmetricnet.com</b> معمولاً با <b>اینترنت ایران</b> باز نمی‌شود؛ لطفاً با <b>VPN</b> یا از خارج ایران وارد شوید.\n\n🌐 <b>آدرس ورود به پنل:</b>\n<a href=\"{panel_url}\">{panel_url}</a>\n\n👤 <b>نام کاربری (ایمیل):</b> <code>{email}</code>\n🔑 <b>رمز عبور:</b> <code>{password}</code>\n\n🔒 این اطلاعات را برای دیگران فوروارد نکنید.";
+                        @endphp
+                        <div class="p-6 rounded-2xl bg-gray-50 dark:bg-gray-800/50 shadow-lg text-right max-w-3xl mx-auto space-y-4 [&_a]:text-indigo-600 [&_a]:dark:text-indigo-400 [&_a]:underline">
                             @if ($xmDashEmail === '')
-                                <p class="text-gray-600 dark:text-gray-300 leading-relaxed">هنوز نام کاربری پنل برای شما ثبت نشده است؛ معمولاً بعد از <strong>اولین خرید</strong> یا هنگام انتخاب روش پرداخت، اینجا نمایش داده می‌شود.</p>
-                            @else
-                                <div class="space-y-3">
-                                    <div>
-                                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">نام کاربری (ایمیل)</p>
-                                        <code class="block w-full break-all rounded-lg bg-gray-900 px-3 py-2 text-left text-sm text-emerald-300" dir="ltr">{{ $xmDashEmail }}</code>
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">رمز عبور</p>
-                                        <code class="block w-full break-all rounded-lg bg-gray-900 px-3 py-2 text-left text-sm text-emerald-300" dir="ltr">{{ $xmDashPass !== '' ? $xmDashPass : '—' }}</code>
-                                    </div>
+                                <div class="prose prose-sm dark:prose-invert max-w-none whitespace-pre-line text-right text-gray-800 dark:text-gray-200">
+                                    {!! \App\Models\BotMessage::get('msg_xmplus_panel_account_empty', $xmDefEmpty, $xmVarsBase) !!}
                                 </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">این اطلاعات حساس است؛ در دسترس دیگران قرار ندهید.</p>
+                            @else
+                                <div class="prose prose-sm dark:prose-invert max-w-none whitespace-pre-line text-right text-gray-800 dark:text-gray-200">
+                                    {!! \App\Models\BotMessage::get('msg_xmplus_panel_account', $xmDefFull, array_merge($xmVarsBase, [
+                                        'email' => $xmH($xmDashEmail),
+                                        'password' => $xmH($xmDashPass !== '' ? $xmDashPass : '—'),
+                                    ])) !!}
+                                </div>
                             @endif
                         </div>
                     </div>

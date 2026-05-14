@@ -35,6 +35,7 @@ use App\Models\Transaction;
 use Illuminate\Support\Facades\DB;
 use Telegram\Bot\Keyboard\Keyboard;
 use Illuminate\Support\Str;
+use App\Models\BotMessage;
 use App\Models\DiscountCode;
 use App\Models\DiscountCodeUsage;
 use Carbon\Carbon;
@@ -45,9 +46,6 @@ class WebhookController extends Controller
 {
     protected $settings;
 
-    /** دکمهٔ منوی ریپلای: نمایش نام کاربری/رمز ورود به پنل XMPlus (SymmetricNet) */
-    private const TG_REPLY_BTN_XMPLUS_ACCOUNT = '🔐 حساب پنل XMPlus';
-
     protected function isXmplusPanel(): bool
     {
         if (! $this->settings) {
@@ -55,6 +53,12 @@ class WebhookController extends Controller
         }
 
         return ($this->settings->get('panel_type') ?? '') === 'xmplus';
+    }
+
+    /** متن دکمهٔ «حساب پنل XMPlus» از پیام‌های ربات (Filament → پیام‌های ربات). */
+    protected function xmplusPanelAccountButtonLabel(): string
+    {
+        return BotMessage::get('btn_xmplus_panel_account', '🔐 حساب پنل XMPlus');
     }
 
     protected function planTelegramDisplayName(Plan $plan): string
@@ -283,6 +287,8 @@ class WebhookController extends Controller
             return;
         }
 
+        $xmplusMenuBtnLabel = $this->xmplusPanelAccountButtonLabel();
+
         switch ($text) {
             case '🛒 خرید سرویس':
                 $this->sendPlans($chatId);
@@ -299,7 +305,7 @@ class WebhookController extends Controller
             case '💬 پشتیبانی':
                 $this->showSupportMenu($user);
                 break;
-            case self::TG_REPLY_BTN_XMPLUS_ACCOUNT:
+            case $xmplusMenuBtnLabel:
                 $this->sendXmplusPanelAccountInfo($user);
                 break;
             case '🎁 دعوت از دوستان':
@@ -2693,29 +2699,30 @@ TXT;
 
         $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
+        $varsBase = ['panel_url' => $esc($panelUrl)];
+
+        $defaultEmpty = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n"
+            . "هنوز نام کاربری پنل برای شما ثبت نشده است. معمولاً بعد از <b>اولین خرید</b> یا هنگام انتخاب روش پرداخت، اینجا نمایش داده می‌شود.\n\n"
+            . "🌐 <b>آدرس ورود (با اینترنت ایران معمولاً باز نمی‌شود):</b>\n"
+            . '<a href="{panel_url}">{panel_url}</a>';
+
+        $defaultFull = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n"
+            . "⚠️ <b>توجه:</b> سایت <b>symmetricnet.com</b> معمولاً با <b>اینترنت ایران</b> باز نمی‌شود؛ لطفاً با <b>VPN</b> یا از خارج ایران وارد شوید.\n\n"
+            . "🌐 <b>آدرس ورود به پنل:</b>\n"
+            . '<a href="{panel_url}">{panel_url}</a>'."\n\n"
+            . '👤 <b>نام کاربری (ایمیل):</b> <code>{email}</code>'."\n"
+            . '🔑 <b>رمز عبور:</b> <code>{password}</code>'."\n\n"
+            . '🔒 این اطلاعات را برای دیگران فوروارد نکنید.';
+
         if ($email === '') {
-            $html = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n"
-                . "هنوز نام کاربری پنل برای شما ثبت نشده است. معمولاً بعد از <b>اولین خرید</b> یا هنگام انتخاب روش پرداخت، اینجا نمایش داده می‌شود.\n\n"
-                . "🌐 <b>آدرس ورود (با اینترنت ایران معمولاً باز نمی‌شود):</b>\n"
-                . '<a href="'.$esc($panelUrl).'">'.$esc($panelUrl)."</a>";
-
-            $keyboard = Keyboard::make()->inline()->row([
-                Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start']),
-            ]);
-            $this->sendOrEditMessage($user->telegram_chat_id, $html, $keyboard, $messageId, 'HTML');
-
-            return;
+            $html = BotMessage::get('msg_xmplus_panel_account_empty', $defaultEmpty, $varsBase);
+        } else {
+            $pwdDisplay = $password !== '' ? $password : '—';
+            $html = BotMessage::get('msg_xmplus_panel_account', $defaultFull, array_merge($varsBase, [
+                'email' => $esc($email),
+                'password' => $esc($pwdDisplay),
+            ]));
         }
-
-        $pwdDisplay = $password !== '' ? $password : '—';
-
-        $html = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n";
-        $html .= "⚠️ <b>توجه:</b> سایت <b>symmetricnet.com</b> معمولاً با <b>اینترنت ایران</b> باز نمی‌شود؛ لطفاً با <b>VPN</b> یا از خارج ایران وارد شوید.\n\n";
-        $html .= "🌐 <b>آدرس ورود به پنل:</b>\n";
-        $html .= '<a href="'.$esc($panelUrl).'">'.$esc($panelUrl)."</a>\n\n";
-        $html .= '👤 <b>نام کاربری (ایمیل):</b> <code>'.$esc($email)."</code>\n";
-        $html .= '🔑 <b>رمز عبور:</b> <code>'.$esc($pwdDisplay)."</code>\n\n";
-        $html .= '🔒 این اطلاعات را برای دیگران فوروارد نکنید.';
 
         $keyboard = Keyboard::make()->inline()->row([
             Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start']),
@@ -4695,7 +4702,11 @@ TXT;
             ->row([
                 Keyboard::inlineButton(['text' => '💰 کیف پول', 'callback_data' => '/wallet']),
                 Keyboard::inlineButton([
-                    'text' => $this->isXmplusPanel() ? '🔐 حساب پنل XMPlus' : '🎁 دعوت از دوستان',
+                    'text' => $this->truncateTelegramInlineButtonText(
+                        $this->isXmplusPanel()
+                            ? BotMessage::get('btn_xmplus_panel_account', '🔐 حساب پنل XMPlus')
+                            : '🎁 دعوت از دوستان'
+                    ),
                     'callback_data' => $this->isXmplusPanel() ? '/xmplus_panel' : '/referral',
                 ]),
             ])
@@ -4716,7 +4727,7 @@ TXT;
     protected function getReplyMainMenu(): Keyboard
     {
         $referralOrXmplusBtn = $this->isXmplusPanel()
-            ? self::TG_REPLY_BTN_XMPLUS_ACCOUNT
+            ? $this->xmplusPanelAccountButtonLabel()
             : '🎁 دعوت از دوستان';
 
         return Keyboard::make([

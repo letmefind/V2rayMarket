@@ -18,6 +18,9 @@
                 <p class="text-gray-600 dark:text-gray-400"><code class="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">{expires_at}</code> - تاریخ انقضا</p>
                 <p class="text-gray-600 dark:text-gray-400"><code class="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">{discount_code}</code> - کد تخفیف</p>
                 <p class="text-gray-600 dark:text-gray-400"><code class="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">{discount_amount}</code> - مبلغ تخفیف</p>
+                <p class="text-gray-600 dark:text-gray-400"><code class="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">{panel_url}</code> - آدرس پنل XMPlus (escape شده، برای تگ <code class="text-xs">&lt;a href&gt;</code>)</p>
+                <p class="text-gray-600 dark:text-gray-400"><code class="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">{email}</code> - ایمیل/نام کاربری پنل XMPlus</p>
+                <p class="text-gray-600 dark:text-gray-400"><code class="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">{password}</code> - رمز پنل XMPlus</p>
             </div>
         </div>
     </div>

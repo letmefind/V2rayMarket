@@ -267,6 +267,29 @@ class BotMessageSeeder extends Seeder
                 'description' => 'متن دکمه تمدید با Plisio',
             ],
 
+            // حساب پنل XMPlus (منوی ربات + داشبورد)
+            [
+                'key' => 'btn_xmplus_panel_account',
+                'category' => 'buttons',
+                'title' => 'دکمه: حساب پنل XMPlus',
+                'content' => '🔐 حساب پنل XMPlus',
+                'description' => 'دکمهٔ منو وقتی panel_type=xmplus است. حدود ۶۴ کاراکتر برای اینلاین تلگرام.',
+            ],
+            [
+                'key' => 'msg_xmplus_panel_account_empty',
+                'category' => 'messages',
+                'title' => 'پیام: حساب XMPlus — بدون نام کاربری',
+                'content' => "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\nهنوز نام کاربری پنل برای شما ثبت نشده است. معمولاً بعد از <b>اولین خرید</b> یا هنگام انتخاب روش پرداخت، اینجا نمایش داده می‌شود.\n\n🌐 <b>آدرس ورود (با اینترنت ایران معمولاً باز نمی‌شود):</b>\n<a href=\"{panel_url}\">{panel_url}</a>",
+                'description' => 'متغیر: {panel_url}',
+            ],
+            [
+                'key' => 'msg_xmplus_panel_account',
+                'category' => 'messages',
+                'title' => 'پیام: حساب XMPlus — با نام کاربری و رمز',
+                'content' => "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n⚠️ <b>توجه:</b> سایت <b>symmetricnet.com</b> معمولاً با <b>اینترنت ایران</b> باز نمی‌شود؛ لطفاً با <b>VPN</b> یا از خارج ایران وارد شوید.\n\n🌐 <b>آدرس ورود به پنل:</b>\n<a href=\"{panel_url}\">{panel_url}</a>\n\n👤 <b>نام کاربری (ایمیل):</b> <code>{email}</code>\n🔑 <b>رمز عبور:</b> <code>{password}</code>\n\n🔒 این اطلاعات را برای دیگران فوروارد نکنید.",
+                'description' => 'متغیرها: {panel_url}, {email}, {password}',
+            ],
+
             // پیام‌های درگاه پرداخت - Gateway Messages
             [
                 'key' => 'msg_payment_redirect_sent',
