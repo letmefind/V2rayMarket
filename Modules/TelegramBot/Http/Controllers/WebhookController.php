@@ -45,6 +45,9 @@ class WebhookController extends Controller
 {
     protected $settings;
 
+    /** دکمهٔ منوی ریپلای: نمایش نام کاربری/رمز ورود به پنل XMPlus (SymmetricNet) */
+    private const TG_REPLY_BTN_XMPLUS_ACCOUNT = '🔐 حساب پنل XMPlus';
+
     protected function isXmplusPanel(): bool
     {
         if (! $this->settings) {
@@ -296,8 +299,15 @@ class WebhookController extends Controller
             case '💬 پشتیبانی':
                 $this->showSupportMenu($user);
                 break;
+            case self::TG_REPLY_BTN_XMPLUS_ACCOUNT:
+                $this->sendXmplusPanelAccountInfo($user);
+                break;
             case '🎁 دعوت از دوستان':
-                $this->sendReferralMenu($user);
+                if ($this->isXmplusPanel()) {
+                    $this->sendXmplusPanelAccountInfo($user);
+                } else {
+                    $this->sendReferralMenu($user);
+                }
                 break;
             case '📚 راهنمای اتصال':
                 $this->sendTutorialsMenu($chatId);
@@ -1151,7 +1161,16 @@ class WebhookController extends Controller
                 case '/plans': $this->sendPlans($chatId, $messageId); break;
                 case '/my_services': $this->sendMyServices($user, $messageId); break;
                 case '/wallet': $this->sendWalletMenu($user, $messageId); break;
-                case '/referral': $this->sendReferralMenu($user, $messageId); break;
+                case '/xmplus_panel':
+                    $this->sendXmplusPanelAccountInfo($user, $messageId);
+                    break;
+                case '/referral':
+                    if ($this->isXmplusPanel()) {
+                        $this->sendXmplusPanelAccountInfo($user, $messageId);
+                    } else {
+                        $this->sendReferralMenu($user, $messageId);
+                    }
+                    break;
                 case '/support_menu': $this->showSupportMenu($user, $messageId); break;
                 case '/deposit': $this->showDepositOptions($user, $messageId); break;
                 case '/transactions': $this->sendTransactions($user, $messageId); break;
@@ -2651,6 +2670,58 @@ TXT;
 
         $keyboard = Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start'])]);
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
+    }
+
+    /**
+     * راهنمای ورود به پنل XMPlus (SymmetricNet) + نام کاربری و رمز — مشابه اطلاعاتی که هنگام پرداخت کارت/درگاه نمایش داده می‌شود.
+     */
+    protected function sendXmplusPanelAccountInfo(User $user, ?int $messageId = null): void
+    {
+        if (! $this->isXmplusPanel()) {
+            $this->sendReferralMenu($user, $messageId);
+
+            return;
+        }
+
+        $panelUrl = rtrim((string) $this->settings->get('xmplus_panel_url', ''), '/');
+        if ($panelUrl === '') {
+            $panelUrl = 'https://www.symmetricnet.com';
+        }
+
+        $email = trim((string) ($user->xmplus_client_email ?? ''));
+        $password = (string) ($user->xmplus_client_password ?? '');
+
+        $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+        if ($email === '') {
+            $html = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n"
+                . "هنوز نام کاربری پنل برای شما ثبت نشده است. معمولاً بعد از <b>اولین خرید</b> یا هنگام انتخاب روش پرداخت، اینجا نمایش داده می‌شود.\n\n"
+                . "🌐 <b>آدرس ورود (با اینترنت ایران معمولاً باز نمی‌شود):</b>\n"
+                . '<a href="'.$esc($panelUrl).'">'.$esc($panelUrl)."</a>";
+
+            $keyboard = Keyboard::make()->inline()->row([
+                Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start']),
+            ]);
+            $this->sendOrEditMessage($user->telegram_chat_id, $html, $keyboard, $messageId, 'HTML');
+
+            return;
+        }
+
+        $pwdDisplay = $password !== '' ? $password : '—';
+
+        $html = "<b>🔐 حساب پنل XMPlus (SymmetricNet)</b>\n\n";
+        $html .= "⚠️ <b>توجه:</b> سایت <b>symmetricnet.com</b> معمولاً با <b>اینترنت ایران</b> باز نمی‌شود؛ لطفاً با <b>VPN</b> یا از خارج ایران وارد شوید.\n\n";
+        $html .= "🌐 <b>آدرس ورود به پنل:</b>\n";
+        $html .= '<a href="'.$esc($panelUrl).'">'.$esc($panelUrl)."</a>\n\n";
+        $html .= '👤 <b>نام کاربری (ایمیل):</b> <code>'.$esc($email)."</code>\n";
+        $html .= '🔑 <b>رمز عبور:</b> <code>'.$esc($pwdDisplay)."</code>\n\n";
+        $html .= '🔒 این اطلاعات را برای دیگران فوروارد نکنید.';
+
+        $keyboard = Keyboard::make()->inline()->row([
+            Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start']),
+        ]);
+
+        $this->sendOrEditMessage($user->telegram_chat_id, $html, $keyboard, $messageId, 'HTML');
     }
 
     protected function sendTransactions($user, $messageId = null)
@@ -4623,7 +4694,10 @@ TXT;
             ])
             ->row([
                 Keyboard::inlineButton(['text' => '💰 کیف پول', 'callback_data' => '/wallet']),
-                Keyboard::inlineButton(['text' => '🎁 دعوت از دوستان', 'callback_data' => '/referral']),
+                Keyboard::inlineButton([
+                    'text' => $this->isXmplusPanel() ? '🔐 حساب پنل XMPlus' : '🎁 دعوت از دوستان',
+                    'callback_data' => $this->isXmplusPanel() ? '/xmplus_panel' : '/referral',
+                ]),
             ])
             ->row([
                 Keyboard::inlineButton(['text' => '💬 پشتیبانی', 'callback_data' => '/support_menu']),
@@ -4641,11 +4715,15 @@ TXT;
 
     protected function getReplyMainMenu(): Keyboard
     {
+        $referralOrXmplusBtn = $this->isXmplusPanel()
+            ? self::TG_REPLY_BTN_XMPLUS_ACCOUNT
+            : '🎁 دعوت از دوستان';
+
         return Keyboard::make([
             'keyboard' => [
                 ['🛒 خرید سرویس', '🧪 اکانت تست'],
                 ['💰 کیف پول', '📜 تاریخچه تراکنش‌ها'],
-                ['💬 پشتیبانی', '🎁 دعوت از دوستان'],
+                ['💬 پشتیبانی', $referralOrXmplusBtn],
                 ['📚 راهنمای اتصال', '🛠 سرویس‌های من'],
 
             ],

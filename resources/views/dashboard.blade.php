@@ -69,13 +69,22 @@
         $isXmplusPanel = is_array($xp) && (($xp['mode'] ?? '') === 'xmplus');
         $xpLinked = $isXmplusPanel && ! empty($xp['linked']);
         $xpPanelUrl = $isXmplusPanel ? (string) ($xp['panel_url'] ?? '') : '';
-        $allowedDashTabs = ['my_services', 'order_history', 'new_service', 'referral', 'tutorials'];
+        $allowedDashTabs = ['my_services', 'order_history', 'new_service', 'tutorials'];
+        if ($isXmplusPanel) {
+            $allowedDashTabs[] = 'xmplus_panel';
+        } else {
+            $allowedDashTabs[] = 'referral';
+        }
         if (Module::isEnabled('Ticketing')) {
             $allowedDashTabs[] = 'support';
         }
-        $initialDashTab = in_array((string) request('tab', 'my_services'), $allowedDashTabs, true)
-            ? (string) request('tab')
-            : 'my_services';
+        $reqTab = (string) request('tab', 'my_services');
+        if ($isXmplusPanel && $reqTab === 'referral') {
+            $reqTab = 'xmplus_panel';
+        }
+        $initialDashTab = in_array($reqTab, $allowedDashTabs, true) ? $reqTab : 'my_services';
+        $dashSideTabId = $isXmplusPanel ? 'xmplus_panel' : 'referral';
+        $dashSideTabLabel = $isXmplusPanel ? 'حساب پنل XMPlus' : 'دعوت از دوستان';
     @endphp
 
     <div class="py-12">
@@ -179,8 +188,8 @@
                         <button @click="tab = 'new_service'" :class="{'border-indigo-500 text-indigo-600 dark:text-indigo-400': tab === 'new_service', 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200': tab !== 'new_service'}" class="whitespace-nowrap py-4 px-3 sm:px-1 border-b-2 font-medium text-sm transition">
                             خرید سرویس جدید
                         </button>
-                        <button @click="tab = 'referral'" :class="{'border-indigo-500 text-indigo-600 dark:text-indigo-400': tab === 'referral', 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200': tab !== 'referral'}" class="whitespace-nowrap py-4 px-3 sm:px-1 border-b-2 font-medium text-sm transition">
-                            دعوت از دوستان
+                        <button @click="tab = '{{ $dashSideTabId }}'" :class="{'border-indigo-500 text-indigo-600 dark:text-indigo-400': tab === '{{ $dashSideTabId }}', 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200': tab !== '{{ $dashSideTabId }}'}" class="whitespace-nowrap py-4 px-3 sm:px-1 border-b-2 font-medium text-sm transition">
+                            {{ $dashSideTabLabel }}
                         </button>
                         <button @click="tab = 'tutorials'" :class="{'border-indigo-500 text-indigo-600 dark:text-indigo-400': tab === 'tutorials', 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200': tab !== 'tutorials'}" class="whitespace-nowrap py-4 px-3 sm:px-1 border-b-2 font-medium text-sm transition">
                             راهنمای اتصال
@@ -653,18 +662,40 @@
                         </div>
                     </div>
 
+                    <div x-show="tab === 'xmplus_panel'" x-transition.opacity x-cloak>
+                        <h2 class="text-xl font-bold mb-6 text-gray-900 dark:text-white text-right">حساب پنل XMPlus (SymmetricNet)</h2>
+                        <div class="p-6 rounded-2xl bg-gray-50 dark:bg-gray-800/50 space-y-4 shadow-lg text-right max-w-3xl mx-auto">
+                            <div class="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 p-4 text-sm text-amber-900 dark:text-amber-100">
+                                <p class="font-semibold mb-1">توجه — اینترنت ایران</p>
+                                <p class="text-amber-800 dark:text-amber-200/90">سایت <strong>symmetricnet.com</strong> معمولاً با اینترنت داخل ایران <strong>باز نمی‌شود</strong>. برای ورود از <strong>VPN</strong> استفاده کنید یا از خارج ایران وارد شوید.</p>
+                            </div>
+                            <div>
+                                <a href="{{ $xmplusPanelAccountUrl }}" target="_blank" rel="noopener noreferrer" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ورود به پنل کاربری</a>
+                            </div>
+                            @php
+                                $xmDashEmail = trim((string) (auth()->user()->xmplus_client_email ?? ''));
+                                $xmDashPass = (string) (auth()->user()->xmplus_client_password ?? '');
+                            @endphp
+                            @if ($xmDashEmail === '')
+                                <p class="text-gray-600 dark:text-gray-300 leading-relaxed">هنوز نام کاربری پنل برای شما ثبت نشده است؛ معمولاً بعد از <strong>اولین خرید</strong> یا هنگام انتخاب روش پرداخت، اینجا نمایش داده می‌شود.</p>
+                            @else
+                                <div class="space-y-3">
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">نام کاربری (ایمیل)</p>
+                                        <code class="block w-full break-all rounded-lg bg-gray-900 px-3 py-2 text-left text-sm text-emerald-300" dir="ltr">{{ $xmDashEmail }}</code>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">رمز عبور</p>
+                                        <code class="block w-full break-all rounded-lg bg-gray-900 px-3 py-2 text-left text-sm text-emerald-300" dir="ltr">{{ $xmDashPass !== '' ? $xmDashPass : '—' }}</code>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">این اطلاعات حساس است؛ در دسترس دیگران قرار ندهید.</p>
+                            @endif
+                        </div>
+                    </div>
+
                     <div x-show="tab === 'referral'" x-transition.opacity x-cloak>
                         <h2 class="text-xl font-bold mb-6 text-gray-900 dark:text-white text-right">کسب درآمد با دعوت از دوستان</h2>
-                        @if ($isXmplusPanel)
-                            <div class="p-6 rounded-2xl bg-gray-50 dark:bg-gray-800/50 space-y-4 shadow-lg text-right">
-                                <p class="text-gray-600 dark:text-gray-300 leading-relaxed">
-                                    سیستم دعوت و پاداش در حالت پنل XMPlus از طریق Client API در دسترس نیست؛ دعوت از دوستان و لینک اختصاصی را از <strong>پنل کاربری XMPlus</strong> پیگیری کنید.
-                                </p>
-                                @if ($xpPanelUrl !== '')
-                                    <a href="{{ $xpPanelUrl }}" target="_blank" rel="noopener noreferrer" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ورود به پنل XMPlus</a>
-                                @endif
-                            </div>
-                        @else
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-right">
 
                             <div class="p-6 rounded-2xl bg-gray-50 dark:bg-gray-800/50 space-y-4 shadow-lg">
@@ -690,7 +721,6 @@
                             </div>
 
                         </div>
-                        @endif
                     </div>
 
                     @if (Module::isEnabled('Ticketing'))

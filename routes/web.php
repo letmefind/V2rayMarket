@@ -116,7 +116,12 @@ Route::middleware(['auth'])->group(function () {
             }
         }
 
-        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions', 'xmplusCatalog', 'xmplusUserSnapshot', 'iranSharePromptOrder'));
+        $xmplusPanelAccountUrl = rtrim((string) $dashSettings->get('xmplus_panel_url', ''), '/');
+        if ($xmplusPanelAccountUrl === '') {
+            $xmplusPanelAccountUrl = 'https://www.symmetricnet.com';
+        }
+
+        return view('dashboard', compact('orders', 'plans', 'tickets', 'transactions', 'xmplusCatalog', 'xmplusUserSnapshot', 'iranSharePromptOrder', 'xmplusPanelAccountUrl'));
     })->name('dashboard');
 
     // Wallet
