@@ -8,39 +8,48 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Modules\TelegramBot\Http\Controllers\WebhookController; // <-- از کنترلر ربات استفاده می‌کنیم
 
+/**
+ * هماهنگ‌کنندهٔ ارسال همگانی: به‌جای یک job خیلی بلند، برای هر دستهٔ کاربران یک Chunk جدا می‌فرستد
+ * تا از تکرار ارسال به‌خاطر `retry_after` کوتاه‌تر از مدت اجرا (database/redis queue) جلوگیری شود.
+ */
 class SendTelegramBroadcast implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected $message;
+    protected string $message;
 
-    /**
-     * Create a new job instance.
-     */
+    public int $timeout = 120;
+
+    public int $tries = 1;
+
     public function __construct(string $message)
     {
         $this->message = $message;
     }
 
-    /**
-     * Execute the job.
-     */
     public function handle(): void
     {
-        $controller = new WebhookController();
+        $chunkSize = 80;
 
-        User::whereNotNull('telegram_chat_id')
-            ->select('telegram_chat_id')
-            ->chunk(100, function ($users) use ($controller) {
-                foreach ($users as $user) {
+        User::query()
+            ->whereNotNull('telegram_chat_id')
+            ->where('telegram_chat_id', '!=', '')
+            ->orderBy('id')
+            ->select(['id', 'telegram_chat_id'])
+            ->chunkById($chunkSize, function ($users): void {
+                $chatIds = $users->pluck('telegram_chat_id')
+                    ->map(fn ($id) => trim((string) $id))
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
 
-                    $controller->sendBroadcastMessage($user->telegram_chat_id, $this->message);
-
-
-                    usleep(50000);
+                if ($chatIds === []) {
+                    return;
                 }
+
+                SendTelegramBroadcastChunk::dispatch($chatIds, $this->message);
             });
     }
 }

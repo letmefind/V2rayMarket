@@ -27,7 +27,7 @@ class ManageTelegramBroadcasts extends Page
                 ->form([
                     Textarea::make('message')
                         ->label('متن پیام همگانی (برای تلگرام)')
-                        ->helperText('این پیام برای تمام کاربرانی که چت آی‌دی تلگرام دارند، ارسال می‌شود.')
+                        ->helperText('این پیام برای تمام کاربرانی که چت آی‌دی تلگرام دارند، ارسال می‌شود. ارسال در چند job کوتاه در صف انجام می‌شود تا به‌خاطر محدودیت زمانی worker تکرار نشود؛ در .env مقدار DB_QUEUE_RETRY_AFTER را حداقل ۳۰۰ نگه دارید.')
                         ->required()
                         ->rows(8)
                         ->maxLength(4096),
