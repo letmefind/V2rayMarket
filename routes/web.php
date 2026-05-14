@@ -98,10 +98,26 @@ Route::middleware(['auth'])->group(function () {
             session()->flash('renewal_success', 'سرویس شما با موفقیت تمدید شد. لینک اشتراک شما تغییر کرده است، لطفاً لینک جدید را کپی و در نرم‌افزار خود آپدیت کنید.');
             $user->update(['show_renewal_notification' => false]);
         }
-        $orders = $user->orders()->with('plan')->whereNotNull('plan_id')->whereNull('renews_order_id')->latest()->get();
-        $transactions = $user->orders()->with('plan')->latest()->get();
+        $orders = $user->orders()
+            ->with('plan')
+            ->whereNotNull('plan_id')
+            ->whereNull('renews_order_id')
+            ->whereNotNull('config_details')
+            ->where('config_details', '!=', '')
+            ->latest()
+            ->limit(100)
+            ->get();
+
+        // تاریخچه: بدون بارگذاری config_details (حجم زیاد) + سقف تعداد
+        $transactions = $user->orders()
+            ->with(['plan:id,name,price,duration_days,volume_gb,is_active'])
+            ->select(['id', 'user_id', 'plan_id', 'renews_order_id', 'amount', 'status', 'created_at'])
+            ->latest()
+            ->limit(200)
+            ->get();
+
         $plans = Plan::where('is_active', true)->orderBy('price')->get();
-        $tickets = $user->tickets()->latest()->get();
+        $tickets = $user->tickets()->latest()->limit(100)->get();
         $dashSettings = Setting::all()->pluck('value', 'key');
         $xmplusCatalog = XmplusCatalog::get($dashSettings);
         $xmplusUserSnapshot = XmplusProvisioningService::fetchWebDashboardSnapshot($user, $dashSettings);

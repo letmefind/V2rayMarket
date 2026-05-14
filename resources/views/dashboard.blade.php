@@ -290,7 +290,7 @@
                             @endif
                         @elseif($orders->isNotEmpty())
                             <div class="space-y-4">
-                                @foreach ($orders->filter(fn($order) => !empty($order->config_details)) as $order)
+                                @foreach ($orders as $order)
                                     <div class="p-5 rounded-xl bg-gray-50 dark:bg-gray-800/50 shadow-md transition-shadow hover:shadow-lg" x-data="{ open: false }">
                                         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-center text-right">
                                             <div>
