@@ -58,6 +58,6 @@ class ServiceShareController extends Controller
             'code' => ['required', 'digits:5'],
         ]);
 
-        return redirect()->route('service-share.lookup', ['code' => $data['code']]);
+        return redirect()->route('home', ['code' => $data['code']]);
     }
 }

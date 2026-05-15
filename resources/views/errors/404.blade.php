@@ -54,9 +54,15 @@
     <h1 class="text-2xl md:text-3xl font-bold mt-8 text-gray-300">اتصال با این صفحه برقرار نشد!</h1>
     <p class="mt-4 text-gray-400">به نظر می‌رسد در فضای بیکران دیجیتال گم شده‌اید. آدرسی که به دنبال آن بودید، وجود ندارد.</p>
     <div class="mt-10">
-        <a href="{{ route('home') }}" class="px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-lg hover:bg-indigo-700 transition-transform transform hover:scale-105 duration-300">
-            بازگشت به پایگاه اصلی
-        </a>
+        @if(\Illuminate\Support\Facades\Route::has('home'))
+            <a href="{{ route('home') }}" class="px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-lg hover:bg-indigo-700 transition-transform transform hover:scale-105 duration-300">
+                بازگشت به پایگاه اصلی
+            </a>
+        @else
+            <a href="{{ url('/') }}" class="px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg shadow-lg hover:bg-indigo-700 transition-transform transform hover:scale-105 duration-300">
+                بازگشت به صفحهٔ اصلی
+            </a>
+        @endif
     </div>
 </div>
 </body>
