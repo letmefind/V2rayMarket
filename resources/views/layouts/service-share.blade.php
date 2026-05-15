@@ -1,10 +1,9 @@
 @php
-    $pickupOnly = (bool) config('app.share_pickup_only');
-    $viteBuilt = ! $pickupOnly && (
-        is_file(public_path('hot'))
+    // اگر manifest/hot باشد (ایمیج Docker بعد از npm run build) همان CSS/JS محلی؛
+    // وابستگی به cdn.tailwindcss.com روی شبکه‌های فیلترشده صفحه را «بی‌استایل» می‌کند.
+    $viteBuilt = is_file(public_path('hot'))
         || is_file(public_path('build/manifest.json'))
-        || is_file(public_path('build/.vite/manifest.json'))
-    );
+        || is_file(public_path('build/.vite/manifest.json'));
 @endphp
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -17,7 +16,7 @@
     @if ($viteBuilt)
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     @else
-        {{-- pickup: همیشه CDN تا مسیرهای vite/mixed content پشت TLS قطع نشوند --}}
+        {{-- فقط وقتی بیلد فرانت در image نیست (Dev بدون npm run build) --}}
         <script src="https://cdn.tailwindcss.com"></script>
         <script>
             tailwind.config = {
