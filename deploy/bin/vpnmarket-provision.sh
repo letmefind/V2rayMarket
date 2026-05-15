@@ -50,6 +50,15 @@ docker_net_exists() {
   docker network inspect "$1" >/dev/null 2>&1
 }
 
+ensure_proxy_network() {
+  if docker_net_exists proxy; then
+    ok "شبکه proxy موجود است"
+    return 0
+  fi
+  docker network create proxy >/dev/null
+  ok "شبکه proxy ساخته شد"
+}
+
 container_running() {
   docker ps --format '{{.Names}}' | grep -qx "$1"
 }
@@ -152,9 +161,7 @@ ensure_traefik() {
   touch "$TRAEFIK_DIR/acme.json"
   chmod 600 "$TRAEFIK_DIR/acme.json"
 
-  if ! docker_net_exists proxy; then
-    docker network create proxy >/dev/null
-  fi
+  ensure_proxy_network
 
   (cd "$TRAEFIK_DIR" && docker compose up -d)
   sleep 3

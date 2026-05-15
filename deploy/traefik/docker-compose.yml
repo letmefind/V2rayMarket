@@ -29,6 +29,7 @@ services:
       - proxy
 
 networks:
+  # شبکهٔ proxy ممکن است قبلاً با `docker network create proxy` ساخته شده باشد
   proxy:
+    external: true
     name: proxy
-    driver: bridge
