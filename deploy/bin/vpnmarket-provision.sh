@@ -92,7 +92,7 @@ TRAEFIK_NETWORK=${TRAEFIK_NETWORK:-proxy}
 TRAEFIK_CERT_RESOLVER=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
 PICKUP_DOMAIN=${PICKUP_DOMAIN:-bale.cyou}
 IRAN_SERVICE_SHARE_URL=${IRAN_SERVICE_SHARE_URL:-https://bale.cyou}
-APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
+APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
 INFRA_TRAEFIK=${INFRA_TRAEFIK:-0}
 INFRA_SHARED_DB=${INFRA_SHARED_DB:-0}
 INFRA_PICKUP=${INFRA_PICKUP:-0}
@@ -118,7 +118,7 @@ app_image_from_env() {
   line="${line#APP_IMAGE=}"
   line="${line%\"}"
   line="${line#\"}"
-  printf '%s' "${line:-vpnmarket/app:latest}"
+  printf '%s' "${line:-vpnmarket-local:latest}"
 }
 
 build_app_image() {
@@ -128,8 +128,17 @@ build_app_image() {
     err "Dockerfile در $ROOT نیست"
     return 1
   fi
-  info "ساخت image از $ROOT/Dockerfile → $image"
-  docker build -t "$image" -f "$ROOT/Dockerfile" "$ROOT"
+  info "ساخت image محلی از $ROOT/Dockerfile → $image (چند دقیقه)"
+  if ! docker build -t "$image" -f "$ROOT/Dockerfile" "$ROOT"; then
+    err "docker build ناموفق بود"
+    return 1
+  fi
+  docker image inspect "$image" >/dev/null || { err "image بعد از build پیدا نشد: $image"; return 1; }
+  ok "image آماده: $image"
+}
+
+ensure_app_image() {
+  build_app_image "$1"
 }
 
 compose_bot() {
@@ -137,6 +146,9 @@ compose_bot() {
   shift
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
+  if [ "${1:-}" = "up" ]; then
+    ensure_app_image "$INSTANCE_ENV_FILE"
+  fi
   docker compose --project-directory "$ROOT" \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
@@ -146,6 +158,7 @@ compose_bot() {
     -f "$dest/docker-compose.yml" \
     --env-file "$INSTANCE_ENV_FILE" \
     -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
+    --pull never \
     "$@"
 }
 
@@ -154,6 +167,9 @@ compose_pickup() {
   shift
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
+  if [ "${1:-}" = "up" ]; then
+    ensure_app_image "$INSTANCE_ENV_FILE"
+  fi
   docker compose --project-directory "$ROOT" \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
@@ -164,6 +180,7 @@ compose_pickup() {
     -f "$dest/docker-compose.yml" \
     --env-file "$INSTANCE_ENV_FILE" \
     -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
+    --pull never \
     "$@"
 }
 
@@ -253,7 +270,7 @@ write_bot_env() {
   local dest="$1" domain="$2" project="$3" instance_id="$4" app_name="$5" app_key="$6"
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
-APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
+APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
 
 APP_INSTANCE_ID=${instance_id}
 APP_NAME="${app_name}"
@@ -301,7 +318,7 @@ write_pickup_env() {
   local dest="$1" domain="$2" project="$3" app_key="$4"
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
-APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
+APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
 
 APP_INSTANCE_ID=pickup
 APP_NAME="دریافت اشتراک"
@@ -340,7 +357,6 @@ bootstrap_bot_container() {
   local dest="$1" domain="$2" token="$3" admin_email="$4" admin_pass="$5" admin_chat="$6"
 
   info "ساخت و اجرای کانتینرهای ربات ..."
-  build_app_image "$(instance_env_file "$dest")"
   compose_bot "$dest" up -d
 
   if ! wait_url "https://${domain}/up" 120; then

@@ -1,13 +1,16 @@
-# build واقعی در provision با `docker build -f $ROOT/Dockerfile` انجام می‌شود
+# image با `docker build` در provision ساخته می‌شود — از Docker Hub pull نمی‌شود
 services:
   web:
     build: !reset null
-    image: ${APP_IMAGE:-vpnmarket/app:latest}
+    image: ${APP_IMAGE:-vpnmarket-local:latest}
+    pull_policy: never
 
   queue:
     build: !reset null
-    image: ${APP_IMAGE:-vpnmarket/app:latest}
+    image: ${APP_IMAGE:-vpnmarket-local:latest}
+    pull_policy: never
 
   scheduler:
     build: !reset null
-    image: ${APP_IMAGE:-vpnmarket/app:latest}
+    image: ${APP_IMAGE:-vpnmarket-local:latest}
+    pull_policy: never
