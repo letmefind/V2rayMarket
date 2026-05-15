@@ -1798,6 +1798,17 @@ class WebhookController extends Controller
      * شماره کارت برای &lt;code&gt; تلگرام (لمس = کپی).
      * در چت RTL، بدون LTR isolate گروه‌های ۴رقمی برعکس دیده می‌شوند (کپی درست است).
      */
+    /** جلوگیری از نمایش برعکس اعداد/URL در چت RTL تلگرام. */
+    protected function ltrIsolate(string $text): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        return "\u{200E}\u{2066}{$text}\u{2069}";
+    }
+
     protected function formatCardNumberForTelegramCopy(string $cardNumber): string
     {
         $digits = preg_replace('/\D+/', '', $cardNumber) ?? '';
@@ -2441,20 +2452,20 @@ class WebhookController extends Controller
             return;
         }
 
-        $typingPath = ServiceShareService::publicDisplayTypingPath();
-        $code = $share->code;
+        $typingPath = $this->ltrIsolate(ServiceShareService::publicDisplayTypingPath());
+        $code = $this->ltrIsolate((string) $share->code);
 
-        $text = <<<TXT
-📝 راهنما (برای کسی که داخل ایران است):
-
-این آدرس را در تماس بخوانید تا در مرورگر تایپ کند:
-{$typingPath}
-
-کد ۵ رقمی را بگویید:
-{$code}
-
-بعد از وارد کردن کد، لینک اشتراک یا QR را می‌گیرد؛ در برنامه VPN وارد کند یا QR را اسکن کند.
-TXT;
+        $text = BotMessage::get(
+            'msg_iran_share_guide',
+            "📝 راهنما (برای کسی که داخل ایران است):\n\n"
+            ."این آدرس را در تماس بخوانید تا در مرورگر تایپ کند:\n{share_url}\n\n"
+            ."کد ۵ رقمی را بگویید:\n{share_code}\n\n"
+            .'بعد از وارد کردن کد، لینک اشتراک یا QR را می‌گیرد؛ در برنامه VPN وارد کند یا QR را اسکن کند.',
+            [
+                'share_url' => $typingPath,
+                'share_code' => $code,
+            ]
+        );
 
         Telegram::sendMessage([
             'chat_id' => $user->telegram_chat_id,

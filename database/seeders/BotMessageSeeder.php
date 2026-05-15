@@ -161,6 +161,13 @@ class BotMessageSeeder extends Seeder
                 'description' => 'فرمت HTML. متغیرها: {amount}, {card_holder}, {card_number} — {card_number} داخل <code> برای کپی با لمس',
             ],
             [
+                'key' => 'msg_iran_share_guide',
+                'category' => 'messages',
+                'title' => 'پیام: راهنمای ارسال کانفیگ به ایران',
+                'content' => "📝 راهنما (برای کسی که داخل ایران است):\n\nاین آدرس را در تماس بخوانید تا در مرورگر تایپ کند:\n{share_url}\n\nکد ۵ رقمی را بگویید:\n{share_code}\n\nبعد از وارد کردن کد، لینک اشتراک یا QR را می‌گیرد؛ در برنامه VPN وارد کند یا QR را اسکن کند.",
+                'description' => 'دکمه «ارسال به ایران». متغیرها: {share_url}, {share_code}',
+            ],
+            [
                 'key' => 'msg_wallet_xmplus_intro',
                 'category' => 'messages',
                 'title' => 'پیام: توضیح کیف پول XMPlus',
