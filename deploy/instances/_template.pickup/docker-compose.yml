@@ -1,6 +1,10 @@
-# فقط override شبکه — build از docker-compose.yml ریشه (context: .)
+# مسیر ./.env نسبت به همین پوشه (deploy/instances/<domain>/) است
 services:
-  web: {}
+  web:
+    env_file: !reset null
+    volumes: !reset
+      - app_storage:/var/www/html/storage
+      - ./.env:/run/instance.env:ro
 
 networks:
   shared_data:

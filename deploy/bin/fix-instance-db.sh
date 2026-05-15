@@ -74,6 +74,12 @@ echo "→ MySQL user ${DB_USERNAME}"
 docker exec vpnmarket_shared_mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -e \
   "ALTER USER '${DB_USERNAME}'@'%' IDENTIFIED BY '${DB_PASSWORD}'; FLUSH PRIVILEGES;"
 
+if grep -q '^APP_SHARE_PICKUP_ONLY=true' "$DEST/.env" 2>/dev/null; then
+  cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$DEST/docker-compose.yml"
+else
+  cp "$ROOT/deploy/instances/_template/docker-compose.yml" "$DEST/docker-compose.yml"
+fi
+
 export INSTANCE_ENV_FILE="$(cd "$DEST" && pwd)/.env"
 export ENV_FILE="$INSTANCE_ENV_FILE"
 set -a

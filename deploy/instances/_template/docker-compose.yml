@@ -1,2 +1,18 @@
-# از ریشهٔ مخزن با provision اجرا می‌شود — build در docker-compose.yml اصلی است
-services: {}
+services:
+  web:
+    env_file: !reset null
+    volumes: !reset
+      - app_storage:/var/www/html/storage
+      - ./.env:/run/instance.env:ro
+
+  queue:
+    env_file: !reset null
+    volumes: !reset
+      - app_storage:/var/www/html/storage
+      - ./.env:/run/instance.env:ro
+
+  scheduler:
+    env_file: !reset null
+    volumes: !reset
+      - app_storage:/var/www/html/storage
+      - ./.env:/run/instance.env:ro
