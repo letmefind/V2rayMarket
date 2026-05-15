@@ -158,7 +158,6 @@ compose_bot() {
     -f "$dest/docker-compose.yml" \
     --env-file "$INSTANCE_ENV_FILE" \
     -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
-    --pull never \
     "$@"
 }
 
@@ -180,7 +179,6 @@ compose_pickup() {
     -f "$dest/docker-compose.yml" \
     --env-file "$INSTANCE_ENV_FILE" \
     -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
-    --pull never \
     "$@"
 }
 
