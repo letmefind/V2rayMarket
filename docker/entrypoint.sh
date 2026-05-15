@@ -40,6 +40,8 @@ wait_for_db() {
     sleep 2
   done
   echo "[entrypoint] MySQL not reachable after timeout." >&2
+  echo "[entrypoint] DB_HOST=${DB_HOST:-?} DB_DATABASE=${DB_DATABASE:-?} DB_USERNAME=${DB_USERNAME:-?}" >&2
+  php artisan db:show --no-interaction 2>&1 | tail -5 >&2 || true
   exit 1
 }
 

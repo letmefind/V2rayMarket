@@ -1,0 +1,9 @@
+# فقط web migrate می‌زند — queue/scheduler همان .env را mount می‌کنند
+services:
+  queue:
+    environment:
+      RUN_MIGRATIONS: "false"
+
+  scheduler:
+    environment:
+      RUN_MIGRATIONS: "false"

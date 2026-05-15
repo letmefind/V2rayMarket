@@ -100,6 +100,10 @@ EOF
   chmod 600 "$CLUSTER_ENV"
 }
 
+normalize_domain() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 domain_slug() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/__*/_/g' | sed 's/^_//;s/_$//'
 }
@@ -276,10 +280,14 @@ ensure_instance_compose_vars() {
       echo "${key}=${val}" >>"$envf"
     fi
   done
+  domain="$(normalize_domain "$domain")"
   if grep -q '^APP_DOMAIN=' "$envf" 2>/dev/null; then
     sed -i "s|^APP_DOMAIN=.*|APP_DOMAIN=${domain}|" "$envf"
   else
     echo "APP_DOMAIN=${domain}" >>"$envf"
+  fi
+  if grep -q '^APP_URL=' "$envf" 2>/dev/null; then
+    sed -i "s|^APP_URL=.*|APP_URL=https://${domain}|" "$envf"
   fi
   if ! grep -q '^APP_IMAGE=' "$envf" 2>/dev/null; then
     echo "APP_IMAGE=vpnmarket/app:latest" >>"$envf"
@@ -402,6 +410,7 @@ EOSQL
 
 write_bot_env() {
   local dest="$1" domain="$2" project="$3" instance_id="$4" app_name="$5" app_key="$6"
+  domain="$(normalize_domain "$domain")"
   require_db_credentials || return 1
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
@@ -451,6 +460,7 @@ EOF
 
 write_pickup_env() {
   local dest="$1" domain="$2" project="$3" app_key="$4"
+  domain="$(normalize_domain "$domain")"
   require_db_credentials || return 1
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
@@ -491,12 +501,24 @@ EOF
 
 bootstrap_bot_container() {
   local dest="$1" domain="$2" token="$3" admin_email="$4" admin_pass="$5" admin_chat="$6"
+  local project container
+  domain="$(normalize_domain "$domain")"
+  project="$(instance_project_name "$domain")"
+  container="${project}-web-1"
 
   info "ساخت و اجرای کانتینرهای ربات ..."
-  compose_bot "$dest" up -d
+  compose_bot "$dest" up -d --force-recreate
 
-  if ! wait_url "https://${domain}/up" 120; then
-    warn "health check از بیرون ناموفق — ادامه با docker exec ..."
+  if ! wait_for_container_ready "$container" 120; then
+    err "کانتینر web بالا نیامد — لاگ:"
+    docker logs "$container" --tail 60 >&2 || true
+    return 1
+  fi
+
+  run_instance_migrate "$dest" "$container" || warn "migrate — دستی: docker exec $container php artisan migrate --force"
+
+  if ! wait_url "https://${domain}/up" 60; then
+    warn "HTTPS هنوز جواب نمی‌دهد — DNS/SSL را چک کنید (APP_DOMAIN=${domain})"
   fi
 
   info "Seed پیام‌های ربات و bootstrap ..."
@@ -555,8 +577,9 @@ provision_pickup_site() {
 }
 
 provision_bot_instance() {
-  local domain="$1"
-  local dest="$INSTANCES_DIR/$domain"
+  local domain
+  domain="$(normalize_domain "$1")"
+  local dest="$INSTANCES_DIR/$1"
   local project instance_id app_name app_key
 
   if [ -f "$dest/.env" ]; then
@@ -573,6 +596,7 @@ provision_bot_instance() {
   cp "$ROOT/deploy/instances/_template/docker-compose.yml" "$dest/docker-compose.yml"
   write_bot_env "$dest" "$domain" "$project" "$instance_id" "$app_name" "$app_key"
   repair_instance_db_env "$dest" "$domain" || return 1
+  grep -qE '^APP_KEY=base64:.+' "$dest/.env" || { err "APP_KEY در $dest/.env نیست"; return 1; }
 
   local token admin_email admin_pass admin_chat
   token="$(prompt_secret "توکن ربات تلگرام (BotFather)" "")"
