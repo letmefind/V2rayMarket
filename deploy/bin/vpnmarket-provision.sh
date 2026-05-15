@@ -295,6 +295,11 @@ ensure_instance_compose_vars() {
   if grep -q '^APP_URL=' "$envf" 2>/dev/null; then
     sed -i "s|^APP_URL=.*|APP_URL=https://${domain}|" "$envf"
   fi
+  if grep -q '^ASSET_URL=' "$envf" 2>/dev/null; then
+    sed -i "s|^ASSET_URL=.*|ASSET_URL=https://${domain}|" "$envf"
+  elif grep -q '^APP_URL=' "$envf" 2>/dev/null; then
+    echo "ASSET_URL=https://${domain}" >>"$envf"
+  fi
   if ! grep -q '^APP_IMAGE=' "$envf" 2>/dev/null; then
     echo "APP_IMAGE=vpnmarket/app:latest" >>"$envf"
   fi
@@ -432,6 +437,7 @@ APP_ENV=production
 APP_KEY=${app_key}
 APP_DEBUG=false
 APP_URL=https://${domain}
+ASSET_URL=https://${domain}
 
 APP_DOMAIN=${domain}
 TRAEFIK_ROUTER_NAME=${project}
@@ -486,6 +492,7 @@ APP_ENV=production
 APP_KEY=${app_key}
 APP_DEBUG=false
 APP_URL=https://${domain}
+ASSET_URL=https://${domain}
 
 APP_SHARE_PICKUP_ONLY=true
 APP_DOMAIN=${domain}

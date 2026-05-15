@@ -14,8 +14,8 @@
         <main class="relative z-10 mx-auto max-w-lg px-4 py-8 sm:py-12 sm:px-6 lg:max-w-2xl">
             {{-- هدر --}}
             <header class="mb-8 text-center sm:mb-10">
-                <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/25 ring-1 ring-white/10 sm:h-16 sm:w-16">
-                    <svg class="h-8 w-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/25 ring-1 ring-white/10 sm:h-16 sm:w-16" style="width:3.5rem;height:3.5rem;max-width:100%;">
+                    <svg class="h-8 w-8 shrink-0 text-white" style="width:2rem;height:2rem;max-width:100%;" width="32" height="32" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                     </svg>
                 </div>

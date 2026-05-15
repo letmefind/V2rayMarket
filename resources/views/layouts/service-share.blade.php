@@ -1,7 +1,10 @@
 @php
-    $viteBuilt = is_file(public_path('hot'))
+    $pickupOnly = (bool) config('app.share_pickup_only');
+    $viteBuilt = ! $pickupOnly && (
+        is_file(public_path('hot'))
         || is_file(public_path('build/manifest.json'))
-        || is_file(public_path('build/.vite/manifest.json'));
+        || is_file(public_path('build/.vite/manifest.json'))
+    );
 @endphp
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -14,7 +17,7 @@
     @if ($viteBuilt)
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     @else
-        {{-- بدون بیلد Vite صفحه ۵۰۰ ندهد؛ استایل از CDN تا بعد از npm ci && npm run build --}}
+        {{-- pickup: همیشه CDN تا مسیرهای vite/mixed content پشت TLS قطع نشوند --}}
         <script src="https://cdn.tailwindcss.com"></script>
         <script>
             tailwind.config = {
