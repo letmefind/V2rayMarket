@@ -1,19 +1,22 @@
-# mount و env_file هر نمونه از مسیر INSTANCE_ENV_FILE (توسط provision یا export دستی)
+# هر نمونه .env خودش را دارد — جایگزین کامل env_file/volume ریشهٔ پروژه
 services:
   web:
-    env_file:
-      - ${INSTANCE_ENV_FILE:?set INSTANCE_ENV_FILE to deploy/instances/<domain>/.env}
-    volumes:
+    env_file: !reset
+      - ${INSTANCE_ENV_FILE:?set INSTANCE_ENV_FILE}
+    volumes: !reset
+      - app_storage:/var/www/html/storage
       - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
 
   queue:
-    env_file:
+    env_file: !reset
       - ${INSTANCE_ENV_FILE:?}
-    volumes:
+    volumes: !reset
+      - app_storage:/var/www/html/storage
       - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
 
   scheduler:
-    env_file:
+    env_file: !reset
       - ${INSTANCE_ENV_FILE:?}
-    volumes:
+    volumes: !reset
+      - app_storage:/var/www/html/storage
       - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro

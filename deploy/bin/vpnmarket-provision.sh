@@ -115,8 +115,8 @@ instance_env_file() {
 compose_bot() {
   local dest="$1"
   shift
-  export INSTANCE_ENV_FILE
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
+  export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
   docker compose \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
@@ -131,8 +131,8 @@ compose_bot() {
 compose_pickup() {
   local dest="$1"
   shift
-  export INSTANCE_ENV_FILE
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
+  export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
   docker compose \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
