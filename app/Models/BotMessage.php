@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToInstance;
 use App\Support\InstanceId;
+use App\Support\SchemaUtil;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 
@@ -60,6 +61,11 @@ class BotMessage extends Model
      */
     public static function clearCache(): void
     {
+        $table = (new static)->getTable();
+        if (! SchemaUtil::tableHasColumn($table, 'instance_id')) {
+            return;
+        }
+
         // پاک کردن کش‌های مربوط به bot_message
         $instanceId = InstanceId::current();
         $keys = self::query()->forInstance($instanceId)->pluck('key');

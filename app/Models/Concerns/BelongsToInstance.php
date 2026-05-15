@@ -3,6 +3,7 @@
 namespace App\Models\Concerns;
 
 use App\Support\InstanceId;
+use App\Support\SchemaUtil;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
@@ -35,7 +36,12 @@ trait BelongsToInstance
 
     public function scopeForInstance(Builder $query, ?string $instanceId = null): Builder
     {
-        return $query->withoutGlobalScope('instance')
-            ->where($this->getTable().'.instance_id', $instanceId ?? InstanceId::current());
+        $table = $this->getTable();
+        $query = $query->withoutGlobalScope('instance');
+        if (! SchemaUtil::tableHasColumn($table, 'instance_id')) {
+            return $query;
+        }
+
+        return $query->where($table.'.instance_id', $instanceId ?? InstanceId::current());
     }
 }

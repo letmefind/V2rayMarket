@@ -2,6 +2,7 @@
 
 namespace App\Support\Migrations;
 
+use App\Support\SchemaUtil;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -35,7 +36,7 @@ final class BotMessageMigration
         $attributes['updated_at'] = $now;
 
         $query = DB::table('bot_messages')->where('key', $key);
-        if (Schema::hasColumn('bot_messages', 'instance_id')) {
+        if (SchemaUtil::tableHasColumn('bot_messages', 'instance_id')) {
             $instanceId = self::instanceIdForMigration();
             $query->where('instance_id', $instanceId);
             $attributes['instance_id'] = $instanceId;
@@ -62,7 +63,7 @@ final class BotMessageMigration
 
         $attributes['updated_at'] = now();
         $query = DB::table('bot_messages')->where('key', $key);
-        if (Schema::hasColumn('bot_messages', 'instance_id')) {
+        if (SchemaUtil::tableHasColumn('bot_messages', 'instance_id')) {
             $query->where('instance_id', self::instanceIdForMigration());
         }
         $query->update($attributes);
@@ -76,7 +77,7 @@ final class BotMessageMigration
         }
 
         $query = DB::table('bot_messages')->whereIn('key', $keys);
-        if (Schema::hasColumn('bot_messages', 'instance_id')) {
+        if (SchemaUtil::tableHasColumn('bot_messages', 'instance_id')) {
             $query->where('instance_id', self::instanceIdForMigration());
         }
         $query->delete();
