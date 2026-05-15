@@ -7,13 +7,12 @@ patch_instance_compose_env_mount() {
   [ -f "$env_abs" ] || { echo "patch_instance_compose_env_mount: .env نیست: $env_abs" >&2; return 1; }
   [ -f "$compose_file" ] || { echo "patch_instance_compose_env_mount: compose نیست: $compose_file" >&2; return 1; }
 
+  # با «اسلش بعد از -» در الگوی /.../ delimiter awk زود تمام می‌شود — از regex رشته‌ای استفاده می‌کنیم
   awk -v env="$env_abs" '
-    /\/run\/instance\.env:ro/ && /^[[:space:]]*-/) {
-      if (match($0, /^[[:space:]]+-[[:space:]]+/)) {
-        prefix = substr($0, 1, RLENGTH)
-        print prefix env ":/run/instance.env:ro"
-        next
-      }
+    index($0, ":/run/instance.env:ro") > 0 && match($0, "^[[:space:]]+-[[:space:]]+") {
+      prefix = substr($0, 1, RLENGTH)
+      print prefix env ":/run/instance.env:ro"
+      next
     }
     { print }
   ' "$compose_file" >"${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
