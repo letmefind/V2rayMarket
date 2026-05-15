@@ -237,10 +237,52 @@ ensure_traefik() {
   warn "اگر SSL قبلاً کار نمی‌کرد: cd $TRAEFIK_DIR && docker compose up -d --force-recreate"
 }
 
+require_db_credentials() {
+  load_cluster
+  if [ -z "${DB_PASSWORD:-}" ] || [ -z "${DB_USERNAME:-}" ] || [ -z "${DB_DATABASE:-}" ]; then
+    err "رمز/کاربر DB در deploy/.provision/cluster.env نیست. یک‌بار گزینه ۴ (زیرساخت) را بزنید یا cluster.env را پر کنید."
+    return 1
+  fi
+}
+
+repair_instance_db_env() {
+  local dest="$1" envf="$dest/.env"
+  require_db_credentials || return 1
+  [ -f "$envf" ] || return 0
+
+  local current_pw
+  current_pw="$(grep '^DB_PASSWORD=' "$envf" 2>/dev/null | cut -d= -f2- || true)"
+  if [ -n "$current_pw" ] && [ "$current_pw" != "change_me" ]; then
+    return 0
+  fi
+
+  warn "اصلاح DB_* در $envf از cluster.env"
+  grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD)=' "$envf" >"${envf}.tmp"
+  cat >>"${envf}.tmp" <<EOF
+DB_CONNECTION=mysql
+DB_HOST=mysql
+DB_PORT=3306
+DB_DATABASE=${DB_DATABASE}
+DB_USERNAME=${DB_USERNAME}
+DB_PASSWORD=${DB_PASSWORD}
+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+EOF
+  mv "${envf}.tmp" "$envf"
+  chmod 600 "$envf"
+  ok "DB_* در .env نمونه به‌روز شد"
+}
+
+clear_instance_config_cache() {
+  local container="$1"
+  [ -n "$container" ] || return 0
+  docker exec "$container" php artisan config:clear --no-interaction 2>/dev/null || true
+}
+
 ensure_shared_db() {
   if container_running vpnmarket_shared_mysql; then
     ok "MySQL مشترک در حال اجراست"
     INFRA_SHARED_DB=1
+    load_cluster
     return 0
   fi
 
@@ -279,11 +321,13 @@ FLUSH PRIVILEGES;
 EOSQL
 
   INFRA_SHARED_DB=1
+  save_cluster
   ok "MySQL/Redis مشترک آماده است"
 }
 
 write_bot_env() {
   local dest="$1" domain="$2" project="$3" instance_id="$4" app_name="$5" app_key="$6"
+  require_db_credentials || return 1
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
 APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
@@ -332,6 +376,7 @@ EOF
 
 write_pickup_env() {
   local dest="$1" domain="$2" project="$3" app_key="$4"
+  require_db_credentials || return 1
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
 APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
@@ -415,11 +460,16 @@ provision_pickup_site() {
     write_pickup_env "$dest" "$domain" "$project" "$app_key"
   fi
   cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
+  repair_instance_db_env "$dest" || return 1
 
   info "اجرای وب pickup ($domain) ..."
   compose_pickup "$dest" up -d
 
   local container="${project}-web-1"
+  clear_instance_config_cache "$dest" "$container"
+  compose_pickup "$dest" exec -T web php artisan migrate --force --no-interaction 2>/dev/null \
+    || warn "migrate — بعداً دستی: docker exec $container php artisan migrate --force"
+
   wait_container_up "$container" /up || true
   wait_url "https://${domain}/up" 40 || true
 
@@ -447,6 +497,7 @@ provision_bot_instance() {
   mkdir -p "$dest"
   cp "$ROOT/deploy/instances/_template/docker-compose.yml" "$dest/docker-compose.yml"
   write_bot_env "$dest" "$domain" "$project" "$instance_id" "$app_name" "$app_key"
+  repair_instance_db_env "$dest" || return 1
 
   local token admin_email admin_pass admin_chat
   token="$(prompt_secret "توکن ربات تلگرام (BotFather)" "")"
