@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\BotMessage;
+use App\Support\Migrations\BotMessageMigration;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\Schema;
 
@@ -48,21 +48,17 @@ return new class extends Migration
         ];
 
         foreach ($rows as $row) {
-            BotMessage::updateOrCreate(['key' => $row['key']], $row);
+            BotMessageMigration::upsert($row);
         }
     }
 
     public function down(): void
     {
-        if (! Schema::hasTable('bot_messages')) {
-            return;
-        }
-
-        BotMessage::whereIn('key', [
+        BotMessageMigration::deleteWhereKeys([
             'msg_wallet_xmplus_intro',
             'msg_wallet_xmplus_not_linked',
             'msg_wallet_xmplus_error',
             'msg_wallet_xmplus_balance',
-        ])->delete();
+        ]);
     }
 };
