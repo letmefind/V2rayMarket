@@ -261,7 +261,8 @@ require_db_credentials() {
 }
 
 repair_instance_db_env() {
-  local dest="$1" envf="$dest/.env"
+  local dest="$1"
+  local envf="${dest}/.env"
   require_db_credentials || return 1
   [ -f "$envf" ] || return 0
 
