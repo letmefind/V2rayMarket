@@ -109,7 +109,7 @@ instance_env_file() {
   local dest="$1"
   local f="$dest/.env"
   [ -f "$f" ] || { err "فایل .env نیست: $f"; return 1; }
-  (cd "$dest" && pwd)/.env
+  printf '%s/.env' "$(cd "$dest" && pwd)"
 }
 
 compose_bot() {
