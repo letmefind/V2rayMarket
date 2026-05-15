@@ -2,11 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToInstance;
 use Illuminate\Database\Eloquent\Model;
 
 class DiscountCode extends Model
 {
+    use BelongsToInstance;
+
     protected $fillable = [
+        'instance_id',
         'code', 'name', 'description', 'type', 'value', 'max_discount_amount',
         'usage_limit', 'usage_limit_per_user', 'used_count', 'min_order_amount',
         'applies_to_wallet', 'applies_to_renewal', 'plan_ids', 'starts_at', 'expires_at', 'is_active'

@@ -123,4 +123,18 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Multi-instance (shared database)
+    |--------------------------------------------------------------------------
+    |
+    | هر ربات/دامنه یک APP_INSTANCE_ID جدا دارد؛ داده‌ها با instance_id جدا می‌شوند.
+    | APP_SHARE_PICKUP_ONLY=true فقط صفحهٔ کد ۵ رقمی (مثلاً bale.cyou) — بدون پنل/ربات.
+    |
+    */
+
+    'instance_id' => env('APP_INSTANCE_ID', 'default'),
+
+    'share_pickup_only' => (bool) env('APP_SHARE_PICKUP_ONLY', false),
+
 ];

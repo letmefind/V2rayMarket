@@ -1,14 +1,19 @@
 # اجرای Docker — چند ربات روی یک سرور
 
-هر **نمونه** = یک ربات تلگرام + یک دامنه + دیتابیس و Redis جدا. همه از پورت **443** با **Traefik** (یک reverse proxy مشترک).
+هر **نمونه ربات** = یک دامنه (x.com) + `APP_INSTANCE_ID` جدا.  
+**یک MySQL مشترک** — داده‌ها با ستون `instance_id` قاطی نمی‌شوند.  
+**یک وب مشترک** (مثلاً `bale.cyou`) — فقط ورود **کد ۵ رقمی**؛ کد از همهٔ ربات‌ها در جدول `service_shares` مشترک است.
 
-## معماری
+## معماری (پیشنهادی)
 
 ```text
 Internet :443
-    → Traefik (یک‌بار روی سرور)
-        → نمونه x.com (web + mysql + redis + queue + scheduler)
-        → نمونه y.com (web + mysql + redis + queue + scheduler)
+    → Traefik
+        → bale.cyou     (APP_SHARE_PICKUP_ONLY=true — فقط صفحه کد ۵ رقمی)
+        → x.com         (ربات A — APP_INSTANCE_ID=vpnmarket_x)
+        → y.com         (ربات B — APP_INSTANCE_ID=vpnmarket_y)
+              ↘
+         MySQL + Redis مشترک (docker-compose.shared-db.yml)
 ```
 
 ## پیش‌نیاز سرور
@@ -27,7 +32,39 @@ docker compose up -d
 docker network ls | grep proxy   # شبکه proxy ساخته می‌شود
 ```
 
-## ۲) ساخت نمونهٔ جدید (مثلاً x.com)
+## ۲) MySQL و Redis مشترک (یک‌بار)
+
+```bash
+export MYSQL_ROOT_PASSWORD='...'
+docker compose -f docker-compose.shared-db.yml up -d
+docker network ls | grep vpnmarket_shared_data
+```
+
+روی MySQL یک دیتابیس بسازید (مثلاً `vpnmarket_shared`) و کاربر `vpnmarket` با دسترسی کامل.
+
+اولین نمونه بعد از `up` باید `php artisan migrate --force` را اجرا کند (در entrypoint خودکار است).
+
+## ۳) وب مشترک کد ۵ رقمی (مثلاً bale.cyou)
+
+```bash
+mkdir -p deploy/instances/bale.cyou
+cp deploy/instances/_template.pickup/.env.example deploy/instances/bale.cyou/.env
+cp deploy/instances/_template.pickup/docker-compose.yml deploy/instances/bale.cyou/
+# ویرایش .env — APP_URL=https://bale.cyou ، DB_* مشترک
+
+cd deploy/instances/bale.cyou
+docker compose \
+  -f ../../../docker-compose.yml \
+  -f ../../../deploy/docker-compose.no-local-db.yml \
+  -f ../../../deploy/docker-compose.pickup-only.yml \
+  -f ../../../docker-compose.traefik.yml \
+  -f docker-compose.yml \
+  --env-file .env up -d --build
+```
+
+در `.env` هر **ربات** مقدار `IRAN_SERVICE_SHARE_URL` / `services.iran_share` را روی `https://bale.cyou` بگذارید (همان دامنهٔ pickup).
+
+## ۴) ساخت نمونهٔ ربات (مثلاً x.com)
 
 ```bash
 chmod +x deploy/bin/new-instance.sh
@@ -46,6 +83,7 @@ chmod +x deploy/bin/new-instance.sh
 cd deploy/instances/x.com
 docker compose \
   -f ../../../docker-compose.yml \
+  -f ../../../deploy/docker-compose.no-local-db.yml \
   -f ../../../docker-compose.traefik.yml \
   -f docker-compose.yml \
   --env-file .env \

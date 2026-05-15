@@ -9,6 +9,7 @@ class ServiceShare extends Model
     protected $fillable = [
         'user_id',
         'order_id',
+        'source_instance_id',
         'code',
         'title',
         'payload',

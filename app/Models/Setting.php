@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToInstance;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Setting extends Model
 {
-    use HasFactory;
+    use BelongsToInstance, HasFactory;
 
     /**
      * The attributes that are mass assignable.
@@ -15,6 +16,7 @@ class Setting extends Model
      * @var array<int, string>
      */
     protected $fillable = [
+        'instance_id',
         'key',
         'value',
         'test_account_enabled',

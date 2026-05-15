@@ -51,10 +51,9 @@ Route::get('/shop', function () {
     ]);
 })->name('home');
 
-// مسیر اصلی برای دریافت کد ۵ رقمی: bale.cyou
-Route::get('/', [ServiceShareController::class, 'lookup'])->name('service-share.lookup');
-Route::post('/', [ServiceShareController::class, 'resolve'])->middleware('throttle:30,1')->name('service-share.resolve');
-
+Route::get('/', function () {
+    return redirect()->route('home');
+});
 
 Route::middleware(['auth'])->group(function () {
 
@@ -168,20 +167,6 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/payment/xmplus/{order}', [OrderController::class, 'processXmplusGatewayPayment'])->name('payment.xmplus.process');
     Route::post('/payment/xmplus/{order}/finalize', [OrderController::class, 'finalizeXmplusWebPayment'])->name('payment.xmplus.finalize');
     Route::post('/service-share', [ServiceShareController::class, 'store'])->name('service-share.store');
-});
-
-// مسیر قدیمی برای سازگاری: bale.cyou/c
-Route::get('/c', function (\Illuminate\Http\Request $request) {
-    return redirect()->route('service-share.lookup', array_filter([
-        'code' => $request->query('code'),
-    ]), 301);
-});
-Route::post('/c', [ServiceShareController::class, 'resolve'])->middleware('throttle:30,1');
-
-Route::get('/iran-access', function (\Illuminate\Http\Request $request) {
-    return redirect()->route('service-share.lookup', array_filter([
-        'code' => $request->query('code'),
-    ]), 301);
 });
 
 Route::post('/webhooks/nowpayments', [NowPaymentsWebhookController::class, 'handle'])->name('webhooks.nowpayments');

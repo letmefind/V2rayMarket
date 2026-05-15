@@ -2,13 +2,16 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToInstance;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 class Inbound extends Model
 {
+    use BelongsToInstance;
 
     protected $fillable = [
+        'instance_id',
         'inbound_data',
         'title',
     ];

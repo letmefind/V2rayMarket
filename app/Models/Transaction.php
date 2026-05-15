@@ -2,17 +2,21 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToInstance;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Transaction extends Model
 {
+    use BelongsToInstance;
+
     /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
      */
     protected $fillable = [
+        'instance_id',
         'user_id',
         'order_id',
         'amount',

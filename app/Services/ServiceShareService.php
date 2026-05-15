@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Order;
 use App\Models\ServiceShare;
+use App\Support\InstanceId;
 use Illuminate\Auth\Access\AuthorizationException;
 use RuntimeException;
 
@@ -40,6 +41,7 @@ final class ServiceShareService
             return ServiceShare::create([
                 'user_id' => $userId,
                 'order_id' => $orderId,
+                'source_instance_id' => InstanceId::current(),
                 'code' => self::generateUniqueCode(),
                 'title' => $title,
                 'payload' => $payload,

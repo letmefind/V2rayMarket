@@ -2,12 +2,17 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToInstance;
+use App\Support\InstanceId;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 
 class BotMessage extends Model
 {
+    use BelongsToInstance;
+
     protected $fillable = [
+        'instance_id',
         'key',
         'category',
         'title',
@@ -30,7 +35,7 @@ class BotMessage extends Model
      */
     public static function get(string $key, string $default = '', array $variables = []): string
     {
-        $cacheKey = 'bot_message_' . $key;
+        $cacheKey = 'bot_message_'.InstanceId::current().'_'.$key;
         
         $message = Cache::remember($cacheKey, now()->addHours(24), function () use ($key, $default) {
             $botMessage = self::where('key', $key)
@@ -56,9 +61,10 @@ class BotMessage extends Model
     public static function clearCache(): void
     {
         // پاک کردن کش‌های مربوط به bot_message
-        $keys = self::pluck('key');
+        $instanceId = InstanceId::current();
+        $keys = self::query()->forInstance($instanceId)->pluck('key');
         foreach ($keys as $key) {
-            Cache::forget('bot_message_' . $key);
+            Cache::forget('bot_message_'.$instanceId.'_'.$key);
         }
     }
 

@@ -1,0 +1,12 @@
+# فقط وب دریافت کد ۵ رقمی — بدون queue/scheduler/db محلی
+services:
+  queue: !reset null
+  scheduler: !reset null
+  mysql: !reset null
+  redis: !reset null
+
+  web:
+    depends_on: !reset null
+    environment:
+      APP_SHARE_PICKUP_ONLY: "true"
+      RUN_MIGRATIONS: "false"

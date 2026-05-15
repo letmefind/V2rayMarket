@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToInstance;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
+
 class Order extends Model
 {
+    use BelongsToInstance;
 
     protected $fillable = [
         'user_id', 'plan_id', 'status', 'expires_at',
@@ -21,7 +24,7 @@ class Order extends Model
         'service_label',
         'panel_client_id',
         'xmplus_inv_id',
-
+        'instance_id',
     ];
 
     protected $casts = [

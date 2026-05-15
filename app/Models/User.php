@@ -6,6 +6,7 @@ use Illuminate\Notifications\Notifiable;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use App\Models\Concerns\BelongsToInstance;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
 use Modules\Ticketing\Models\Ticket;
@@ -13,7 +14,7 @@ use Modules\Ticketing\Models\Ticket;
 class User extends Authenticatable implements FilamentUser
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+    use BelongsToInstance, HasFactory, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -33,6 +34,7 @@ class User extends Authenticatable implements FilamentUser
         'referral_code',
         'xmplus_client_email',
         'xmplus_client_password',
+        'instance_id',
     ];
 
     /**

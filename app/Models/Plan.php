@@ -2,12 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToInstance;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Plan extends Model
 {
-    use HasFactory;
+    use BelongsToInstance, HasFactory;
 
     protected $fillable = [
         'name',
@@ -20,6 +21,7 @@ class Plan extends Model
         'duration_days',
         'xmplus_package_id',
         'xmplus_billing',
+        'instance_id',
     ];
 
     protected $casts = [

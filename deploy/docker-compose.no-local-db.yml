@@ -1,0 +1,37 @@
+# برای نمونه‌های ربات وقتی MySQL/Redis مشترک روی vpnmarket_shared_data است.
+services:
+  mysql: !reset null
+  redis: !reset null
+
+  web:
+    depends_on: !reset null
+    networks:
+      - internal
+      - proxy
+      - shared_data
+    environment:
+      DB_HOST: ${SHARED_DB_HOST:-mysql}
+      REDIS_HOST: ${SHARED_REDIS_HOST:-redis}
+
+  queue:
+    depends_on: !reset null
+    networks:
+      - internal
+      - shared_data
+    environment:
+      DB_HOST: ${SHARED_DB_HOST:-mysql}
+      REDIS_HOST: ${SHARED_REDIS_HOST:-redis}
+
+  scheduler:
+    depends_on: !reset null
+    networks:
+      - internal
+      - shared_data
+    environment:
+      DB_HOST: ${SHARED_DB_HOST:-mysql}
+      REDIS_HOST: ${SHARED_REDIS_HOST:-redis}
+
+networks:
+  shared_data:
+    external: true
+    name: ${SHARED_DATA_NETWORK:-vpnmarket_shared_data}

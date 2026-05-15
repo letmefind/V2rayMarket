@@ -1,0 +1,43 @@
+# دیتابیس و Redis مشترک — چند نمونهٔ ربات به DB_HOST=mysql وصل می‌شوند.
+# MySQL/Redis فقط یک‌بار بالا می‌آید؛ هر ربات mysql/redis خودش را ندارد.
+#
+# مثال:
+#   docker compose -f docker-compose.shared-db.yml up -d
+#   cd deploy/instances/x.com && docker compose ... (بدون سرویس mysql در override)
+
+name: vpnmarket_shared
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
+    volumes:
+      - shared_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - shared_data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - shared_redis_data:/data
+    networks:
+      - shared_data
+
+volumes:
+  shared_mysql_data:
+  shared_redis_data:
+
+networks:
+  shared_data:
+    name: vpnmarket_shared_data
+    driver: bridge

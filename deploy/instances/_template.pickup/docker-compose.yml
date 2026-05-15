@@ -1,0 +1,10 @@
+services:
+  web:
+    build:
+      context: ../../../
+      dockerfile: Dockerfile
+
+networks:
+  shared_data:
+    external: true
+    name: ${SHARED_DATA_NETWORK:-vpnmarket_shared_data}
