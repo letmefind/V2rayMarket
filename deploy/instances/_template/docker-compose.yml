@@ -1,18 +1,5 @@
-services:
-  web:
-    env_file: !reset null
-    volumes: !reset
-      - app_storage:/var/www/html/storage
-      - ${ENV_FILE}:/run/instance.env:ro
-
-  queue:
-    env_file: !reset null
-    volumes: !reset
-      - app_storage:/var/www/html/storage
-      - ${ENV_FILE}:/run/instance.env:ro
-
-  scheduler:
-    env_file: !reset null
-    volumes: !reset
-      - app_storage:/var/www/html/storage
-      - ${ENV_FILE}:/run/instance.env:ro
+# فقط شبکهٔ دادهٔ مشترک؛ bindهای .env در docker-compose.mount.yml (آخرین فایل merge) اضافه می‌شوند.
+networks:
+  shared_data:
+    external: true
+    name: ${SHARED_DATA_NETWORK:-vpnmarket_shared_data}

@@ -1,10 +1,16 @@
-# فقط env_file داکر را حذف می‌کند — mount در deploy/instances/<domain>/docker-compose.yml است
+# حذف env_file داکر + حذف bind پایهٔ .env؛ mount نمونه در docker-compose.mount.yml (append در آخر merge)
 services:
   web:
     env_file: !reset null
+    volumes: !reset
+      - app_storage:/var/www/html/storage
 
   queue:
     env_file: !reset null
+    volumes: !reset
+      - app_storage:/var/www/html/storage
 
   scheduler:
     env_file: !reset null
+    volumes: !reset
+      - app_storage:/var/www/html/storage

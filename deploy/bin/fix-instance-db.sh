@@ -157,7 +157,7 @@ fi
 
 ensure_env_mount_vars "$DEST/.env"
 ENV_ABS="$(cd "$DEST" && pwd)/.env"
-patch_instance_compose_env_mount "$DEST/docker-compose.yml" "$ENV_ABS" || err "patch docker-compose.yml ناموفق"
+write_instance_mount_fragment "$DEST" "$ENV_ABS" "$INSTANCE_TYPE" || err "نوشتن docker-compose.mount.yml ناموفق"
 
 echo "→ .env:"
 grep -E '^(APP_KEY|DB_|APP_DOMAIN|COMPOSE_PROJECT_NAME|ENV_FILE)=' "$DEST/.env"
@@ -189,6 +189,7 @@ fi
 COMPOSE_FILES+=(
   -f "$ROOT/docker-compose.traefik.yml"
   -f "$DEST/docker-compose.yml"
+  -f "$DEST/docker-compose.mount.yml"
 )
 
 info "recreate container ($CONTAINER)"
@@ -210,7 +211,7 @@ docker exec "$CONTAINER" rm -f /var/www/html/bootstrap/cache/config.php 2>/dev/n
 docker exec "$CONTAINER" php artisan config:clear --no-interaction 2>/dev/null || true
 
 info "mount:"
-docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null | grep -E 'instance|\.env' || true
+docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Type}} {{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true
 
 info "داخل کانتینر:"
 CTR_STATE="$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo missing)"

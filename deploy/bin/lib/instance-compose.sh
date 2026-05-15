@@ -1,24 +1,40 @@
 # shellcheck shell=bash
-# مشترک: mount مطلق .env نمونه در docker-compose (بدون interpolate متغیر در bind path)
-patch_instance_compose_env_mount() {
-  local compose_file="$1"
+# نمونهٔ چنددامنه: bind مطلق .env به /run/instance.env (append واقعی؛ بدون اتکا به !reset در همان فایل)
+
+write_instance_mount_fragment() {
+  local dest_dir="$1"
   local env_abs="$2"
+  local mode="${3:-pickup}"
 
-  [ -f "$env_abs" ] || { echo "patch_instance_compose_env_mount: .env نیست: $env_abs" >&2; return 1; }
-  [ -f "$compose_file" ] || { echo "patch_instance_compose_env_mount: compose نیست: $compose_file" >&2; return 1; }
-
-  # با «اسلش بعد از -» در الگوی /.../ delimiter awk زود تمام می‌شود — از regex رشته‌ای استفاده می‌کنیم
-  awk -v env="$env_abs" '
-    index($0, ":/run/instance.env:ro") > 0 && match($0, "^[[:space:]]+-[[:space:]]+") {
-      prefix = substr($0, 1, RLENGTH)
-      print prefix env ":/run/instance.env:ro"
-      next
-    }
-    { print }
-  ' "$compose_file" >"${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
-
-  if ! grep -qF "${env_abs}:/run/instance.env:ro" "$compose_file"; then
-    echo "patch_instance_compose_env_mount: mount در $compose_file پیدا نشد" >&2
+  [ -f "$env_abs" ] || {
+    echo "write_instance_mount_fragment: .env نیست: $env_abs" >&2
     return 1
+  }
+  [ -d "$dest_dir" ] || {
+    echo "write_instance_mount_fragment: پوشه نیست: $dest_dir" >&2
+    return 1
+  }
+
+  local frag="$dest_dir/docker-compose.mount.yml"
+  if [ "$mode" = "bot" ]; then
+    cat >"$frag" <<EOF
+services:
+  web:
+    volumes:
+      - ${env_abs}:/run/instance.env:ro
+  queue:
+    volumes:
+      - ${env_abs}:/run/instance.env:ro
+  scheduler:
+    volumes:
+      - ${env_abs}:/run/instance.env:ro
+EOF
+  else
+    cat >"$frag" <<EOF
+services:
+  web:
+    volumes:
+      - ${env_abs}:/run/instance.env:ro
+EOF
   fi
 }

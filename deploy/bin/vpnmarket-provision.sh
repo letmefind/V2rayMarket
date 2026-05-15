@@ -174,8 +174,10 @@ compose_bot() {
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
     -f "$ROOT/deploy/docker-compose.instance-env.yml" \
     -f "$ROOT/deploy/docker-compose.build-root.yml" \
+    -f "$ROOT/deploy/docker-compose.bot-workers.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \
+    -f "$dest/docker-compose.mount.yml" \
     --env-file "$INSTANCE_ENV_FILE" \
     -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
     "$@"
@@ -201,6 +203,7 @@ compose_pickup() {
     -f "$ROOT/deploy/docker-compose.pickup-only.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \
+    -f "$dest/docker-compose.mount.yml" \
     --env-file "$INSTANCE_ENV_FILE" \
     -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
     "$@"
@@ -568,7 +571,7 @@ provision_pickup_site() {
   fi
   cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
   repair_instance_db_env "$dest" "$domain" || return 1
-  patch_instance_compose_env_mount "$dest/docker-compose.yml" "$(instance_env_file "$dest")" || return 1
+  write_instance_mount_fragment "$dest" "$(instance_env_file "$dest")" pickup || return 1
   sync_mysql_app_user || warn "همگام‌سازی کاربر MySQL ناموفق — cluster.env و MySQL را چک کنید"
 
   info "اجرای وب pickup ($domain) ..."
@@ -607,7 +610,7 @@ provision_bot_instance() {
   cp "$ROOT/deploy/instances/_template/docker-compose.yml" "$dest/docker-compose.yml"
   write_bot_env "$dest" "$domain" "$project" "$instance_id" "$app_name" "$app_key"
   repair_instance_db_env "$dest" "$domain" || return 1
-  patch_instance_compose_env_mount "$dest/docker-compose.yml" "$(instance_env_file "$dest")" || return 1
+  write_instance_mount_fragment "$dest" "$(instance_env_file "$dest")" bot || return 1
   grep -qE '^APP_KEY=base64:.+' "$dest/.env" || { err "APP_KEY در $dest/.env نیست"; return 1; }
 
   local token admin_email admin_pass admin_chat

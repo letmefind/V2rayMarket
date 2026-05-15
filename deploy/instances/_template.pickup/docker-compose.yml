@@ -1,11 +1,4 @@
-# ENV_FILE / INSTANCE_ENV_FILE = مسیر مطلق .env نمونه (در خود .env یا export قبل از compose)
-services:
-  web:
-    env_file: !reset null
-    volumes: !reset
-      - app_storage:/var/www/html/storage
-      - ${ENV_FILE}:/run/instance.env:ro
-
+# فقط شبکهٔ دادهٔ مشترک؛ bindهای .env در docker-compose.mount.yml (آخرین فایل merge) اضافه می‌شوند.
 networks:
   shared_data:
     external: true
