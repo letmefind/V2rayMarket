@@ -32,7 +32,8 @@ services:
       - internal
 
   queue:
-    image: ${APP_IMAGE:-vpnmarket/app:latest}
+    image: ${APP_IMAGE:-vpnmarket-local:latest}
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile
