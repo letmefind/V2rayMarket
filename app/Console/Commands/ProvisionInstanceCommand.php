@@ -5,7 +5,6 @@ namespace App\Console\Commands;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class ProvisionInstanceCommand extends Command
@@ -47,7 +46,8 @@ class ProvisionInstanceCommand extends Command
             if ($user) {
                 $user->update([
                     'name' => (string) $this->option('admin-name'),
-                    'password' => Hash::make($password),
+                    // User::$casts['password'] === 'hashed' — خودش هش می‌کند؛ Hash::make = دوباره‌هش = ورود خراب
+                    'password' => $password,
                     'is_admin' => true,
                 ]);
                 $this->info("Admin user updated: {$email}");
@@ -55,7 +55,7 @@ class ProvisionInstanceCommand extends Command
                 User::create([
                     'name' => (string) $this->option('admin-name'),
                     'email' => $email,
-                    'password' => Hash::make($password),
+                    'password' => $password,
                     'is_admin' => true,
                     'referral_code' => Str::random(8),
                 ]);
