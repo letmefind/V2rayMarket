@@ -79,7 +79,7 @@ chmod +x deploy/bin/fix-instance-db.sh
 ./deploy/bin/fix-instance-db.sh bale.cyou pickup
 ```
 
-این اسکریپت `.env`، **`docker-compose.mount.yml`** (کپی `.env` به `/run/instance.env` داخل کانتینر)، `--project-directory` و `-p` را درست می‌کند؛ بدون mount، entrypoint با پیام `FATAL: no /run/instance.env and no .env` خارج می‌شود و کانتینر **مدام Restarting** می‌ماند.
+این اسکریپت `.env`، **`docker-compose.mount.yml`** (کپی `.env` به `/run/instance.env` داخل کانتینر)، `--project-directory` و `-p` را درست می‌کند؛ بدون mount، entrypoint با پیام `FATAL: no /run/instance.env and no .env` خارج می‌شود و کانتینر **مدام Restarting** می‌ماند. همچنین **`docker-compose.web-rebuild.yml`** را به زنجیره اضافه می‌کند تا `up --build` واقعاً از `Dockerfile` بیلد بگیرد (`build-root` به‌تنهایی بیلد را حذف می‌کند).
 
 **دستی:** اگر بدون اسکریپت بالا می‌آورید، حتماً یک‌بار mount بسازید و در دستور `compose` بگذارید:
 
@@ -97,6 +97,7 @@ docker compose --project-directory "$(pwd)" \
   -f deploy/docker-compose.no-local-db.yml \
   -f deploy/docker-compose.instance-env.yml \
   -f deploy/docker-compose.build-root.yml \
+  -f deploy/docker-compose.web-rebuild.yml \
   -f deploy/docker-compose.pickup-only.yml \
   -f docker-compose.traefik.yml \
   -f deploy/instances/bale.cyou/docker-compose.yml \
@@ -145,6 +146,7 @@ docker compose --project-directory "$(pwd)" \
   -f deploy/docker-compose.no-local-db.yml \
   -f deploy/docker-compose.instance-env.yml \
   -f deploy/docker-compose.build-root.yml \
+  -f deploy/docker-compose.web-rebuild.yml \
   -f deploy/docker-compose.bot-workers.yml \
   -f docker-compose.traefik.yml \
   -f deploy/instances/x.com/docker-compose.yml \

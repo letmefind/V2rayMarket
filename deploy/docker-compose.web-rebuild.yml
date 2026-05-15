@@ -1,0 +1,8 @@
+# بعد از docker-compose.build-root.yml بگذارید.
+# build-root برای web مقدار build را حذف می‌کند (فقط image)؛ بدون این فایل
+# «docker compose build» یا «up --build» اپ را از Dockerfile به‌روز نمی‌کند و کانتینر همیشه ایمیج قدیمی است.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile

@@ -175,6 +175,7 @@ compose_bot() {
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
     -f "$ROOT/deploy/docker-compose.instance-env.yml" \
     -f "$ROOT/deploy/docker-compose.build-root.yml" \
+    -f "$ROOT/deploy/docker-compose.web-rebuild.yml" \
     -f "$ROOT/deploy/docker-compose.bot-workers.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \
@@ -201,6 +202,7 @@ compose_pickup() {
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
     -f "$ROOT/deploy/docker-compose.instance-env.yml" \
     -f "$ROOT/deploy/docker-compose.build-root.yml" \
+    -f "$ROOT/deploy/docker-compose.web-rebuild.yml" \
     -f "$ROOT/deploy/docker-compose.pickup-only.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \

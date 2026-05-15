@@ -182,6 +182,7 @@ COMPOSE_FILES=(
   -f "$ROOT/deploy/docker-compose.no-local-db.yml"
   -f "$ROOT/deploy/docker-compose.instance-env.yml"
   -f "$ROOT/deploy/docker-compose.build-root.yml"
+  -f "$ROOT/deploy/docker-compose.web-rebuild.yml"
 )
 if [ "$INSTANCE_TYPE" = "pickup" ]; then
   COMPOSE_FILES+=(-f "$ROOT/deploy/docker-compose.pickup-only.yml")
@@ -194,12 +195,12 @@ COMPOSE_FILES+=(
   -f "$DEST/docker-compose.mount.yml"
 )
 
-info "recreate container ($CONTAINER)"
+info "build + recreate $CONTAINER (web از Dockerfile ریشهٔ مخزن)"
 docker compose --project-directory "$ROOT" \
   "${COMPOSE_FILES[@]}" \
   --env-file "$INSTANCE_ENV_FILE" \
   -p "$PROJECT" \
-  up -d --force-recreate
+  up -d --build --force-recreate
 
 sleep 12
 for i in 1 2 3 4 5 6 7 8 9 10; do
