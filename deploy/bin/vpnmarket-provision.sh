@@ -100,9 +100,12 @@ EOF
   chmod 600 "$CLUSTER_ENV"
 }
 
+domain_slug() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/__*/_/g' | sed 's/^_//;s/_$//'
+}
+
 instance_project_name() {
-  local domain="$1"
-  echo "vpnmarket_${domain//./_}"
+  echo "vpnmarket_$(domain_slug "$1")"
 }
 
 instance_env_file() {
@@ -260,11 +263,35 @@ require_db_credentials() {
   fi
 }
 
+ensure_instance_compose_vars() {
+  local dest="$1" domain="$2"
+  local envf="${dest}/.env" project key val
+  project="$(instance_project_name "$domain")"
+  [ -f "$envf" ] || return 0
+  for key in COMPOSE_PROJECT_NAME TRAEFIK_ROUTER_NAME; do
+    val="$project"
+    if grep -q "^${key}=" "$envf" 2>/dev/null; then
+      sed -i "s|^${key}=.*|${key}=${val}|" "$envf"
+    else
+      echo "${key}=${val}" >>"$envf"
+    fi
+  done
+  if grep -q '^APP_DOMAIN=' "$envf" 2>/dev/null; then
+    sed -i "s|^APP_DOMAIN=.*|APP_DOMAIN=${domain}|" "$envf"
+  else
+    echo "APP_DOMAIN=${domain}" >>"$envf"
+  fi
+  if ! grep -q '^APP_IMAGE=' "$envf" 2>/dev/null; then
+    echo "APP_IMAGE=vpnmarket/app:latest" >>"$envf"
+  fi
+}
+
 repair_instance_db_env() {
-  local dest="$1"
+  local dest="$1" domain="${2:-}"
   local envf="${dest}/.env"
   require_db_credentials || return 1
   [ -f "$envf" ] || return 0
+  [ -n "$domain" ] || domain="$(basename "$dest")"
 
   warn "همگام‌سازی DB_* در $envf با cluster.env"
   grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD)=' "$envf" >"${envf}.tmp"
@@ -279,6 +306,7 @@ repair_instance_db_env() {
   } >>"${envf}.tmp"
   mv "${envf}.tmp" "$envf"
   chmod 640 "$envf"
+  ensure_instance_compose_vars "$dest" "$domain"
   ok "DB_USERNAME=${DB_USERNAME} DB_DATABASE=${DB_DATABASE}"
 }
 
@@ -507,7 +535,7 @@ provision_pickup_site() {
     write_pickup_env "$dest" "$domain" "$project" "$app_key"
   fi
   cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
-  repair_instance_db_env "$dest" || return 1
+  repair_instance_db_env "$dest" "$domain" || return 1
   sync_mysql_app_user || warn "همگام‌سازی کاربر MySQL ناموفق — cluster.env و MySQL را چک کنید"
 
   info "اجرای وب pickup ($domain) ..."
@@ -544,7 +572,7 @@ provision_bot_instance() {
   mkdir -p "$dest"
   cp "$ROOT/deploy/instances/_template/docker-compose.yml" "$dest/docker-compose.yml"
   write_bot_env "$dest" "$domain" "$project" "$instance_id" "$app_name" "$app_key"
-  repair_instance_db_env "$dest" || return 1
+  repair_instance_db_env "$dest" "$domain" || return 1
 
   local token admin_email admin_pass admin_chat
   token="$(prompt_secret "توکن ربات تلگرام (BotFather)" "")"
@@ -596,15 +624,19 @@ auto_install() {
   local pickup="${PICKUP_DOMAIN:-bale.cyou}"
   if [ -f "$INSTANCES_DIR/$pickup/.env" ]; then
     warn "pickup موجود — تعمیر DB و recreate"
-    repair_instance_db_env "$INSTANCES_DIR/$pickup" || return 1
+    repair_instance_db_env "$INSTANCES_DIR/$pickup" "$pickup" || return 1
     sync_mysql_app_user || true
     export INSTANCE_ENV_FILE="$(cd "$INSTANCES_DIR/$pickup" && pwd)/.env"
     set -a && source "$INSTANCE_ENV_FILE" && set +a
-    ensure_app_image "$INSTANCE_ENV_FILE"
     compose_pickup "$INSTANCES_DIR/$pickup" up -d --force-recreate
-    local c="vpnmarket_${pickup//./_}-web-1"
+    local c
+    c="$(instance_project_name "$pickup")-web-1"
+    if ! wait_for_container_ready "$c" 90; then
+      err "pickup بالا نیامد — ببینید: docker logs $c"
+      return 1
+    fi
     clear_instance_config_cache "$c"
-    run_instance_migrate "$INSTANCES_DIR/$pickup" "$c" || true
+    run_instance_migrate "$INSTANCES_DIR/$pickup" "$c" || warn "migrate pickup — بعداً: docker exec $c php artisan migrate --force"
   else
     provision_pickup_site "$pickup"
   fi

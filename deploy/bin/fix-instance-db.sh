@@ -6,7 +6,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CLUSTER="$ROOT/deploy/.provision/cluster.env"
 DOMAIN="${1:-bale.cyou}"
 DEST="$ROOT/deploy/instances/$DOMAIN"
-PROJECT="vpnmarket_${DOMAIN//./_}"
+# shellcheck source=deploy/bin/vpnmarket-provision.sh
+domain_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/__*/_/g' | sed 's/^_//;s/_$//'; }
+PROJECT="vpnmarket_$(domain_slug "$DOMAIN")"
 CONTAINER="${PROJECT}-web-1"
 
 err() { echo "✗ $*" >&2; exit 1; }
