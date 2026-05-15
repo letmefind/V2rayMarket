@@ -410,10 +410,14 @@ EOSQL
 
 write_bot_env() {
   local dest="$1" domain="$2" project="$3" instance_id="$4" app_name="$5" app_key="$6"
+  local env_abs
   domain="$(normalize_domain "$domain")"
   require_db_credentials || return 1
+  env_abs="$(cd "$dest" && pwd)/.env"
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
+ENV_FILE=${env_abs}
+INSTANCE_ENV_FILE=${env_abs}
 APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
 
 APP_INSTANCE_ID=${instance_id}
@@ -460,10 +464,14 @@ EOF
 
 write_pickup_env() {
   local dest="$1" domain="$2" project="$3" app_key="$4"
+  local env_abs
   domain="$(normalize_domain "$domain")"
   require_db_credentials || return 1
+  env_abs="$(cd "$dest" && pwd)/.env"
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
+ENV_FILE=${env_abs}
+INSTANCE_ENV_FILE=${env_abs}
 APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
 
 APP_INSTANCE_ID=pickup

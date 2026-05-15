@@ -46,6 +46,18 @@ pick_app_image() {
 
 APP_IMAGE="$(pick_app_image)"
 
+ensure_env_mount_vars() {
+  local envf="$1"
+  local abs
+  abs="$(cd "$(dirname "$envf")" && pwd)/$(basename "$envf")"
+  grep -v -E '^(ENV_FILE|INSTANCE_ENV_FILE)=' "$envf" >"${envf}.tmp"
+  mv "${envf}.tmp" "$envf"
+  {
+    echo "ENV_FILE=${abs}"
+    echo "INSTANCE_ENV_FILE=${abs}"
+  } >>"$envf"
+}
+
 if [ "$INSTANCE_TYPE" = "bot" ]; then
   cp "$ROOT/deploy/instances/_template/docker-compose.yml" "$DEST/docker-compose.yml"
 else
@@ -141,8 +153,10 @@ else
   chmod 640 "$DEST/.env"
 fi
 
+ensure_env_mount_vars "$DEST/.env"
+
 echo "→ .env:"
-grep -E '^(APP_KEY|DB_|APP_DOMAIN|COMPOSE_PROJECT_NAME)=' "$DEST/.env"
+grep -E '^(APP_KEY|DB_|APP_DOMAIN|COMPOSE_PROJECT_NAME|ENV_FILE)=' "$DEST/.env"
 
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx vpnmarket_shared_mysql; then
   info "همگام‌سازی کاربر MySQL"
@@ -195,7 +209,12 @@ info "mount:"
 docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null | grep -E 'instance|\.env' || true
 
 info "داخل کانتینر:"
-docker exec "$CONTAINER" head -3 /run/instance.env 2>/dev/null || err "mount /run/instance.env نیست — docker logs $CONTAINER"
+if ! docker exec "$CONTAINER" test -f /run/instance.env 2>/dev/null; then
+  echo "  ENV_FILE در .env: $(grep -E '^ENV_FILE=' "$DEST/.env" || echo '(خالی)')"
+  docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true
+  err "mount /run/instance.env نیست — ENV_FILE باید مسیر مطلق deploy/instances/$DOMAIN/.env باشد؛ docker logs $CONTAINER"
+fi
+docker exec "$CONTAINER" head -3 /run/instance.env
 docker exec "$CONTAINER" grep -E '^(DB_USERNAME|DB_DATABASE)=' /var/www/html/.env
 
 info "migrate"

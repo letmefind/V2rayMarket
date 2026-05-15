@@ -3,16 +3,16 @@ services:
     env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ./.env:/run/instance.env:ro
+      - ${ENV_FILE:-${INSTANCE_ENV_FILE}}:/run/instance.env:ro
 
   queue:
     env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ./.env:/run/instance.env:ro
+      - ${ENV_FILE:-${INSTANCE_ENV_FILE}}:/run/instance.env:ro
 
   scheduler:
     env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ./.env:/run/instance.env:ro
+      - ${ENV_FILE:-${INSTANCE_ENV_FILE}}:/run/instance.env:ro
