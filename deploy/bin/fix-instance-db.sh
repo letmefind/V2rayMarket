@@ -1,83 +1,153 @@
 #!/usr/bin/env bash
-# اصلاح .env نمونه + image + Traefik vars + recreate + migrate
+# ساخت یا تعمیر .env نمونه + recreate + migrate
+# Usage: fix-instance-db.sh <domain> [pickup|bot]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CLUSTER="$ROOT/deploy/.provision/cluster.env"
 DOMAIN="${1:-bale.cyou}"
+INSTANCE_TYPE="${2:-pickup}"
 DEST="$ROOT/deploy/instances/$DOMAIN"
-# shellcheck source=deploy/bin/vpnmarket-provision.sh
-domain_slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/__*/_/g' | sed 's/^_//;s/_$//'; }
-PROJECT="vpnmarket_$(domain_slug "$DOMAIN")"
-CONTAINER="${PROJECT}-web-1"
+
+domain_slug() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/__*/_/g' | sed 's/^_//;s/_$//'
+}
+
+normalize_domain() {
+  echo "$1" | tr '[:upper:]' '[:lower:]'
+}
 
 err() { echo "✗ $*" >&2; exit 1; }
+info() { echo "→ $*"; }
 
-[ -f "$CLUSTER" ] || err "نیست: $CLUSTER"
-if [ -d "$DEST/.env" ]; then
-  err "$DEST/.env یک پوشه است! rm -rf $DEST/.env"
-fi
-[ -f "$DEST/.env" ] || err "نیست: $DEST/.env"
-
+[ -f "$CLUSTER" ] || err "نیست: $CLUSTER — اول ./deploy/install.sh یا گزینه ۴ provision"
 # shellcheck disable=SC1090
 source "$CLUSTER"
 [ -n "${DB_PASSWORD:-}" ] || err "DB_PASSWORD در cluster.env خالی است"
+
+if [ -d "$DEST/.env" ]; then
+  err "$DEST/.env یک پوشه است — حذف: rm -rf $DEST/.env"
+fi
+
+mkdir -p "$DEST"
+PROJECT="vpnmarket_$(domain_slug "$DOMAIN")"
+DOMAIN_LC="$(normalize_domain "$DOMAIN")"
+CONTAINER="${PROJECT}-web-1"
 
 pick_app_image() {
   if docker image inspect vpnmarket/app:latest >/dev/null 2>&1; then
     echo "vpnmarket/app:latest"
   elif docker image inspect vpnmarket-local:latest >/dev/null 2>&1; then
     echo "vpnmarket-local:latest"
-  elif [ -n "${APP_IMAGE:-}" ] && docker image inspect "${APP_IMAGE}" >/dev/null 2>&1; then
-    echo "$APP_IMAGE"
   else
-    err "هیچ image محلی نیست — اول: docker build -t vpnmarket/app:latest -f Dockerfile ."
-  fi
-}
-
-set_env_var() {
-  local file="$1" key="$2" val="$3"
-  if grep -q "^${key}=" "$file" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${val}|" "$file"
-  else
-    echo "${key}=${val}" >>"$file"
+    err "image نیست — docker build -t vpnmarket/app:latest -f Dockerfile ."
   fi
 }
 
 APP_IMAGE="$(pick_app_image)"
 
-echo "→ قبل:"
-grep -E '^(DB_|APP_IMAGE|APP_DOMAIN|TRAEFIK_ROUTER_NAME)=' "$DEST/.env" 2>/dev/null || true
-
-echo "→ همگام‌سازی DB و متغیرهای compose"
-grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD|APP_IMAGE|APP_DOMAIN|TRAEFIK_ROUTER_NAME|COMPOSE_PROJECT_NAME)=' "$DEST/.env" >"${DEST}/.env.tmp"
-{
-  echo "COMPOSE_PROJECT_NAME=${PROJECT}"
-  echo "APP_IMAGE=${APP_IMAGE}"
-  echo "APP_DOMAIN=${DOMAIN}"
-  echo "TRAEFIK_ROUTER_NAME=${PROJECT}"
-  echo 'DB_CONNECTION=mysql'
-  echo 'DB_HOST=mysql'
-  echo 'DB_PORT=3306'
-  printf 'DB_DATABASE=%s\n' "$DB_DATABASE"
-  printf 'DB_USERNAME=%s\n' "$DB_USERNAME"
-  printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
-  printf 'MYSQL_ROOT_PASSWORD=%s\n' "$MYSQL_ROOT_PASSWORD"
-} >>"${DEST}/.env.tmp"
-mv "${DEST}/.env.tmp" "$DEST/.env"
-chmod 640 "$DEST/.env"
-
-echo "→ بعد:"
-grep -E '^(DB_|APP_IMAGE|APP_DOMAIN|TRAEFIK_ROUTER_NAME)=' "$DEST/.env"
-
-echo "→ MySQL user ${DB_USERNAME}"
-docker exec vpnmarket_shared_mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -e \
-  "ALTER USER '${DB_USERNAME}'@'%' IDENTIFIED BY '${DB_PASSWORD}'; FLUSH PRIVILEGES;"
-
-if grep -q '^APP_SHARE_PICKUP_ONLY=true' "$DEST/.env" 2>/dev/null; then
-  cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$DEST/docker-compose.yml"
-else
+if [ "$INSTANCE_TYPE" = "bot" ]; then
   cp "$ROOT/deploy/instances/_template/docker-compose.yml" "$DEST/docker-compose.yml"
+else
+  cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$DEST/docker-compose.yml"
+  INSTANCE_TYPE=pickup
+fi
+
+if [ ! -f "$DEST/.env" ]; then
+  info "ساخت .env جدید ($INSTANCE_TYPE) برای $DOMAIN_LC"
+  APP_KEY="base64:$(openssl rand -base64 32)"
+  if [ "$INSTANCE_TYPE" = "bot" ]; then
+    cat >"$DEST/.env" <<EOF
+COMPOSE_PROJECT_NAME=${PROJECT}
+APP_IMAGE=${APP_IMAGE}
+APP_INSTANCE_ID=$(domain_slug "$DOMAIN")
+APP_NAME="VPNMarket"
+APP_ENV=production
+APP_KEY=${APP_KEY}
+APP_DEBUG=false
+APP_URL=https://${DOMAIN_LC}
+APP_SHARE_PICKUP_ONLY=false
+APP_DOMAIN=${DOMAIN_LC}
+TRAEFIK_ROUTER_NAME=${PROJECT}
+TRAEFIK_CERT_RESOLVER=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+TRAEFIK_NETWORK=${TRAEFIK_NETWORK:-proxy}
+DB_CONNECTION=mysql
+DB_HOST=mysql
+DB_PORT=3306
+DB_DATABASE=${DB_DATABASE}
+DB_USERNAME=${DB_USERNAME}
+DB_PASSWORD=${DB_PASSWORD}
+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+SHARED_DATA_NETWORK=${SHARED_DATA_NETWORK:-vpnmarket_shared_data}
+REDIS_HOST=redis
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+QUEUE_CONNECTION=redis
+CACHE_STORE=redis
+SESSION_DRIVER=database
+IRAN_SERVICE_SHARE_URL=${IRAN_SERVICE_SHARE_URL:-https://bale.cyou}
+RUN_MIGRATIONS=true
+WAIT_FOR_DB=true
+EOF
+  else
+    cat >"$DEST/.env" <<EOF
+COMPOSE_PROJECT_NAME=${PROJECT}
+APP_IMAGE=${APP_IMAGE}
+APP_INSTANCE_ID=pickup
+APP_NAME="دریافت اشتراک"
+APP_ENV=production
+APP_KEY=${APP_KEY}
+APP_DEBUG=false
+APP_URL=https://${DOMAIN_LC}
+APP_SHARE_PICKUP_ONLY=true
+APP_DOMAIN=${DOMAIN_LC}
+TRAEFIK_ROUTER_NAME=${PROJECT}
+TRAEFIK_CERT_RESOLVER=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+TRAEFIK_NETWORK=${TRAEFIK_NETWORK:-proxy}
+DB_CONNECTION=mysql
+DB_HOST=mysql
+DB_PORT=3306
+DB_DATABASE=${DB_DATABASE}
+DB_USERNAME=${DB_USERNAME}
+DB_PASSWORD=${DB_PASSWORD}
+MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+SHARED_DATA_NETWORK=${SHARED_DATA_NETWORK:-vpnmarket_shared_data}
+REDIS_HOST=redis
+QUEUE_CONNECTION=sync
+CACHE_STORE=file
+SESSION_DRIVER=file
+RUN_MIGRATIONS=true
+WAIT_FOR_DB=true
+EOF
+  fi
+  chmod 640 "$DEST/.env"
+else
+  info "تعمیر DB_* در .env موجود"
+  grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD|APP_IMAGE|APP_DOMAIN|TRAEFIK_ROUTER_NAME|COMPOSE_PROJECT_NAME)=' "$DEST/.env" >"${DEST}/.env.tmp"
+  {
+    echo "COMPOSE_PROJECT_NAME=${PROJECT}"
+    echo "APP_IMAGE=${APP_IMAGE}"
+    echo "APP_DOMAIN=${DOMAIN_LC}"
+    echo "TRAEFIK_ROUTER_NAME=${PROJECT}"
+    echo 'DB_CONNECTION=mysql'
+    echo 'DB_HOST=mysql'
+    echo 'DB_PORT=3306'
+    printf 'DB_DATABASE=%s\n' "$DB_DATABASE"
+    printf 'DB_USERNAME=%s\n' "$DB_USERNAME"
+    printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
+    printf 'MYSQL_ROOT_PASSWORD=%s\n' "$MYSQL_ROOT_PASSWORD"
+  } >>"${DEST}/.env.tmp"
+  mv "${DEST}/.env.tmp" "$DEST/.env"
+  chmod 640 "$DEST/.env"
+fi
+
+echo "→ .env:"
+grep -E '^(APP_KEY|DB_|APP_DOMAIN|COMPOSE_PROJECT_NAME)=' "$DEST/.env"
+
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx vpnmarket_shared_mysql; then
+  info "همگام‌سازی کاربر MySQL"
+  docker exec vpnmarket_shared_mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -e \
+    "ALTER USER '${DB_USERNAME}'@'%' IDENTIFIED BY '${DB_PASSWORD}'; FLUSH PRIVILEGES;" 2>/dev/null || true
 fi
 
 export INSTANCE_ENV_FILE="$(cd "$DEST" && pwd)/.env"
@@ -87,28 +157,48 @@ set -a
 source "$INSTANCE_ENV_FILE"
 set +a
 
-echo "→ recreate container (image: ${APP_IMAGE})"
+COMPOSE_FILES=(
+  -f "$ROOT/docker-compose.yml"
+  -f "$ROOT/deploy/docker-compose.no-local-db.yml"
+  -f "$ROOT/deploy/docker-compose.instance-env.yml"
+  -f "$ROOT/deploy/docker-compose.build-root.yml"
+)
+if [ "$INSTANCE_TYPE" = "pickup" ]; then
+  COMPOSE_FILES+=(-f "$ROOT/deploy/docker-compose.pickup-only.yml")
+else
+  COMPOSE_FILES+=(-f "$ROOT/deploy/docker-compose.bot-workers.yml")
+fi
+COMPOSE_FILES+=(
+  -f "$ROOT/docker-compose.traefik.yml"
+  -f "$DEST/docker-compose.yml"
+)
+
+info "recreate container ($CONTAINER)"
 docker compose --project-directory "$ROOT" \
-  -f "$ROOT/docker-compose.yml" \
-  -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
-  -f "$ROOT/deploy/docker-compose.instance-env.yml" \
-  -f "$ROOT/deploy/docker-compose.build-root.yml" \
-  -f "$ROOT/deploy/docker-compose.pickup-only.yml" \
-  -f "$ROOT/docker-compose.traefik.yml" \
-  -f "$DEST/docker-compose.yml" \
+  "${COMPOSE_FILES[@]}" \
   --env-file "$INSTANCE_ENV_FILE" \
   -p "$PROJECT" \
   up -d --force-recreate
 
-sleep 10
+sleep 12
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if docker exec "$CONTAINER" test -f /run/instance.env 2>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+
 docker exec "$CONTAINER" rm -f /var/www/html/bootstrap/cache/config.php 2>/dev/null || true
-docker exec "$CONTAINER" php artisan config:clear --no-interaction
+docker exec "$CONTAINER" php artisan config:clear --no-interaction 2>/dev/null || true
 
-echo "→ mount و .env داخل کانتینر:"
-docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' | grep -E 'instance|\.env' || true
-docker exec "$CONTAINER" grep -E '^(DB_|APP_DOMAIN)=' /var/www/html/.env
+info "mount:"
+docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null | grep -E 'instance|\.env' || true
 
-echo "→ migrate"
+info "داخل کانتینر:"
+docker exec "$CONTAINER" head -3 /run/instance.env 2>/dev/null || err "mount /run/instance.env نیست — docker logs $CONTAINER"
+docker exec "$CONTAINER" grep -E '^(DB_USERNAME|DB_DATABASE)=' /var/www/html/.env
+
+info "migrate"
 docker exec "$CONTAINER" php artisan migrate --force --no-interaction
 
-echo "✓ تمام"
+echo "✓ تمام — https://${DOMAIN_LC}/up"
