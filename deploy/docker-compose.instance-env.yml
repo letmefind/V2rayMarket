@@ -1,0 +1,19 @@
+# mount و env_file هر نمونه از مسیر INSTANCE_ENV_FILE (توسط provision یا export دستی)
+services:
+  web:
+    env_file:
+      - ${INSTANCE_ENV_FILE:?set INSTANCE_ENV_FILE to deploy/instances/<domain>/.env}
+    volumes:
+      - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
+
+  queue:
+    env_file:
+      - ${INSTANCE_ENV_FILE:?}
+    volumes:
+      - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
+
+  scheduler:
+    env_file:
+      - ${INSTANCE_ENV_FILE:?}
+    volumes:
+      - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro

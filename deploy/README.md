@@ -76,9 +76,11 @@ cp deploy/instances/_template.pickup/docker-compose.yml deploy/instances/bale.cy
 # ویرایش .env — APP_URL=https://bale.cyou ، DB_* مشترک
 
 cd deploy/instances/bale.cyou
+export INSTANCE_ENV_FILE="$(pwd)/.env"
 docker compose \
   -f ../../../docker-compose.yml \
   -f ../../../deploy/docker-compose.no-local-db.yml \
+  -f ../../../deploy/docker-compose.instance-env.yml \
   -f ../../../deploy/docker-compose.pickup-only.yml \
   -f ../../../docker-compose.traefik.yml \
   -f docker-compose.yml \
@@ -104,9 +106,11 @@ chmod +x deploy/bin/new-instance.sh
 
 ```bash
 cd deploy/instances/x.com
+export INSTANCE_ENV_FILE="$(pwd)/.env"
 docker compose \
   -f ../../../docker-compose.yml \
   -f ../../../deploy/docker-compose.no-local-db.yml \
+  -f ../../../deploy/docker-compose.instance-env.yml \
   -f ../../../docker-compose.traefik.yml \
   -f docker-compose.yml \
   --env-file .env \

@@ -105,30 +105,43 @@ instance_project_name() {
   echo "vpnmarket_${domain//./_}"
 }
 
+instance_env_file() {
+  local dest="$1"
+  local f="$dest/.env"
+  [ -f "$f" ] || { err "فایل .env نیست: $f"; return 1; }
+  (cd "$dest" && pwd)/.env
+}
+
 compose_bot() {
   local dest="$1"
   shift
+  export INSTANCE_ENV_FILE
+  INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   docker compose \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
+    -f "$ROOT/deploy/docker-compose.instance-env.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \
-    --env-file "$dest/.env" \
-    -p "$(grep '^COMPOSE_PROJECT_NAME=' "$dest/.env" | cut -d= -f2-)" \
+    --env-file "$INSTANCE_ENV_FILE" \
+    -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
     "$@"
 }
 
 compose_pickup() {
   local dest="$1"
   shift
+  export INSTANCE_ENV_FILE
+  INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   docker compose \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
+    -f "$ROOT/deploy/docker-compose.instance-env.yml" \
     -f "$ROOT/deploy/docker-compose.pickup-only.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \
-    --env-file "$dest/.env" \
-    -p "$(grep '^COMPOSE_PROJECT_NAME=' "$dest/.env" | cut -d= -f2-)" \
+    --env-file "$INSTANCE_ENV_FILE" \
+    -p "$(grep '^COMPOSE_PROJECT_NAME=' "$INSTANCE_ENV_FILE" | cut -d= -f2-)" \
     "$@"
 }
 
@@ -337,16 +350,15 @@ provision_pickup_site() {
   project="$(instance_project_name "$domain")"
 
   if [ -f "$dest/.env" ]; then
-    err "وب pickup قبلاً وجود دارد: $dest"
-    return 1
+    warn "پوشه pickup از قبل هست — ادامهٔ deploy (بدون بازنویسی .env)"
+    [ -f "$dest/docker-compose.yml" ] || cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
+  else
+    mkdir -p "$dest"
+    cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
+    local app_key
+    app_key="$(gen_app_key)"
+    write_pickup_env "$dest" "$domain" "$project" "$app_key"
   fi
-
-  mkdir -p "$dest"
-  cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
-
-  local app_key
-  app_key="$(gen_app_key)"
-  write_pickup_env "$dest" "$domain" "$project" "$app_key"
 
   info "اجرای وب pickup ($domain) ..."
   compose_pickup "$dest" up -d --build
