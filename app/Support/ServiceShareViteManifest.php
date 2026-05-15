@@ -6,7 +6,7 @@ namespace App\Support;
  * لود CSS/JS صفحهٔ دریافت کانفیگ بدون وابستگی به @vite — همان چیزی که روی سرور معمولی
  * با nginx روی public/ اتفاق می‌افتد: لینک مستقیم به /build/assets/...
  *
- * اگر مسیر absolute از asset()/@vite به‌دلیل پروکسی یا ASSET_URL خراب شود، این مسیر نسبی پایدار است.
+ * در Blade با url() ترکیب می‌شود تا آدرس مطلق با APP_URL (https) ساخته شود.
  */
 final class ServiceShareViteManifest
 {
@@ -27,10 +27,18 @@ final class ServiceShareViteManifest
             return null;
         }
 
-        return [
+        $paths = [
             'css' => '/build/'.$css,
             'js' => '/build/'.$js,
         ];
+        foreach ($paths as $rel) {
+            $abs = public_path(ltrim($rel, '/'));
+            if (! is_file($abs)) {
+                return null;
+            }
+        }
+
+        return $paths;
     }
 
     /** @return array<string, mixed>|null */

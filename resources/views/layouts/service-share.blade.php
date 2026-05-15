@@ -15,8 +15,9 @@
     @if ($viteHot)
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     @elseif ($fromManifest)
-        <link rel="stylesheet" href="{{ $fromManifest['css'] }}">
-        <script type="module" src="{{ $fromManifest['js'] }}"></script>
+        {{-- URL مطلق با scheme دامنه (APP_URL + TrustProxies) — جلو mixed content / Not Secure --}}
+        <link rel="stylesheet" href="{{ url($fromManifest['css']) }}">
+        <script type="module" src="{{ url($fromManifest['js']) }}"></script>
     @else
         {{-- فقط بدون بیلد (بدون Docker / بدون npm run build) --}}
         <script src="https://cdn.tailwindcss.com"></script>
