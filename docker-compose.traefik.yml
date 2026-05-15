@@ -1,0 +1,22 @@
+# پشت Traefik روی پورت 443 (شبکه proxy باید از قبل ساخته شده باشد)
+services:
+  web:
+    ports: []
+    networks:
+      - internal
+      - proxy
+    environment:
+      TRAEFIK_ENABLE: "true"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
+      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.entrypoints=websecure
+      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls=true
+      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.${TRAEFIK_ROUTER_NAME}.loadbalancer.server.port=80
+
+networks:
+  proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK:-proxy}
