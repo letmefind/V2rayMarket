@@ -4,7 +4,7 @@
     $fromManifest = \App\Support\ServiceShareViteManifest::entryUrls();
 @endphp
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html lang="fa" dir="rtl" @if ($viteHot) data-vpnmarket-share-assets="vite-dev" @elseif ($fromManifest) data-vpnmarket-share-assets="manifest" @else data-vpnmarket-share-assets="cdn" @endif>
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,8 +18,8 @@
     @elseif ($fromManifest)
         <!-- vpnmarket-share-assets: manifest {{ $fromManifest['css'] }} -->
         {{-- هم‌مبدأ با صفحه — مستقل از APP_URL اشتباه در .env --}}
+        <link rel="preload" href="{{ $fromManifest['css'] }}" as="style">
         <link rel="stylesheet" href="{{ $fromManifest['css'] }}">
-        <script type="module" src="{{ $fromManifest['js'] }}"></script>
     @else
         <!-- vpnmarket-share-assets: cdn-fallback -->
         {{-- فقط بدون بیلد (بدون Docker / بدون npm run build) --}}
@@ -47,6 +47,9 @@
 </head>
 <body class="font-sans antialiased text-slate-100 min-h-screen selection:bg-indigo-500/30">
     {{ $slot }}
+    @if ($fromManifest && ! $viteHot)
+        <script type="module" src="{{ $fromManifest['js'] }}"></script>
+    @endif
     @stack('scripts')
 </body>
 </html>
