@@ -55,6 +55,8 @@ docker compose up -d
 docker network ls | grep proxy   # شبکه proxy ساخته می‌شود
 ```
 
+**هنوز مرورگر «TRAEFIK DEFAULT CERT» / گواهی نامعتبر؟** معمولاً Let's Encrypt روی پورت ۸۰ چالش HTTP-01 را کامل نکرده (مثلاً روتر ریدایرکت به HTTPS با اولویت بالاتر از چالش داخلی Traefik بوده). در `docker-compose.traefik.yml` برای روتر `*-http` اولویت پایین (`priority=1`) تنظیم شده تا ACME برنده شود. روی سرور بعد از `git pull` سرویس pickup (و در صورت نیاز Traefik) را یک‌بار `docker compose up -d --force-recreate` کنید؛ `docker logs` روی Traefik مشترک (لیبل `vpnmarket.shared_traefik=true`) را برای خطاهای `acme` ببینید. اگر قبلاً چند بار شکست خورده، تا رفع **rate limit** صبر کنید یا `acme.json` را فقط در صورت خرابی/تست پاک و دوباره `chmod 600` کنید.
+
 ## ۲) MySQL و Redis مشترک (یک‌بار)
 
 ```bash
