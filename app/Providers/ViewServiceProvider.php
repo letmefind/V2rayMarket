@@ -11,17 +11,13 @@ class ViewServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-
-
-
-
-        if (Schema::hasTable('settings')) {
-            $settings = Setting::all()->pluck('value', 'key');
-
-            View::share('settings', $settings);
+        try {
+            if (Schema::hasTable('settings')) {
+                $settings = Setting::all()->pluck('value', 'key');
+                View::share('settings', $settings);
+            }
+        } catch (\Throwable) {
+            // نصب اول / migrate / DB هنوز آماده نیست
         }
-
-
-
     }
 }

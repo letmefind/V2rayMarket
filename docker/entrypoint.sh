@@ -3,13 +3,17 @@ set -e
 
 cd /var/www/html
 
+rm -f bootstrap/cache/config.php 2>/dev/null || true
 php artisan config:clear --no-interaction 2>/dev/null || true
 
 if [ -f .env ]; then
-  :
+  chmod 640 .env 2>/dev/null || true
+  chown www-data:www-data .env 2>/dev/null || true
 elif [ -f .env.example ]; then
   echo "[entrypoint] Warning: .env missing; copying .env.example (set real values via mount or env_file)"
   cp .env.example .env
+  chmod 640 .env 2>/dev/null || true
+  chown www-data:www-data .env 2>/dev/null || true
 fi
 
 wait_for_db() {
@@ -40,9 +44,11 @@ fi
 
 php artisan storage:link --force 2>/dev/null || true
 
-if [ "${APP_ENV:-production}" = "production" ]; then
-  php artisan config:cache --no-interaction 2>/dev/null || true
+# config:cache در Docker .env mount را قفل می‌کند (root/بدون رمز) — استفاده نکنید
+if [ "${LARAVEL_ROUTE_CACHE:-false}" = "true" ]; then
   php artisan route:cache --no-interaction 2>/dev/null || true
+fi
+if [ "${LARAVEL_VIEW_CACHE:-false}" = "true" ]; then
   php artisan view:cache --no-interaction 2>/dev/null || true
 fi
 
