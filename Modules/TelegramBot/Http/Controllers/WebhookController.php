@@ -1795,13 +1795,16 @@ class WebhookController extends Controller
     }
 
     /**
-     * شماره کارت فقط با رقم (گروه ۴تایی) برای تگ &lt;code&gt; تلگرام — لمس = کپی.
+     * شماره کارت برای &lt;code&gt; تلگرام (لمس = کپی).
+     * در چت RTL، بدون LTR isolate گروه‌های ۴رقمی برعکس دیده می‌شوند (کپی درست است).
      */
     protected function formatCardNumberForTelegramCopy(string $cardNumber): string
     {
         $digits = preg_replace('/\D+/', '', $cardNumber) ?? '';
         if ($digits !== '' && strlen($digits) >= 12) {
-            return trim(chunk_split($digits, 4, ' '));
+            $formatted = trim(chunk_split($digits, 4, ' '));
+
+            return "\u{200E}\u{2066}{$formatted}\u{2069}";
         }
 
         return $this->htmlEscape($cardNumber);
