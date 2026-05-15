@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# مشترک: mount مطلق .env نمونه در docker-compose (بدون وابستگی به interpolate compose)
+# مشترک: mount مطلق .env نمونه در docker-compose (بدون interpolate متغیر در bind path)
 patch_instance_compose_env_mount() {
   local compose_file="$1"
   local env_abs="$2"
@@ -7,13 +7,16 @@ patch_instance_compose_env_mount() {
   [ -f "$env_abs" ] || { echo "patch_instance_compose_env_mount: .env نیست: $env_abs" >&2; return 1; }
   [ -f "$compose_file" ] || { echo "patch_instance_compose_env_mount: compose نیست: $compose_file" >&2; return 1; }
 
-  sed -i.bak \
-    -e 's|\${ENV_FILE:-\${INSTANCE_ENV_FILE}}|'"$env_abs"'|g' \
-    -e 's|\${ENV_FILE}|'"$env_abs"'|g' \
-    -e 's|\${INSTANCE_ENV_FILE}|'"$env_abs"'|g' \
-    -e 's|\./\.env:'"$env_abs"':|g' \
-    "$compose_file"
-  rm -f "${compose_file}.bak"
+  awk -v env="$env_abs" '
+    /\/run\/instance\.env:ro/ && /^[[:space:]]*-/) {
+      if (match($0, /^[[:space:]]+-[[:space:]]+/)) {
+        prefix = substr($0, 1, RLENGTH)
+        print prefix env ":/run/instance.env:ro"
+        next
+      }
+    }
+    { print }
+  ' "$compose_file" >"${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
 
   if ! grep -qF "${env_abs}:/run/instance.env:ro" "$compose_file"; then
     echo "patch_instance_compose_env_mount: mount در $compose_file پیدا نشد" >&2
