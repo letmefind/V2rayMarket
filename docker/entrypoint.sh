@@ -3,6 +3,8 @@ set -e
 
 cd /var/www/html
 
+php artisan config:clear --no-interaction 2>/dev/null || true
+
 if [ -f .env ]; then
   :
 elif [ -f .env.example ]; then

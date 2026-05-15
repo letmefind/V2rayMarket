@@ -250,26 +250,56 @@ repair_instance_db_env() {
   require_db_credentials || return 1
   [ -f "$envf" ] || return 0
 
-  local current_pw
-  current_pw="$(grep '^DB_PASSWORD=' "$envf" 2>/dev/null | cut -d= -f2- || true)"
-  if [ -n "$current_pw" ] && [ "$current_pw" != "change_me" ]; then
-    return 0
-  fi
-
-  warn "اصلاح DB_* در $envf از cluster.env"
+  warn "همگام‌سازی DB_* در $envf با cluster.env"
   grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD)=' "$envf" >"${envf}.tmp"
-  cat >>"${envf}.tmp" <<EOF
-DB_CONNECTION=mysql
-DB_HOST=mysql
-DB_PORT=3306
-DB_DATABASE=${DB_DATABASE}
-DB_USERNAME=${DB_USERNAME}
-DB_PASSWORD=${DB_PASSWORD}
-MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-EOF
+  {
+    echo 'DB_CONNECTION=mysql'
+    echo 'DB_HOST=mysql'
+    echo 'DB_PORT=3306'
+    printf 'DB_DATABASE=%s\n' "$DB_DATABASE"
+    printf 'DB_USERNAME=%s\n' "$DB_USERNAME"
+    printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
+    printf 'MYSQL_ROOT_PASSWORD=%s\n' "$MYSQL_ROOT_PASSWORD"
+  } >>"${envf}.tmp"
   mv "${envf}.tmp" "$envf"
   chmod 600 "$envf"
-  ok "DB_* در .env نمونه به‌روز شد"
+  ok "DB_USERNAME=${DB_USERNAME} DB_DATABASE=${DB_DATABASE}"
+}
+
+wait_for_container_ready() {
+  local container="$1" max="${2:-60}" i=0
+  while [ "$i" -lt "$max" ]; do
+    if docker exec "$container" test -f /var/www/html/.env 2>/dev/null \
+      && docker exec "$container" pgrep -x supervisord >/dev/null 2>&1; then
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 2
+  done
+  return 1
+}
+
+sync_mysql_app_user() {
+  require_db_credentials || return 1
+  container_running vpnmarket_shared_mysql || return 0
+  info "همگام‌سازی کاربر MySQL (${DB_USERNAME}) با cluster.env"
+  docker exec vpnmarket_shared_mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" <<EOSQL
+ALTER USER '${DB_USERNAME}'@'%' IDENTIFIED BY '${DB_PASSWORD}';
+FLUSH PRIVILEGES;
+EOSQL
+}
+
+run_instance_migrate() {
+  local dest="$1" container="$2"
+  clear_instance_config_cache "$container"
+  sleep 2
+  if docker exec "$container" php artisan migrate --force --no-interaction; then
+    ok "migrate انجام شد"
+    return 0
+  fi
+  warn "migrate ناموفق — بررسی:"
+  docker exec "$container" grep -E '^DB_(USERNAME|PASSWORD|DATABASE)=' /var/www/html/.env 2>/dev/null || true
+  return 1
 }
 
 clear_instance_config_cache() {
@@ -461,14 +491,14 @@ provision_pickup_site() {
   fi
   cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
   repair_instance_db_env "$dest" || return 1
+  sync_mysql_app_user || warn "همگام‌سازی کاربر MySQL ناموفق — cluster.env و MySQL را چک کنید"
 
   info "اجرای وب pickup ($domain) ..."
-  compose_pickup "$dest" up -d
+  compose_pickup "$dest" up -d --force-recreate
 
   local container="${project}-web-1"
-  clear_instance_config_cache "$dest" "$container"
-  compose_pickup "$dest" exec -T web php artisan migrate --force --no-interaction 2>/dev/null \
-    || warn "migrate — بعداً دستی: docker exec $container php artisan migrate --force"
+  wait_for_container_ready "$container" || warn "کانتینر دیر آماده شد"
+  run_instance_migrate "$dest" "$container" || true
 
   wait_container_up "$container" /up || true
   wait_url "https://${domain}/up" 40 || true

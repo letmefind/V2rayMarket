@@ -1,22 +1,19 @@
-# هر نمونه .env خودش را دارد — جایگزین کامل env_file/volume ریشهٔ پروژه
+# فقط mount فایل .env نمونه — env_file داکر با Laravel تداخل/override می‌سازد
 services:
   web:
-    env_file: !reset
-      - ${INSTANCE_ENV_FILE:?set INSTANCE_ENV_FILE}
+    env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
+      - ${INSTANCE_ENV_FILE:?set INSTANCE_ENV_FILE}:/var/www/html/.env:ro
 
   queue:
-    env_file: !reset
-      - ${INSTANCE_ENV_FILE:?}
+    env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
       - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
 
   scheduler:
-    env_file: !reset
-      - ${INSTANCE_ENV_FILE:?}
+    env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
       - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
