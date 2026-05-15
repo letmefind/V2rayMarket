@@ -1,8 +1,6 @@
+# فقط override شبکه — build از docker-compose.yml ریشه (context: .)
 services:
-  web:
-    build:
-      context: ../../../
-      dockerfile: Dockerfile
+  web: {}
 
 networks:
   shared_data:

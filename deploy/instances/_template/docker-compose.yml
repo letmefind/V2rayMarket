@@ -1,18 +1,2 @@
-# از ریشهٔ مخزن اجرا شود:
-# docker compose -f ../../../docker-compose.yml -f ../../../docker-compose.traefik.yml -f docker-compose.yml --env-file .env up -d
-
-services:
-  web:
-    build:
-      context: ../../../
-      dockerfile: Dockerfile
-
-  queue:
-    build:
-      context: ../../../
-      dockerfile: Dockerfile
-
-  scheduler:
-    build:
-      context: ../../../
-      dockerfile: Dockerfile
+# از ریشهٔ مخزن با provision اجرا می‌شود — build در docker-compose.yml اصلی است
+services: {}

@@ -117,7 +117,7 @@ compose_bot() {
   shift
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
-  docker compose \
+  docker compose --project-directory "$ROOT" \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
     -f "$ROOT/deploy/docker-compose.instance-env.yml" \
@@ -133,7 +133,7 @@ compose_pickup() {
   shift
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
-  docker compose \
+  docker compose --project-directory "$ROOT" \
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
     -f "$ROOT/deploy/docker-compose.instance-env.yml" \
@@ -351,10 +351,9 @@ provision_pickup_site() {
 
   if [ -f "$dest/.env" ]; then
     warn "پوشه pickup از قبل هست — ادامهٔ deploy (بدون بازنویسی .env)"
-    [ -f "$dest/docker-compose.yml" ] || cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
+    mkdir -p "$dest"
   else
     mkdir -p "$dest"
-    cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
     local app_key
     app_key="$(gen_app_key)"
     write_pickup_env "$dest" "$domain" "$project" "$app_key"
