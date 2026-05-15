@@ -191,14 +191,6 @@ COMPOSE_FILES+=(
   -f "$DEST/docker-compose.yml"
 )
 
-if ! compose_config_has_env_mount "$ENV_ABS" \
-  --project-directory "$ROOT" \
-  "${COMPOSE_FILES[@]}" \
-  --env-file "$INSTANCE_ENV_FILE" \
-  -p "$PROJECT"; then
-  err "در docker compose config مسیر .env نیست — نسخه compose یا فایل‌های merge را چک کنید"
-fi
-
 info "recreate container ($CONTAINER)"
 docker compose --project-directory "$ROOT" \
   "${COMPOSE_FILES[@]}" \

@@ -22,9 +22,3 @@ patch_instance_compose_env_mount() {
     return 1
   fi
 }
-
-compose_config_has_env_mount() {
-  local env_abs="$1"
-  shift
-  docker compose "$@" config 2>/dev/null | grep -qF "$env_abs"
-}
