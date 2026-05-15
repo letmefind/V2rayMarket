@@ -13,8 +13,7 @@ case "${1:-}" in
     [ -n "${2:-}" ] || { echo "Usage: $0 add-bot <domain>"; exit 1; }
     exec "$ROOT/deploy/bin/vpnmarket-provision.sh" bot "$2"
     ;;
-  fix)
-  fix-db)
+  fix|fix-db)
     DOMAIN="${2:-bale.cyou}"
     exec "$ROOT/deploy/bin/fix-instance-db.sh" "$DOMAIN"
     ;;
