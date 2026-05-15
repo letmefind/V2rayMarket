@@ -14,8 +14,8 @@ services:
       - --providers.docker.network=proxy
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # ریدایرکت HTTP→HTTPS فقط روی router هر دامنه است (در docker-compose.traefik.yml)
+      # ریدایرکت سراسری اینجا ACME http-01 را خراب می‌کند
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?Set ACME_EMAIL}
       - --certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web

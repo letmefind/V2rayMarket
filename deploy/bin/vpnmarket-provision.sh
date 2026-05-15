@@ -182,16 +182,33 @@ compose_pickup() {
     "$@"
 }
 
-wait_url() {
-  local url="$1" max="${2:-90}" i=0
-  info "منتظر آماده‌شدن $url ..."
+wait_container_up() {
+  local container="$1" path="${2:-/up}" max="${3:-40}" i=0
+  info "بررسی اپ داخل کانتینر $container ..."
   while [ "$i" -lt "$max" ]; do
-    if curl -fsS -k -o /dev/null "$url" 2>/dev/null; then
+    if docker exec "$container" curl -fsS -o /dev/null "http://127.0.0.1${path}" 2>/dev/null; then
+      ok "اپ داخل کانتینر پاسخ داد (${path})"
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 2
+  done
+  warn "اپ داخل کانتینر هنوز پاسخ نمی‌دهد — لاگ: docker logs $container"
+  return 1
+}
+
+wait_url() {
+  local url="$1" max="${2:-40}" i=0
+  info "بررسی از بیرون $url (DNS + SSL؛ ممکن است ۱–۲ دقیقه طول بکشد) ..."
+  while [ "$i" -lt "$max" ]; do
+    if curl -fsS -k -o /dev/null --connect-timeout 5 "$url" 2>/dev/null; then
+      ok "دسترسی بیرونی OK: $url"
       return 0
     fi
     i=$((i + 1))
     sleep 3
   done
+  warn "هنوز $url از بیرون جواب نمی‌دهد — DNS را به IP سرور بزنید و Traefik را یک‌بار restart کنید"
   return 1
 }
 
@@ -217,6 +234,7 @@ ensure_traefik() {
   sleep 3
   INFRA_TRAEFIK=1
   ok "Traefik بالا آمد"
+  warn "اگر SSL قبلاً کار نمی‌کرد: cd $TRAEFIK_DIR && docker compose up -d --force-recreate"
 }
 
 ensure_shared_db() {
@@ -399,9 +417,11 @@ provision_pickup_site() {
   cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
 
   info "اجرای وب pickup ($domain) ..."
-  compose_pickup "$dest" up -d --build
+  compose_pickup "$dest" up -d
 
-  wait_url "https://${domain}/up" 90 || warn "health pickup از HTTPS چک نشد"
+  local container="${project}-web-1"
+  wait_container_up "$container" /up || true
+  wait_url "https://${domain}/up" 40 || true
 
   INFRA_PICKUP=1
   PICKUP_DOMAIN="$domain"
