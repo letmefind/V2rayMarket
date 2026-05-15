@@ -122,6 +122,186 @@ instance_env_file() {
   printf '%s/.env' "$(cd "$dest" && pwd)"
 }
 
+# مقدار یک کلید در .env نمونه (بدون کوتیشن دور مقدار)
+env_var_from_file() {
+  local f="$1" k="$2" line
+  [ -f "$f" ] || return 0
+  line="$(grep -E "^${k}=" "$f" 2>/dev/null | tail -1)" || true
+  [ -n "$line" ] || return 0
+  line="${line#${k}=}"
+  line="${line%\"}"
+  line="${line#\"}"
+  printf '%s' "$line"
+}
+
+instance_is_pickup_only() {
+  local dest="$1"
+  local v
+  v="$(env_var_from_file "$dest/.env" APP_SHARE_PICKUP_ONLY)"
+  if echo "$v" | grep -qiE '^(1|true|yes|on)$'; then
+    return 0
+  fi
+  return 1
+}
+
+# خروجی: یک مسیر مطلق در هر خط — فقط ربات (نه pickup)
+list_bot_instance_dirs() {
+  local d base
+  for d in "$INSTANCES_DIR"/*/; do
+    [ -d "$d" ] || continue
+    base="$(basename "${d%/}")"
+    case "$base" in _template*) continue ;; esac
+    [ -f "$d/.env" ] || continue
+    if instance_is_pickup_only "$d"; then
+      continue
+    fi
+    printf '%s\n' "$(cd "$d" && pwd)"
+  done
+}
+
+# ورودی: نام پوشه یا APP_DOMAIN یا بخشی از APP_URL
+resolve_instance_dest() {
+  local input="$1" d base needle dom url
+  input="${input%/}"
+  if [ -d "$INSTANCES_DIR/$input" ] && [ -f "$INSTANCES_DIR/$input/.env" ]; then
+    printf '%s' "$(cd "$INSTANCES_DIR/$input" && pwd)"
+    return 0
+  fi
+  needle="$(normalize_domain "$input")"
+  for d in "$INSTANCES_DIR"/*/; do
+    [ -f "$d/.env" ] || continue
+    base="$(basename "${d%/}")"
+    case "$base" in _template*) continue ;; esac
+    dom="$(normalize_domain "$(env_var_from_file "$d/.env" APP_DOMAIN)")"
+    url="$(normalize_domain "$(env_var_from_file "$d/.env" APP_URL)")"
+    if [ "$base" = "$input" ] || [ "$dom" = "$needle" ] || [ "$url" = "$needle" ] || [[ "$url" == *"${needle}"* ]]; then
+      printf '%s' "$(cd "$d" && pwd)"
+      return 0
+    fi
+  done
+  return 1
+}
+
+reprovision_bot_admin_for_dest() {
+  local dest="$1"
+  local admin_email admin_pass dom defmail
+  [ -d "$dest" ] && [ -f "$dest/.env" ] || { err "مسیر نامعتبر: $dest"; return 1; }
+  if instance_is_pickup_only "$dest"; then
+    err "نمونه pickup است — پنل Filament ندارد."
+    return 1
+  fi
+  dom="$(env_var_from_file "$dest/.env" APP_DOMAIN)"
+  defmail="admin@${dom}"
+  admin_email="$(prompt "ایمیل ادمین Filament" "$defmail")"
+  admin_pass="$(prompt_secret "رمز ادمین جدید" "")"
+  if [ -z "$admin_pass" ]; then
+    err "رمز خالی مجاز نیست."
+    return 1
+  fi
+  info "اجرای vpnmarket:provision-instance در کانتینر ..."
+  compose_bot "$dest" exec -T web php artisan vpnmarket:provision-instance \
+    --admin-email="$admin_email" \
+    --admin-password="$admin_pass" \
+    --no-interaction
+  ok "ادمین به‌روز شد — https://${dom}/admin"
+}
+
+reprovision_bot_admin_menu() {
+  local dirs=() i n dest
+  mapfile -t dirs < <(list_bot_instance_dirs)
+  if [ "${#dirs[@]}" -eq 0 ]; then
+    err "هیچ نمونهٔ رباتی نیست (فقط pickup یا هنوز رباتی نساخته‌اید)."
+    return 1
+  fi
+  echo ""
+  info "نمونه‌های ربات:"
+  i=1
+  for dest in "${dirs[@]}"; do
+    local dom proj
+    dom="$(env_var_from_file "$dest/.env" APP_DOMAIN)"
+    proj="$(env_var_from_file "$dest/.env" COMPOSE_PROJECT_NAME)"
+    echo "  $i) $(basename "$dest")  —  $dom  ($proj)"
+    i=$((i + 1))
+  done
+  n="$(prompt "شماره از لیست یا نام پوشه (مثلاً shop.example.com)" "1")"
+  dest=""
+  if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le "${#dirs[@]}" ]; then
+    dest="${dirs[$((n - 1))]}"
+  elif resolved="$(resolve_instance_dest "$n")" && [ -n "$resolved" ]; then
+    dest="$resolved"
+    if instance_is_pickup_only "$dest"; then
+      err "این نمونه pickup است."
+      return 1
+    fi
+  else
+    err "نمونه پیدا نشد: $n"
+    return 1
+  fi
+  reprovision_bot_admin_for_dest "$dest"
+}
+
+remove_bot_instance_for_dest() {
+  local dest="$1" purge="${2:-0}"
+  [ -d "$dest" ] && [ -f "$dest/.env" ] || { err "مسیر نامعتبر: $dest"; return 1; }
+  if instance_is_pickup_only "$dest"; then
+    err "حذف pickup از اینجا پشتیبانی نمی‌شود — دستی docker compose برای همان پوشه pickup."
+    return 1
+  fi
+  local dom base
+  dom="$(env_var_from_file "$dest/.env" APP_DOMAIN)"
+  base="$(basename "$dest")"
+  warn "پایین آوردن نمونه: $base ($dom)"
+  compose_bot "$dest" down
+  ok "docker compose down انجام شد."
+  if [ "$purge" = "1" ] || [ "${VPNMARKET_PURGE_INSTANCE_DIR:-}" = "1" ]; then
+    rm -rf "$dest"
+    ok "پوشه حذف شد: $dest"
+  fi
+  warn "دادهٔ MySQL این نمونه (instance_id) هنوز در دیتابیس مشترک است؛ حذف ردیف‌ها جداگانه است."
+}
+
+remove_bot_instance_menu() {
+  local dirs=() i n dest purge_ask
+  mapfile -t dirs < <(list_bot_instance_dirs)
+  if [ "${#dirs[@]}" -eq 0 ]; then
+    err "هیچ نمونهٔ رباتی نیست."
+    return 1
+  fi
+  echo ""
+  info "نمونه‌های ربات:"
+  i=1
+  for dest in "${dirs[@]}"; do
+    local dom proj
+    dom="$(env_var_from_file "$dest/.env" APP_DOMAIN)"
+    proj="$(env_var_from_file "$dest/.env" COMPOSE_PROJECT_NAME)"
+    echo "  $i) $(basename "$dest")  —  $dom  ($proj)"
+    i=$((i + 1))
+  done
+  n="$(prompt "شماره یا نام پوشه برای حذف Docker" "1")"
+  dest=""
+  if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le "${#dirs[@]}" ]; then
+    dest="${dirs[$((n - 1))]}"
+  elif resolved="$(resolve_instance_dest "$n")" && [ -n "$resolved" ]; then
+    dest="$resolved"
+    if instance_is_pickup_only "$dest"; then
+      err "این نمونه pickup است."
+      return 1
+    fi
+  else
+    err "نمونه پیدا نشد: $n"
+    return 1
+  fi
+  if [ "$(prompt "تایید docker compose DOWN برای این نمونه (y/N)" "N")" != "y" ]; then
+    info "لغو شد."
+    return 0
+  fi
+  purge_ask=0
+  if [ "$(prompt "پوشهٔ deploy/instances/$(basename "$dest") از دیسک هم پاک شود؟ (y/N)" "N")" = "y" ]; then
+    purge_ask=1
+  fi
+  remove_bot_instance_for_dest "$dest" "$purge_ask"
+}
+
 app_image_from_env() {
   local env_file="$1" line
   line="$(grep -E '^APP_IMAGE=' "$env_file" | tail -1 || true)"
@@ -720,6 +900,64 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "reset-admin" ]; then
+  if [ -n "${2:-}" ]; then
+    dest="$(resolve_instance_dest "$2")" || {
+      err "نمونه پیدا نشد: $2"
+      exit 1
+    }
+    if instance_is_pickup_only "$dest"; then
+      err "این نمونه pickup است — پنل Filament ندارد."
+      exit 1
+    fi
+    reprovision_bot_admin_for_dest "$dest"
+  else
+    reprovision_bot_admin_menu
+  fi
+  exit 0
+fi
+
+if [ "${1:-}" = "remove-bot" ]; then
+  if [ -z "${2:-}" ]; then
+    remove_bot_instance_menu
+    exit 0
+  fi
+  key="$2"
+  shift 2
+  yes=0
+  purge=0
+  for a in "$@"; do
+    case "$a" in
+      --yes) yes=1 ;;
+      --purge-dir) purge=1 ;;
+      *)
+        err "آرگومان ناشناس: $a — فقط --yes و --purge-dir"
+        exit 1
+        ;;
+    esac
+  done
+  dest="$(resolve_instance_dest "$key")" || {
+    err "نمونه پیدا نشد: $key"
+    exit 1
+  }
+  if instance_is_pickup_only "$dest"; then
+    err "این نمونه pickup است — برای حذف pickup همان پوشه را دستی با docker compose مدیریت کنید."
+    exit 1
+  fi
+  if [ "$yes" != "1" ]; then
+    purge=0
+    if [ "$(prompt "تایید docker compose DOWN (y/N)" "N")" != "y" ]; then
+      info "لغو شد."
+      exit 0
+    fi
+    if [ "$(prompt "پوشهٔ deploy/instances/$(basename "$dest") هم حذف شود؟ (y/N)" "N")" = "y" ]; then
+      purge=1
+    fi
+  fi
+  remove_bot_instance_for_dest "$dest" "$purge"
+  exit 0
+fi
+
 echo ""
 echo "╔══════════════════════════════════════════════╗"
 echo "║   VPNMarket — نصب/افزودن Docker (تعاملی)     ║"
@@ -740,6 +978,8 @@ echo "  2) فقط افزودن ربات تلگرام جدید"
 echo "  3) فقط وب مشترک کد ۵ رقمی (مثلاً bale.cyou)"
 echo "  4) فقط زیرساخت (Traefik + DB) بدون ربات"
 echo "  5) نمایش وضعیت"
+echo "  6) تغییر رمز / ایمیل ادمین Filament (یک ربات)"
+echo "  7) حذف یک ربات از Docker (compose down؛ اختیاری پاک کردن پوشه)"
 echo "  q) خروج"
 echo ""
 
@@ -787,6 +1027,12 @@ case "$choice" in
   5)
     show_status
     exit 0
+    ;;
+  6)
+    reprovision_bot_admin_menu
+    ;;
+  7)
+    remove_bot_instance_menu
     ;;
   q|Q)
     exit 0
