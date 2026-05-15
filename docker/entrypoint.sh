@@ -3,6 +3,8 @@ set -e
 
 cd /var/www/html
 
+rm -f public/hot 2>/dev/null || true
+
 rm -f bootstrap/cache/config.php 2>/dev/null || true
 php artisan config:clear --no-interaction 2>/dev/null || true
 php artisan view:clear --no-interaction 2>/dev/null || true

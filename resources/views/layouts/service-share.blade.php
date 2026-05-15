@@ -1,6 +1,8 @@
 @php
-    // public/hot فقط در local؛ اگر در ایمیج اشتباهی مانده باشد @vite به :5173 می‌زند و استایل می‌پاشد.
-    $viteHot = app()->isLocal() && is_file(public_path('hot'));
+    // pickup هرگز @vite نزند: با APP_URL=http خروجی http://… می‌دهد → روی صفحهٔ https مرورگر asset را بلوک می‌کند (mixed content).
+    $viteHot = app()->isLocal()
+        && is_file(public_path('hot'))
+        && ! config('app.share_pickup_only');
     $fromManifest = \App\Support\ServiceShareViteManifest::entryUrls();
 @endphp
 <!DOCTYPE html>
