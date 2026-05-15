@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# یک‌بار روی سرور: اصلاح DB .env نمونه + پاک کردن config cache + migrate
+# اصلاح .env نمونه + image + Traefik vars + recreate + migrate
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -11,9 +11,9 @@ CONTAINER="${PROJECT}-web-1"
 
 err() { echo "✗ $*" >&2; exit 1; }
 
-[ -f "$CLUSTER" ] || err "نیست: $CLUSTER — ابتدا ./provision گزینه ۴"
+[ -f "$CLUSTER" ] || err "نیست: $CLUSTER"
 if [ -d "$DEST/.env" ]; then
-  err "$DEST/.env یک پوشه است! حذف کنید: rm -rf $DEST/.env && دوباره این اسکریپت را بزنید"
+  err "$DEST/.env یک پوشه است! rm -rf $DEST/.env"
 fi
 [ -f "$DEST/.env" ] || err "نیست: $DEST/.env"
 
@@ -21,12 +21,39 @@ fi
 source "$CLUSTER"
 [ -n "${DB_PASSWORD:-}" ] || err "DB_PASSWORD در cluster.env خالی است"
 
-echo "→ قبل (هاست):"
-grep -E '^DB_(USERNAME|PASSWORD|DATABASE)=' "$DEST/.env" 2>/dev/null || true
+pick_app_image() {
+  if docker image inspect vpnmarket/app:latest >/dev/null 2>&1; then
+    echo "vpnmarket/app:latest"
+  elif docker image inspect vpnmarket-local:latest >/dev/null 2>&1; then
+    echo "vpnmarket-local:latest"
+  elif [ -n "${APP_IMAGE:-}" ] && docker image inspect "${APP_IMAGE}" >/dev/null 2>&1; then
+    echo "$APP_IMAGE"
+  else
+    err "هیچ image محلی نیست — اول: docker build -t vpnmarket/app:latest -f Dockerfile ."
+  fi
+}
 
-echo "→ همگام‌سازی $DEST/.env"
-grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD)=' "$DEST/.env" >"${DEST}/.env.tmp"
+set_env_var() {
+  local file="$1" key="$2" val="$3"
+  if grep -q "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+  else
+    echo "${key}=${val}" >>"$file"
+  fi
+}
+
+APP_IMAGE="$(pick_app_image)"
+
+echo "→ قبل:"
+grep -E '^(DB_|APP_IMAGE|APP_DOMAIN|TRAEFIK_ROUTER_NAME)=' "$DEST/.env" 2>/dev/null || true
+
+echo "→ همگام‌سازی DB و متغیرهای compose"
+grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD|APP_IMAGE|APP_DOMAIN|TRAEFIK_ROUTER_NAME|COMPOSE_PROJECT_NAME)=' "$DEST/.env" >"${DEST}/.env.tmp"
 {
+  echo "COMPOSE_PROJECT_NAME=${PROJECT}"
+  echo "APP_IMAGE=${APP_IMAGE}"
+  echo "APP_DOMAIN=${DOMAIN}"
+  echo "TRAEFIK_ROUTER_NAME=${PROJECT}"
   echo 'DB_CONNECTION=mysql'
   echo 'DB_HOST=mysql'
   echo 'DB_PORT=3306'
@@ -38,14 +65,21 @@ grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|
 mv "${DEST}/.env.tmp" "$DEST/.env"
 chmod 640 "$DEST/.env"
 
+echo "→ بعد:"
+grep -E '^(DB_|APP_IMAGE|APP_DOMAIN|TRAEFIK_ROUTER_NAME)=' "$DEST/.env"
+
 echo "→ MySQL user ${DB_USERNAME}"
 docker exec vpnmarket_shared_mysql mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" -e \
   "ALTER USER '${DB_USERNAME}'@'%' IDENTIFIED BY '${DB_PASSWORD}'; FLUSH PRIVILEGES;"
 
 export INSTANCE_ENV_FILE="$(cd "$DEST" && pwd)/.env"
 export ENV_FILE="$INSTANCE_ENV_FILE"
+set -a
+# shellcheck disable=SC1090
+source "$INSTANCE_ENV_FILE"
+set +a
 
-echo "→ recreate container"
+echo "→ recreate container (image: ${APP_IMAGE})"
 docker compose --project-directory "$ROOT" \
   -f "$ROOT/docker-compose.yml" \
   -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
@@ -58,12 +92,12 @@ docker compose --project-directory "$ROOT" \
   -p "$PROJECT" \
   up -d --force-recreate
 
-sleep 8
+sleep 10
 docker exec "$CONTAINER" rm -f /var/www/html/bootstrap/cache/config.php 2>/dev/null || true
 docker exec "$CONTAINER" php artisan config:clear --no-interaction
 
 echo "→ .env داخل کانتینر:"
-docker exec "$CONTAINER" grep -E '^DB_(USERNAME|PASSWORD|DATABASE)=' /var/www/html/.env
+docker exec "$CONTAINER" grep -E '^(DB_|APP_DOMAIN)=' /var/www/html/.env
 
 echo "→ migrate"
 docker exec "$CONTAINER" php artisan migrate --force --no-interaction

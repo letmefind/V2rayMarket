@@ -92,7 +92,7 @@ TRAEFIK_NETWORK=${TRAEFIK_NETWORK:-proxy}
 TRAEFIK_CERT_RESOLVER=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
 PICKUP_DOMAIN=${PICKUP_DOMAIN:-bale.cyou}
 IRAN_SERVICE_SHARE_URL=${IRAN_SERVICE_SHARE_URL:-https://bale.cyou}
-APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
+APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
 INFRA_TRAEFIK=${INFRA_TRAEFIK:-0}
 INFRA_SHARED_DB=${INFRA_SHARED_DB:-0}
 INFRA_PICKUP=${INFRA_PICKUP:-0}
@@ -118,7 +118,14 @@ app_image_from_env() {
   line="${line#APP_IMAGE=}"
   line="${line%\"}"
   line="${line#\"}"
-  printf '%s' "${line:-vpnmarket-local:latest}"
+  line="${line:-vpnmarket/app:latest}"
+  if docker image inspect "$line" >/dev/null 2>&1; then
+    printf '%s' "$line"
+  elif docker image inspect "vpnmarket/app:latest" >/dev/null 2>&1; then
+    printf '%s' "vpnmarket/app:latest"
+  else
+    printf '%s' "$line"
+  fi
 }
 
 build_app_image() {
@@ -146,6 +153,10 @@ compose_bot() {
   shift
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
+  set -a
+  # shellcheck disable=SC1090
+  source "$INSTANCE_ENV_FILE"
+  set +a
   if [ "${1:-}" = "up" ]; then
     ensure_app_image "$INSTANCE_ENV_FILE"
   fi
@@ -166,6 +177,10 @@ compose_pickup() {
   shift
   INSTANCE_ENV_FILE="$(instance_env_file "$dest")"
   export INSTANCE_ENV_FILE ENV_FILE="$INSTANCE_ENV_FILE"
+  set -a
+  # shellcheck disable=SC1090
+  source "$INSTANCE_ENV_FILE"
+  set +a
   if [ "${1:-}" = "up" ]; then
     ensure_app_image "$INSTANCE_ENV_FILE"
   fi
@@ -262,7 +277,7 @@ repair_instance_db_env() {
     printf 'MYSQL_ROOT_PASSWORD=%s\n' "$MYSQL_ROOT_PASSWORD"
   } >>"${envf}.tmp"
   mv "${envf}.tmp" "$envf"
-  chmod 600 "$envf"
+  chmod 640 "$envf"
   ok "DB_USERNAME=${DB_USERNAME} DB_DATABASE=${DB_DATABASE}"
 }
 
@@ -305,6 +320,7 @@ run_instance_migrate() {
 clear_instance_config_cache() {
   local container="$1"
   [ -n "$container" ] || return 0
+  docker exec "$container" rm -f /var/www/html/bootstrap/cache/config.php 2>/dev/null || true
   docker exec "$container" php artisan config:clear --no-interaction 2>/dev/null || true
 }
 
@@ -360,7 +376,7 @@ write_bot_env() {
   require_db_credentials || return 1
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
-APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
+APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
 
 APP_INSTANCE_ID=${instance_id}
 APP_NAME="${app_name}"
@@ -409,7 +425,7 @@ write_pickup_env() {
   require_db_credentials || return 1
   cat >"$dest/.env" <<EOF
 COMPOSE_PROJECT_NAME=${project}
-APP_IMAGE=${APP_IMAGE:-vpnmarket-local:latest}
+APP_IMAGE=${APP_IMAGE:-vpnmarket/app:latest}
 
 APP_INSTANCE_ID=pickup
 APP_NAME="دریافت اشتراک"
