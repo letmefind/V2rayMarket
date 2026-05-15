@@ -61,6 +61,12 @@ class WebhookController extends Controller
         return BotMessage::get('btn_xmplus_panel_account', '🔐 حساب پنل XMPlus');
     }
 
+    /** متن دکمهٔ «تمدید سرویس» در منوی اصلی (Filament → پیام‌های ربات). */
+    protected function mainMenuRenewButtonLabel(): string
+    {
+        return BotMessage::get('btn_main_renew_service', '🔄 تمدید سرویس');
+    }
+
     protected function planTelegramDisplayName(Plan $plan): string
     {
         if (! $this->settings) {
@@ -288,6 +294,7 @@ class WebhookController extends Controller
         }
 
         $xmplusMenuBtnLabel = $this->xmplusPanelAccountButtonLabel();
+        $renewMenuBtnLabel = $this->mainMenuRenewButtonLabel();
 
         switch ($text) {
             case '🛒 خرید سرویس':
@@ -295,6 +302,10 @@ class WebhookController extends Controller
                 break;
             case '🛠 سرویس‌های من':
                 $this->sendMyServices($user);
+                break;
+            case $renewMenuBtnLabel:
+            case '🔄 تمدید سرویس':
+                $this->sendRenewServiceMenu($user);
                 break;
             case '💰 کیف پول':
                 $this->sendWalletMenu($user);
@@ -1166,6 +1177,7 @@ class WebhookController extends Controller
                     break;
                 case '/plans': $this->sendPlans($chatId, $messageId); break;
                 case '/my_services': $this->sendMyServices($user, $messageId); break;
+                case '/renew': $this->sendRenewServiceMenu($user, $messageId); break;
                 case '/wallet': $this->sendWalletMenu($user, $messageId); break;
                 case '/xmplus_panel':
                     $this->sendXmplusPanelAccountInfo($user, $messageId);
@@ -2512,6 +2524,74 @@ TXT;
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
 
+    /**
+     * منوی تمدید: لیست سرویس‌های قابل تمدید (همان فیلتر «سرویس‌های من»).
+     */
+    protected function sendRenewServiceMenu($user, $messageId = null): void
+    {
+        $orders = $user->orders()->with('plan')
+            ->where('status', 'paid')
+            ->whereNotNull('plan_id')
+            ->whereNull('renews_order_id')
+            ->where('expires_at', '>', now()->subDays(30))
+            ->orderBy('expires_at', 'desc')
+            ->get();
+
+        if ($orders->isEmpty()) {
+            $keyboard = Keyboard::make()->inline()->row([
+                Keyboard::inlineButton(['text' => '🛒 خرید سرویس جدید', 'callback_data' => '/plans']),
+                Keyboard::inlineButton(['text' => '⬅️ بازگشت به منوی اصلی', 'callback_data' => '/start']),
+            ]);
+            $this->sendOrEditMessage(
+                $user->telegram_chat_id,
+                "⚠️ سرویسی برای تمدید یافت نشد.\n\nابتدا یک سرویس فعال بخرید یا از «سرویس‌های من» وضعیت را بررسی کنید.",
+                $keyboard,
+                $messageId
+            );
+
+            return;
+        }
+
+        $message = BotMessage::get(
+            'msg_renew_service_picker',
+            "🔄 *تمدید سرویس*\n\nیکی از سرویس‌های زیر را برای تمدید انتخاب کنید:"
+        );
+
+        $keyboard = Keyboard::make()->inline();
+
+        foreach ($orders as $order) {
+            if (! $order->plan) {
+                continue;
+            }
+
+            $expiresAt = Carbon::parse($order->expires_at);
+            $statusIcon = '🟢';
+            if ($expiresAt->isPast()) {
+                $statusIcon = '⚫️';
+            } elseif ($expiresAt->diffInDays(now()) <= 7) {
+                $statusIcon = '🟡';
+            }
+
+            $username = $order->panel_username ?: "سرویس-{$order->id}";
+            $planLabel = $this->truncateTelegramInlineButtonText($this->planTelegramDisplayName($order->plan));
+            $buttonText = "{$statusIcon} {$username} · {$planLabel}";
+
+            $keyboard->row([
+                Keyboard::inlineButton([
+                    'text' => $this->truncateTelegramInlineButtonText($buttonText),
+                    'callback_data' => "renew_order_{$order->id}",
+                ]),
+            ]);
+        }
+
+        $keyboard->row([
+            Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+            Keyboard::inlineButton(['text' => '⬅️ منوی اصلی', 'callback_data' => '/start']),
+        ]);
+
+        $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
+    }
+
     protected function showServiceDetails($user, $orderId, $messageId = null)
     {
         $order = $user->orders()->with('plan')->find($orderId);
@@ -3445,17 +3525,29 @@ TXT;
         if (! $xmplus && $balance >= $plan->price) {
             $keyboard->row([Keyboard::inlineButton(['text' => '✅ تمدید با کیف پول (آنی)', 'callback_data' => "renew_pay_wallet_{$originalOrderId}"])]);
         }
-        $keyboard->row([Keyboard::inlineButton(['text' => '💳 تمدید با کارت به کارت', 'callback_data' => "renew_pay_card_{$originalOrderId}"])]);
+        $keyboard->row([Keyboard::inlineButton([
+            'text' => BotMessage::get('btn_renew_card', '💳 تمدید با کارت به کارت'),
+            'callback_data' => "renew_pay_card_{$originalOrderId}",
+        ])]);
         if ($xmplus) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '🌐 تمدید با پرداخت آنلاین ارزی / کریپتو', 'callback_data' => "renew_pay_xmplusgw_{$originalOrderId}"])]);
+            $keyboard->row([Keyboard::inlineButton([
+                'text' => BotMessage::get('btn_renew_online', '🌐 تمدید با پرداخت آنلاین ارزی / کریپتو'),
+                'callback_data' => "renew_pay_xmplusgw_{$originalOrderId}",
+            ])]);
         }
         if ($this->isPlisioActive()) {
-            $keyboard->row([Keyboard::inlineButton(['text' => '💎 تمدید با Plisio', 'callback_data' => "renew_pay_plisio_{$originalOrderId}"])]);
+            $keyboard->row([Keyboard::inlineButton([
+                'text' => BotMessage::get('btn_renew_plisio', '💎 تمدید با Plisio'),
+                'callback_data' => "renew_pay_plisio_{$originalOrderId}",
+            ])]);
         }
         if ($this->isManualCryptoActive()) {
             $keyboard->row([Keyboard::inlineButton(['text' => '💠 تمدید با USDT / USDC', 'callback_data' => "renew_pay_mc_{$originalOrderId}"])]);
         }
-        $keyboard->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به سرویس‌ها', 'callback_data' => '/my_services'])]);
+        $keyboard->row([
+            Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => '/renew']),
+            Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+        ]);
 
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
@@ -4700,7 +4792,10 @@ TXT;
                 Keyboard::inlineButton(['text' => '🧪 اکانت تست', 'callback_data' => '🧪 اکانت تست']),
             ])
             ->row([
-                Keyboard::inlineButton(['text' => '💰 کیف پول', 'callback_data' => '/wallet']),
+                Keyboard::inlineButton([
+                    'text' => $this->truncateTelegramInlineButtonText($this->mainMenuRenewButtonLabel()),
+                    'callback_data' => '/renew',
+                ]),
                 Keyboard::inlineButton([
                     'text' => $this->truncateTelegramInlineButtonText(
                         $this->isXmplusPanel()
@@ -4733,7 +4828,7 @@ TXT;
         return Keyboard::make([
             'keyboard' => [
                 ['🛒 خرید سرویس', '🧪 اکانت تست'],
-                ['💰 کیف پول', '📜 تاریخچه تراکنش‌ها'],
+                [$this->mainMenuRenewButtonLabel(), '📜 تاریخچه تراکنش‌ها'],
                 ['💬 پشتیبانی', $referralOrXmplusBtn],
                 ['📚 راهنمای اتصال', '🛠 سرویس‌های من'],
 

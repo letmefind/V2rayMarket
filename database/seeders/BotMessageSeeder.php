@@ -246,6 +246,20 @@ class BotMessageSeeder extends Seeder
 
             // تمدید - Renewals
             [
+                'key' => 'btn_main_renew_service',
+                'category' => 'buttons',
+                'title' => 'دکمه: تمدید سرویس (منوی اصلی)',
+                'content' => '🔄 تمدید سرویس',
+                'description' => 'دکمهٔ منوی اصلی به‌جای کیف پول',
+            ],
+            [
+                'key' => 'msg_renew_service_picker',
+                'category' => 'messages',
+                'title' => 'پیام: انتخاب سرویس برای تمدید',
+                'content' => "🔄 *تمدید سرویس*\n\nیکی از سرویس‌های زیر را برای تمدید انتخاب کنید:",
+                'description' => 'متن لیست تمدید از منوی اصلی',
+            ],
+            [
                 'key' => 'btn_renew_card',
                 'category' => 'buttons',
                 'title' => 'دکمه: تمدید با کارت',
