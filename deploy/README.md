@@ -71,22 +71,48 @@ docker network ls | grep vpnmarket_shared_data
 
 ## ۳) وب مشترک کد ۵ رقمی (مثلاً bale.cyou)
 
+**پیشنهادی (هماهنگ با اسکریپت):** از **ریشهٔ مخزن** cluster را داشته باشید (`deploy/.provision/cluster.env`)، بعد:
+
+```bash
+cd /path/to/VPNMarket
+chmod +x deploy/bin/fix-instance-db.sh
+./deploy/bin/fix-instance-db.sh bale.cyou pickup
+```
+
+این اسکریپت `.env`، **`docker-compose.mount.yml`** (کپی `.env` به `/run/instance.env` داخل کانتینر)، `--project-directory` و `-p` را درست می‌کند؛ بدون mount، entrypoint با پیام `FATAL: no /run/instance.env and no .env` خارج می‌شود و کانتینر **مدام Restarting** می‌ماند.
+
+**دستی:** اگر بدون اسکریپت بالا می‌آورید، حتماً یک‌بار mount بسازید و در دستور `compose` بگذارید:
+
+```bash
+cd deploy/instances/bale.cyou
+source ../../../deploy/bin/lib/instance-compose.sh
+write_instance_mount_fragment "$(pwd)" "$(pwd)/.env" pickup
+
+cd ../../..   # برگرد به ریشهٔ VPNMarket
+export INSTANCE_ENV_FILE="$(pwd)/deploy/instances/bale.cyou/.env"
+set -a && source "$INSTANCE_ENV_FILE" && set +a
+
+docker compose --project-directory "$(pwd)" \
+  -f docker-compose.yml \
+  -f deploy/docker-compose.no-local-db.yml \
+  -f deploy/docker-compose.instance-env.yml \
+  -f deploy/docker-compose.build-root.yml \
+  -f deploy/docker-compose.pickup-only.yml \
+  -f docker-compose.traefik.yml \
+  -f deploy/instances/bale.cyou/docker-compose.yml \
+  -f deploy/instances/bale.cyou/docker-compose.mount.yml \
+  --env-file "$INSTANCE_ENV_FILE" \
+  -p "${COMPOSE_PROJECT_NAME:-vpnmarket_bale_cyou}" \
+  up -d --build --force-recreate
+```
+
+قبل از آن (اگر `.env` ندارید):
+
 ```bash
 mkdir -p deploy/instances/bale.cyou
 cp deploy/instances/_template.pickup/.env.example deploy/instances/bale.cyou/.env
 cp deploy/instances/_template.pickup/docker-compose.yml deploy/instances/bale.cyou/
-# ویرایش .env — APP_URL=https://bale.cyou ، DB_* مشترک
-
-cd deploy/instances/bale.cyou
-export INSTANCE_ENV_FILE="$(pwd)/.env"
-docker compose \
-  -f ../../../docker-compose.yml \
-  -f ../../../deploy/docker-compose.no-local-db.yml \
-  -f ../../../deploy/docker-compose.instance-env.yml \
-  -f ../../../deploy/docker-compose.pickup-only.yml \
-  -f ../../../docker-compose.traefik.yml \
-  -f docker-compose.yml \
-  --env-file .env up -d --build
+# ویرایش .env — APP_URL ، APP_DOMAIN ، DB_* مشترک
 ```
 
 در `.env` هر **ربات** مقدار `IRAN_SERVICE_SHARE_URL` / `services.iran_share` را روی `https://bale.cyou` بگذارید (همان دامنهٔ pickup).
@@ -104,18 +130,27 @@ chmod +x deploy/bin/new-instance.sh
 - `DB_PASSWORD`, `MYSQL_ROOT_PASSWORD`
 - `APP_URL=https://x.com`
 
-سپس:
+سپس از **ریشهٔ مخزن** (مثل `fix-instance-db.sh`): `write_instance_mount_fragment` برای `bot` اجرا کنید و `-f docker-compose.mount.yml` و `--project-directory` و `-p` را به دستور اضافه کنید؛ یا از `./deploy/bin/fix-instance-db.sh x.com bot` بعد از آماده بودن `cluster.env` استفاده کنید.
 
 ```bash
 cd deploy/instances/x.com
-export INSTANCE_ENV_FILE="$(pwd)/.env"
-docker compose \
-  -f ../../../docker-compose.yml \
-  -f ../../../deploy/docker-compose.no-local-db.yml \
-  -f ../../../deploy/docker-compose.instance-env.yml \
-  -f ../../../docker-compose.traefik.yml \
+source ../../../deploy/bin/lib/instance-compose.sh
+write_instance_mount_fragment "$(pwd)" "$(pwd)/.env" bot
+cd ../../..
+export INSTANCE_ENV_FILE="$(pwd)/deploy/instances/x.com/.env"
+set -a && source "$INSTANCE_ENV_FILE" && set +a
+
+docker compose --project-directory "$(pwd)" \
   -f docker-compose.yml \
-  --env-file .env \
+  -f deploy/docker-compose.no-local-db.yml \
+  -f deploy/docker-compose.instance-env.yml \
+  -f deploy/docker-compose.build-root.yml \
+  -f deploy/docker-compose.bot-workers.yml \
+  -f docker-compose.traefik.yml \
+  -f deploy/instances/x.com/docker-compose.yml \
+  -f deploy/instances/x.com/docker-compose.mount.yml \
+  --env-file "$INSTANCE_ENV_FILE" \
+  -p "${COMPOSE_PROJECT_NAME}" \
   up -d --build
 ```
 
