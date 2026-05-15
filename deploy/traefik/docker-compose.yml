@@ -3,8 +3,11 @@ name: traefik
 
 services:
   traefik:
-    image: traefik:v3.3
+    # نسخهٔ قدیمی‌تر با سوکت Docker گاهی API 1.24 می‌فرستد و روی Docker جدید providers قطع می‌شود → همه‌چیز 404
+    image: traefik:v3.7
     restart: unless-stopped
+    labels:
+      - vpnmarket.shared_traefik=true
     env_file:
       - .env
     command:

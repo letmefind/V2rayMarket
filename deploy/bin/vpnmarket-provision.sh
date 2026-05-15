@@ -76,7 +76,8 @@ load_cluster() {
 }
 
 traefik_running() {
-  docker ps --filter "name=traefik" --filter "status=running" -q 2>/dev/null | grep -q .
+  # فقط Traefik مشترک deploy/traefik (لیبل دار)؛ traefik که کنار هر ربات بالا آمده را «running» حساب نکن
+  docker ps --filter "label=vpnmarket.shared_traefik=true" --filter "status=running" -q 2>/dev/null | grep -q .
 }
 
 save_cluster() {
