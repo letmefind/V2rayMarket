@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <domain> [project_name]"
-  echo "Example: $0 x.com vpnmarket_x"
+  echo "Usage: $0 <domain>"
+  echo ""
+  echo "برای نصب کامل بدون مرحلهٔ دستی از اسکریپت تعاملی استفاده کنید:"
+  echo "  $ROOT/provision"
+  echo "  # یا: $ROOT/deploy/bin/vpnmarket-provision.sh"
   exit 1
+fi
+
+if [ "${VPNMARKET_LEGACY_NEW_INSTANCE:-}" != "1" ]; then
+  echo "→ برای نصب خودکار (Traefik، DB، webhook، ادمین) اجرا کنید:"
+  echo "  $ROOT/provision"
+  echo "  (گزینه ۲ — افزودن ربات جدید)"
+  echo ""
+  echo "برای همان رفتار قدیمی فقط کپی قالب: VPNMARKET_LEGACY_NEW_INSTANCE=1 $0 $*"
+  exit 0
 fi
 
 DOMAIN="$1"

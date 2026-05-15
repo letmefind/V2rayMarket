@@ -10,6 +10,7 @@ name: vpnmarket_shared
 services:
   mysql:
     image: mysql:8.4
+    container_name: vpnmarket_shared_mysql
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD}
@@ -22,16 +23,23 @@ services:
       retries: 30
       start_period: 30s
     networks:
-      - shared_data
+      shared_data:
+        aliases:
+          - mysql
+          - vpnmarket-mysql
 
   redis:
     image: redis:7-alpine
+    container_name: vpnmarket_shared_redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - shared_redis_data:/data
     networks:
-      - shared_data
+      shared_data:
+        aliases:
+          - redis
+          - vpnmarket-redis
 
 volumes:
   shared_mysql_data:

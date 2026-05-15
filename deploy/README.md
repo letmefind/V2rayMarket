@@ -4,6 +4,29 @@
 **یک MySQL مشترک** — داده‌ها با ستون `instance_id` قاطی نمی‌شوند.  
 **یک وب مشترک** (مثلاً `bale.cyou`) — فقط ورود **کد ۵ رقمی**؛ کد از همهٔ ربات‌ها در جدول `service_shares` مشترک است.
 
+## نصب خودکار (پیشنهادی — بدون کار دستی)
+
+روی سرور لینوکس، از ریشهٔ مخزن:
+
+```bash
+chmod +x provision deploy/bin/vpnmarket-provision.sh
+./provision
+```
+
+منوی تعاملی:
+
+| گزینه | کار |
+|--------|-----|
+| **1** | اولین بار: Traefik + MySQL/Redis مشترک + وب pickup + یک ربات |
+| **2** | هر بار بعد: فقط ربات جدید (دامنه، توکن BotFather، ادمین Filament) |
+| **3** | فقط وب کد ۵ رقمی |
+| **4** | فقط زیرساخت (Traefik + DB) |
+| **5** | وضعیت کانتینرها و نمونه‌ها |
+
+اسکریپت این کارها را خودکار انجام می‌دهد: ساخت `.env`، `docker compose up --build`، migrate، seed پیام‌های ربات، ذخیره توکن در DB، ساخت کاربر ادمین، `telegram:set-webhook`. تنظیمات خوشه در `deploy/.provision/cluster.env` (در git نیست) ذخیره می‌شود.
+
+**پیش‌نیاز:** DNS هر دامنه به IP سرور اشاره کند؛ پورت‌های 80 و 443 باز باشند.
+
 ## معماری (پیشنهادی)
 
 ```text
@@ -93,7 +116,7 @@ docker compose \
 وب‌هوک تلگرام: `https://x.com/webhooks/telegram`  
 پنل ادمین: `https://x.com/admin` (مسیر Filament شما)
 
-## ۳) نمونهٔ دوم (y.com)
+## ۵) نمونهٔ دوم ربات (y.com)
 
 ```bash
 ./deploy/bin/new-instance.sh y.com vpnmarket_y
@@ -101,6 +124,14 @@ docker compose \
 cd deploy/instances/y.com
 docker compose -f ../../../docker-compose.yml -f ../../../docker-compose.traefik.yml -f docker-compose.yml --env-file .env up -d --build
 ```
+
+## متغیرهای مهم
+
+| متغیر | نقش |
+|--------|-----|
+| `APP_INSTANCE_ID` | جداسازی کاربر/سفارش/تنظیمات در DB مشترک |
+| `APP_SHARE_PICKUP_ONLY=true` | فقط مسیرهای کد ۵ رقمی (بدون فروشگاه/ادمین) |
+| `DB_DATABASE` | نام دیتابیس مشترک (یکسان برای همه) |
 
 ## تست محلی (بدون Traefik)
 
