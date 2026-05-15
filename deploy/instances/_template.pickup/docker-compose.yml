@@ -4,7 +4,7 @@ services:
     env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ${ENV_FILE:-${INSTANCE_ENV_FILE}}:/run/instance.env:ro
+      - ${ENV_FILE}:/run/instance.env:ro
 
 networks:
   shared_data:

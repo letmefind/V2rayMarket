@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=lib/instance-compose.sh
+source "$ROOT/deploy/bin/lib/instance-compose.sh"
 CLUSTER="$ROOT/deploy/.provision/cluster.env"
 DOMAIN="${1:-bale.cyou}"
 INSTANCE_TYPE="${2:-pickup}"
@@ -154,6 +156,8 @@ else
 fi
 
 ensure_env_mount_vars "$DEST/.env"
+ENV_ABS="$(cd "$DEST" && pwd)/.env"
+patch_instance_compose_env_mount "$DEST/docker-compose.yml" "$ENV_ABS" || err "patch docker-compose.yml ناموفق"
 
 echo "→ .env:"
 grep -E '^(APP_KEY|DB_|APP_DOMAIN|COMPOSE_PROJECT_NAME|ENV_FILE)=' "$DEST/.env"
@@ -187,6 +191,14 @@ COMPOSE_FILES+=(
   -f "$DEST/docker-compose.yml"
 )
 
+if ! compose_config_has_env_mount "$ENV_ABS" \
+  --project-directory "$ROOT" \
+  "${COMPOSE_FILES[@]}" \
+  --env-file "$INSTANCE_ENV_FILE" \
+  -p "$PROJECT"; then
+  err "در docker compose config مسیر .env نیست — نسخه compose یا فایل‌های merge را چک کنید"
+fi
+
 info "recreate container ($CONTAINER)"
 docker compose --project-directory "$ROOT" \
   "${COMPOSE_FILES[@]}" \
@@ -209,10 +221,16 @@ info "mount:"
 docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null | grep -E 'instance|\.env' || true
 
 info "داخل کانتینر:"
+CTR_STATE="$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo missing)"
+if [ "$CTR_STATE" != "running" ]; then
+  docker logs "$CONTAINER" --tail 40 2>&1 || true
+  err "کانتینر $CONTAINER در حالت $CTR_STATE است — لاگ بالا"
+fi
 if ! docker exec "$CONTAINER" test -f /run/instance.env 2>/dev/null; then
   echo "  ENV_FILE در .env: $(grep -E '^ENV_FILE=' "$DEST/.env" || echo '(خالی)')"
+  echo "  mount در compose.yml: $(grep run/instance.env "$DEST/docker-compose.yml" || true)"
   docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true
-  err "mount /run/instance.env نیست — ENV_FILE باید مسیر مطلق deploy/instances/$DOMAIN/.env باشد؛ docker logs $CONTAINER"
+  err "mount /run/instance.env نیست — docker logs $CONTAINER"
 fi
 docker exec "$CONTAINER" head -3 /run/instance.env
 docker exec "$CONTAINER" grep -E '^(DB_USERNAME|DB_DATABASE)=' /var/www/html/.env
