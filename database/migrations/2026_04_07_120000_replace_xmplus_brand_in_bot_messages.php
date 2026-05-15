@@ -1,7 +1,7 @@
 <?php
 
-use App\Models\BotMessage;
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -12,7 +12,7 @@ return new class extends Migration
             return;
         }
 
-        BotMessage::query()->chunkById(100, function ($rows): void {
+        DB::table('bot_messages')->orderBy('id')->chunk(100, function ($rows): void {
             foreach ($rows as $m) {
                 $title = str_ireplace('xmplus', 'BypassNET', (string) $m->title);
                 $content = str_ireplace('xmplus', 'BypassNET', (string) $m->content);
@@ -21,16 +21,14 @@ return new class extends Migration
                     : null;
 
                 if ($title !== $m->title || $content !== $m->content || $desc !== $m->description) {
-                    $m->forceFill([
+                    DB::table('bot_messages')->where('id', $m->id)->update([
                         'title' => $title,
                         'content' => $content,
                         'description' => $desc,
-                    ])->saveQuietly();
+                    ]);
                 }
             }
         });
-
-        BotMessage::clearCache();
     }
 
     public function down(): void

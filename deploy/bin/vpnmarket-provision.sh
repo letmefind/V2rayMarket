@@ -454,10 +454,10 @@ QUEUE_CONNECTION=sync
 CACHE_STORE=file
 SESSION_DRIVER=file
 
-RUN_MIGRATIONS=false
+RUN_MIGRATIONS=true
 WAIT_FOR_DB=true
 EOF
-  chmod 600 "$dest/.env"
+  chmod 640 "$dest/.env"
 }
 
 bootstrap_bot_container() {
@@ -587,14 +587,63 @@ ensure_prerequisites() {
   command -v curl >/dev/null || { err "curl لازم است"; exit 1; }
 }
 
+auto_install() {
+  info "نصب خودکار — Traefik، DB، وب pickup، یک ربات"
+  ensure_traefik
+  ensure_shared_db
+  save_cluster
+  local pickup="${PICKUP_DOMAIN:-bale.cyou}"
+  if [ -f "$INSTANCES_DIR/$pickup/.env" ]; then
+    warn "pickup موجود — تعمیر DB و recreate"
+    repair_instance_db_env "$INSTANCES_DIR/$pickup" || return 1
+    sync_mysql_app_user || true
+    export INSTANCE_ENV_FILE="$(cd "$INSTANCES_DIR/$pickup" && pwd)/.env"
+    set -a && source "$INSTANCE_ENV_FILE" && set +a
+    ensure_app_image "$INSTANCE_ENV_FILE"
+    compose_pickup "$INSTANCES_DIR/$pickup" up -d --force-recreate
+    local c="vpnmarket_${pickup//./_}-web-1"
+    clear_instance_config_cache "$c"
+    run_instance_migrate "$INSTANCES_DIR/$pickup" "$c" || true
+  else
+    provision_pickup_site "$pickup"
+  fi
+  save_cluster
+  local bot_domain
+  bot_domain="$(prompt "دامنه ربات (مثلاً shop.example.com)" "")"
+  [ -n "$bot_domain" ] && provision_bot_instance "$bot_domain"
+  save_cluster
+  show_status
+  ok "نصب تمام شد."
+}
+
 # --- main ---
 ensure_prerequisites
 load_cluster
+
+if [ "${1:-}" = "auto" ]; then
+  auto_install
+  exit 0
+fi
+if [ "${1:-}" = "bot" ] && [ -n "${2:-}" ]; then
+  ensure_traefik
+  ensure_shared_db
+  save_cluster
+  provision_bot_instance "$2"
+  save_cluster
+  show_status
+  exit 0
+fi
+if [ "${1:-}" = "status" ]; then
+  show_status
+  exit 0
+fi
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
 echo "║   VPNMarket — نصب/افزودن Docker (تعاملی)     ║"
 echo "╚══════════════════════════════════════════════╝"
+echo ""
+echo "  نصب ساده:  ./deploy/install.sh"
 echo ""
 
 if [ -f "$CLUSTER_ENV" ]; then
