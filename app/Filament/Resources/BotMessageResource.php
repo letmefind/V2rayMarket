@@ -124,6 +124,7 @@ class BotMessageResource extends Resource
 
                 Tables\Columns\TextColumn::make('content')
                     ->label('محتوا')
+                    ->searchable()
                     ->limit(50)
                     ->wrap()
                     ->tooltip(function (Tables\Columns\TextColumn $column): ?string {
@@ -133,6 +134,11 @@ class BotMessageResource extends Resource
                         }
                         return null;
                     }),
+
+                Tables\Columns\TextColumn::make('description')
+                    ->label('توضیحات')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 Tables\Columns\IconColumn::make('is_active')
                     ->label('فعال')
