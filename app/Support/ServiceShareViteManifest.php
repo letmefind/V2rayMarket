@@ -27,18 +27,11 @@ final class ServiceShareViteManifest
             return null;
         }
 
-        $paths = [
+        // وجود فایل را از manifest می‌پذیریم؛ چک is_file گاهی در برخی FS/کانتینرها false منفی می‌دهد.
+        return [
             'css' => '/build/'.$css,
             'js' => '/build/'.$js,
         ];
-        foreach ($paths as $rel) {
-            $abs = public_path(ltrim($rel, '/'));
-            if (! is_file($abs)) {
-                return null;
-            }
-        }
-
-        return $paths;
     }
 
     /** @return array<string, mixed>|null */

@@ -1,7 +1,6 @@
 @php
-    // مثل سرور معمولی: nginx فایل‌های public/build را مستقیم می‌دهد — لینک نسبی /build/...
-    // بدون @vite تا با ASSET_URL/پروکسی، URL اشتباه نشود. با public/hot همان HMR @vite.
-    $viteHot = is_file(public_path('hot'));
+    // public/hot فقط در local؛ اگر در ایمیج اشتباهی مانده باشد @vite به :5173 می‌زند و استایل می‌پاشد.
+    $viteHot = app()->isLocal() && is_file(public_path('hot'));
     $fromManifest = \App\Support\ServiceShareViteManifest::entryUrls();
 @endphp
 <!DOCTYPE html>
@@ -12,13 +11,17 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="theme-color" content="#0f172a">
     <title>دریافت اشتراک — {{ \App\Services\ServiceShareService::publicDisplayTypingPath() }}</title>
+    {{-- تشخیص دیپلوی در View Source: باید manifest باشد نه cdn --}}
     @if ($viteHot)
+        <!-- vpnmarket-share-assets: vite-dev -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     @elseif ($fromManifest)
-        {{-- URL مطلق با scheme دامنه (APP_URL + TrustProxies) — جلو mixed content / Not Secure --}}
-        <link rel="stylesheet" href="{{ url($fromManifest['css']) }}">
-        <script type="module" src="{{ url($fromManifest['js']) }}"></script>
+        <!-- vpnmarket-share-assets: manifest {{ $fromManifest['css'] }} -->
+        {{-- هم‌مبدأ با صفحه — مستقل از APP_URL اشتباه در .env --}}
+        <link rel="stylesheet" href="{{ $fromManifest['css'] }}">
+        <script type="module" src="{{ $fromManifest['js'] }}"></script>
     @else
+        <!-- vpnmarket-share-assets: cdn-fallback -->
         {{-- فقط بدون بیلد (بدون Docker / بدون npm run build) --}}
         <script src="https://cdn.tailwindcss.com"></script>
         <script>
