@@ -1,3 +1,3 @@
-*
-!_template/
-!.gitignore
+/*
+!/_template/
+!/_template/**
