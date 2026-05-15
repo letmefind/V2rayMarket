@@ -427,6 +427,7 @@ if ($success) {
         ];
         if ($panelType === 'xmplus') {
             $renewPatch = array_merge($renewPatch, $extraOrderAttrs);
+            $renewPatch = Order::mergePreserveServiceLabel($originalOrder, $renewPatch);
         } else {
             $renewPatch['panel_username'] = $uniqueUsername;
         }
@@ -447,6 +448,7 @@ if ($success) {
         ];
         if ($panelType === 'xmplus') {
             $newPatch = array_merge($newPatch, $extraOrderAttrs);
+            $newPatch = Order::mergePreserveServiceLabel($order, $newPatch);
         } else {
             $newPatch['panel_username'] = $uniqueUsername;
         }
@@ -537,10 +539,10 @@ return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛
         }
 
         $finalConfig = $result['final_config'];
-        $extraOrderAttrs = array_filter([
+        $extraOrderAttrs = Order::mergePreserveServiceLabel($pending, array_filter([
             'panel_username' => $result['panel_username'],
             'panel_client_id' => $result['panel_client_id'],
-        ], fn ($v) => $v !== null && $v !== '');
+        ], fn ($v) => $v !== null && $v !== ''));
         $telegramAppend = $result['credentials_message'] ?? null;
 
         $newExpiresAt = $isRenewal
@@ -554,10 +556,10 @@ return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛
             }
 
             if ($isRenewal) {
-                $renewPatch = array_merge([
+                $renewPatch = Order::mergePreserveServiceLabel($originalOrder, array_merge([
                     'config_details' => $finalConfig,
                     'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
-                ], $extraOrderAttrs);
+                ], $extraOrderAttrs));
                 $originalOrder->update($renewPatch);
 
                 $user->update(['show_renewal_notification' => true]);
@@ -569,10 +571,10 @@ return ApprovePendingOrderResult::fail('توجه', 'سفارش فعال نشد؛
                     'link' => route('dashboard', ['tab' => 'my_services']),
                 ]);
             } else {
-                $locked->update(array_merge([
+                $locked->update(Order::mergePreserveServiceLabel($locked, array_merge([
                     'config_details' => $finalConfig,
                     'expires_at' => $newExpiresAt,
-                ], $extraOrderAttrs));
+                ], $extraOrderAttrs)));
                 $user->notifications()->create([
                     'type' => 'service_activated_admin',
                     'title' => 'سرویس شما فعال شد!',

@@ -388,7 +388,12 @@ class WebhookController extends Controller
         }
 
 
-        $existingOrder = Order::where('panel_username', $username)->where('status', 'paid')->first();
+        $existingOrder = Order::query()
+            ->where('status', 'paid')
+            ->where(function ($q) use ($username) {
+                $q->where('panel_username', $username)->orWhere('service_label', $username);
+            })
+            ->first();
         if ($existingOrder) {
             Telegram::sendMessage([
                 'chat_id' => $user->telegram_chat_id,
@@ -1468,7 +1473,8 @@ class WebhookController extends Controller
             'amount' => $plan->price,
             'discount_amount' => 0,
             'discount_code_id' => null,
-            'panel_username' => $username
+            'panel_username' => $username,
+            'service_label' => $username,
         ]);
 
         $this->ensureXmplusInvoiceForPendingPlanOrder($order);
@@ -1687,7 +1693,7 @@ class WebhookController extends Controller
                     if (! empty($provisionData['panel_client_id'])) {
                         $patch['panel_client_id'] = $provisionData['panel_client_id'];
                     }
-                    $order->update($patch);
+                    $order->update(Order::mergePreserveServiceLabel($order, $patch));
 
                     if ($order->renews_order_id) {
                         $orig = Order::find($order->renews_order_id);
@@ -1696,7 +1702,7 @@ class WebhookController extends Controller
                                 ? Carbon::parse($orig->expires_at)
                                 : now();
                             $newExp = $base->copy()->addDays($plan->duration_days);
-                            $orig->update(array_merge($patch, ['expires_at' => $newExp]));
+                            $orig->update(Order::mergePreserveServiceLabel($orig, array_merge($patch, ['expires_at' => $newExp])));
                         }
                     }
                 } else {
@@ -2508,8 +2514,8 @@ TXT;
                 $statusIcon = '🟡';
             }
 
-            $username = $order->panel_username ?: "سرویس-{$order->id}";
-            $buttonText = "{$statusIcon} {$username} (ID: #{$order->id})";
+            $displayName = $order->serviceDisplayLabel();
+            $buttonText = "{$statusIcon} {$displayName} (ID: #{$order->id})";
 
             $keyboard->row([
                 Keyboard::inlineButton([
@@ -2572,9 +2578,9 @@ TXT;
                 $statusIcon = '🟡';
             }
 
-            $username = $order->panel_username ?: "سرویس-{$order->id}";
+            $displayName = $order->serviceDisplayLabel();
             $planLabel = $this->truncateTelegramInlineButtonText($this->planTelegramDisplayName($order->plan));
-            $buttonText = "{$statusIcon} {$username} · {$planLabel}";
+            $buttonText = "{$statusIcon} {$displayName} · {$planLabel}";
 
             $keyboard->row([
                 Keyboard::inlineButton([
@@ -2605,6 +2611,7 @@ TXT;
         if (empty($panelUsername)) {
             $panelUsername = "user-{$user->id}-order-{$order->id}";
         }
+        $serviceLabel = $order->serviceDisplayLabel();
 
         $expiresAt = Carbon::parse($order->expires_at);
         $now = now();
@@ -2625,7 +2632,12 @@ TXT;
 
         $message = "🔍 جزئیات سرویس #{$order->id}\n\n";
         $message .= "{$statusIcon} سرویس: ".$this->escape($this->planTelegramDisplayName($order->plan))."\n";
-        $message .= "👤 نام کاربری: `" . $panelUsername . "`\n";
+        $message .= '🏷 نام سرویس: *'.$this->escape($serviceLabel)."*\n";
+        if ($serviceLabel !== $panelUsername) {
+            $message .= '👤 حساب پنل: `'.$panelUsername."`\n";
+        } else {
+            $message .= "👤 نام کاربری: `" . $panelUsername . "`\n";
+        }
         $message .= "🗓 انقضا: " . $this->escape($expiresAt->format('Y/m/d')) . " - " . $remainingText . "\n";
         $message .= "📦  حجم:  " . $this->escape($order->plan->volume_gb . ' گیگابایت') . "\n";
         if (!empty($order->config_details)) {
@@ -3973,12 +3985,12 @@ TXT;
                 if (($result['phase'] ?? '') === 'await_gateway') {
                     return ['phase' => 'await_gateway'];
                 }
-                $originalOrder->update([
+                $originalOrder->update(Order::mergePreserveServiceLabel($originalOrder, [
                     'expires_at' => $newExpiryDate,
                     'config_details' => $result['final_config'],
                     'panel_username' => $result['panel_username'],
                     'panel_client_id' => $result['panel_client_id'] ?? $originalOrder->panel_client_id,
-                ]);
+                ]));
 
                 return [
                     'link' => $result['final_config'],

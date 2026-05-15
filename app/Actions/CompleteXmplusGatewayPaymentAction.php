@@ -426,10 +426,10 @@ final class CompleteXmplusGatewayPaymentAction
             : now()->addDays($plan->duration_days);
 
         $finalConfig = $prov['final_config'];
-        $extraOrderAttrs = array_filter([
+        $extraOrderAttrs = Order::mergePreserveServiceLabel($order, array_filter([
             'panel_username' => $prov['panel_username'],
             'panel_client_id' => $prov['panel_client_id'],
-        ], fn ($v) => $v !== null && $v !== '');
+        ], fn ($v) => $v !== null && $v !== ''));
 
         $telegramAppend = isset($ctx['credentials_message']) && is_string($ctx['credentials_message'])
             ? $ctx['credentials_message']
@@ -451,10 +451,10 @@ final class CompleteXmplusGatewayPaymentAction
                 $txAmount
             ) {
                 if ($isRenewal && $originalOrder) {
-                    $renewPatch = array_merge([
+                    $renewPatch = Order::mergePreserveServiceLabel($originalOrder, array_merge([
                         'config_details' => $finalConfig,
                         'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
-                    ], $extraOrderAttrs);
+                    ], $extraOrderAttrs));
                     $originalOrder->update($renewPatch);
                     $user->update(['show_renewal_notification' => true]);
                     $user->notifications()->create([
@@ -464,10 +464,10 @@ final class CompleteXmplusGatewayPaymentAction
                         'link' => route('dashboard', ['tab' => 'my_services']),
                     ]);
                 } else {
-                    $newPatch = array_merge([
+                    $newPatch = Order::mergePreserveServiceLabel($order, array_merge([
                         'config_details' => $finalConfig,
                         'expires_at' => $newExpiresAt,
-                    ], $extraOrderAttrs);
+                    ], $extraOrderAttrs));
                     $order->update($newPatch);
                     $user->notifications()->create([
                         'type' => 'service_activated_admin',

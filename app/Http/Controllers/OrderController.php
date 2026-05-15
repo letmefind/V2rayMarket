@@ -772,10 +772,10 @@ class OrderController extends Controller
                     );
                     $finalConfig = $result['final_config'];
                     $success = true;
-                    $extraOrderAttrs = array_filter([
+                    $extraOrderAttrs = Order::mergePreserveServiceLabel($order, array_filter([
                         'panel_username' => $result['panel_username'],
                         'panel_client_id' => $result['panel_client_id'],
-                    ], fn ($v) => $v !== null && $v !== '');
+                    ], fn ($v) => $v !== null && $v !== ''));
                 } else {
                     throw new \Exception('نوع پنل در تنظیمات مشخص نشده است.');
                 }
@@ -788,10 +788,10 @@ class OrderController extends Controller
                 // ذخیره سفارشات
                 // ==========================================
                 if ($isRenewal) {
-                    $originalOrder->update(array_merge([
+                    $originalOrder->update(Order::mergePreserveServiceLabel($originalOrder, array_merge([
                         'config_details' => $finalConfig,
                         'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
-                    ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
+                    ], $panelType === 'xmplus' ? $extraOrderAttrs : [])));
 
                     $user->update(['show_renewal_notification' => true]);
 
@@ -802,10 +802,10 @@ class OrderController extends Controller
                         'link' => route('dashboard', ['tab' => 'my_services']),
                     ]);
                 } else {
-                    $order->update(array_merge([
+                    $order->update(Order::mergePreserveServiceLabel($order, array_merge([
                         'config_details' => $finalConfig,
                         'expires_at' => $newExpiresAt,
-                    ], $panelType === 'xmplus' ? $extraOrderAttrs : []));
+                    ], $panelType === 'xmplus' ? $extraOrderAttrs : [])));
 
                     $user->notifications()->create([
                         'type' => 'service_purchased',

@@ -342,20 +342,20 @@ class FulfillOrderAfterPaymentAction
             );
             $finalConfig = $result['final_config'];
             $success = true;
-            $extraOrderAttrs = array_filter([
+            $extraOrderAttrs = Order::mergePreserveServiceLabel($order, array_filter([
                 'panel_username' => $result['panel_username'],
                 'panel_client_id' => $result['panel_client_id'],
-            ], fn ($v) => $v !== null && $v !== '');
+            ], fn ($v) => $v !== null && $v !== ''));
             $telegramAppend = $result['credentials_message'] ?? null;
         } else {
             throw new \RuntimeException('نوع پنل در تنظیمات مشخص نشده است.');
         }
 
         if ($isRenewal) {
-            $originalOrder->update(array_merge([
+            $originalOrder->update(Order::mergePreserveServiceLabel($originalOrder, array_merge([
                 'config_details' => $finalConfig,
                 'expires_at' => $newExpiresAt->format('Y-m-d H:i:s'),
-            ], $extraOrderAttrs));
+            ], $extraOrderAttrs)));
             $user->update(['show_renewal_notification' => true]);
             $user->notifications()->create([
                 'type' => 'service_renewed',
@@ -364,10 +364,10 @@ class FulfillOrderAfterPaymentAction
                 'link' => route('dashboard', ['tab' => 'my_services']),
             ]);
         } else {
-            $order->update(array_merge([
+            $order->update(Order::mergePreserveServiceLabel($order, array_merge([
                 'config_details' => $finalConfig,
                 'expires_at' => $newExpiresAt,
-            ], $extraOrderAttrs));
+            ], $extraOrderAttrs)));
             $user->notifications()->create([
                 'type' => 'service_purchased',
                 'title' => 'سرویس شما فعال شد!',
