@@ -9,11 +9,15 @@ php artisan config:clear --no-interaction 2>/dev/null || true
 if [ -f .env ]; then
   chmod 640 .env 2>/dev/null || true
   chown www-data:www-data .env 2>/dev/null || true
-elif [ -f .env.example ]; then
-  echo "[entrypoint] Warning: .env missing; copying .env.example (set real values via mount or env_file)"
+elif [ -d .env ]; then
+  echo "[entrypoint] FATAL: .env is a directory — fix host mount (rm deploy/instances/<domain>/.env dir and recreate file)" >&2
+  exit 1
+elif [ -f .env.example ] && [ "${APP_ENV:-production}" != "production" ]; then
+  echo "[entrypoint] Warning: .env missing; copying .env.example (local only)"
   cp .env.example .env
-  chmod 640 .env 2>/dev/null || true
-  chown www-data:www-data .env 2>/dev/null || true
+else
+  echo "[entrypoint] FATAL: .env missing — mount deploy/instances/<domain>/.env (never use repo .env.example in production)" >&2
+  exit 1
 fi
 
 wait_for_db() {

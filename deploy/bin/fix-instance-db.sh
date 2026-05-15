@@ -12,11 +12,17 @@ CONTAINER="${PROJECT}-web-1"
 err() { echo "✗ $*" >&2; exit 1; }
 
 [ -f "$CLUSTER" ] || err "نیست: $CLUSTER — ابتدا ./provision گزینه ۴"
+if [ -d "$DEST/.env" ]; then
+  err "$DEST/.env یک پوشه است! حذف کنید: rm -rf $DEST/.env && دوباره این اسکریپت را بزنید"
+fi
 [ -f "$DEST/.env" ] || err "نیست: $DEST/.env"
 
 # shellcheck disable=SC1090
 source "$CLUSTER"
 [ -n "${DB_PASSWORD:-}" ] || err "DB_PASSWORD در cluster.env خالی است"
+
+echo "→ قبل (هاست):"
+grep -E '^DB_(USERNAME|PASSWORD|DATABASE)=' "$DEST/.env" 2>/dev/null || true
 
 echo "→ همگام‌سازی $DEST/.env"
 grep -v -E '^(DB_CONNECTION|DB_HOST|DB_PORT|DB_DATABASE|DB_USERNAME|DB_PASSWORD|MYSQL_ROOT_PASSWORD)=' "$DEST/.env" >"${DEST}/.env.tmp"
