@@ -1,19 +1,19 @@
-# فقط mount فایل .env نمونه — env_file داکر با Laravel تداخل/override می‌سازد
+# mount به /run/instance.env — entrypoint آن را به .env کپی می‌کند (bind مستقیم .env روی بعضی hostها خراب می‌شود)
 services:
   web:
     env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ${INSTANCE_ENV_FILE:?set INSTANCE_ENV_FILE}:/var/www/html/.env:ro
+      - ${INSTANCE_ENV_FILE:?set INSTANCE_ENV_FILE}:/run/instance.env:ro
 
   queue:
     env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
+      - ${INSTANCE_ENV_FILE:?}:/run/instance.env:ro
 
   scheduler:
     env_file: !reset null
     volumes: !reset
       - app_storage:/var/www/html/storage
-      - ${INSTANCE_ENV_FILE:?}:/var/www/html/.env:ro
+      - ${INSTANCE_ENV_FILE:?}:/run/instance.env:ro

@@ -6,17 +6,22 @@ cd /var/www/html
 rm -f bootstrap/cache/config.php 2>/dev/null || true
 php artisan config:clear --no-interaction 2>/dev/null || true
 
-if [ -f .env ]; then
+if [ -f /run/instance.env ]; then
+  cp /run/instance.env /var/www/html/.env
+  chmod 640 /var/www/html/.env
+  chown www-data:www-data /var/www/html/.env
+  echo "[entrypoint] Loaded .env from /run/instance.env"
+elif [ -f .env ]; then
   chmod 640 .env 2>/dev/null || true
   chown www-data:www-data .env 2>/dev/null || true
 elif [ -d .env ]; then
-  echo "[entrypoint] FATAL: .env is a directory — fix host mount (rm deploy/instances/<domain>/.env dir and recreate file)" >&2
+  echo "[entrypoint] FATAL: .env is a directory — rm deploy/instances/<domain>/.env on host" >&2
   exit 1
 elif [ -f .env.example ] && [ "${APP_ENV:-production}" != "production" ]; then
   echo "[entrypoint] Warning: .env missing; copying .env.example (local only)"
   cp .env.example .env
 else
-  echo "[entrypoint] FATAL: .env missing — mount deploy/instances/<domain>/.env (never use repo .env.example in production)" >&2
+  echo "[entrypoint] FATAL: no /run/instance.env and no .env — check Docker volume mount" >&2
   exit 1
 fi
 
@@ -48,7 +53,6 @@ fi
 
 php artisan storage:link --force 2>/dev/null || true
 
-# config:cache در Docker .env mount را قفل می‌کند (root/بدون رمز) — استفاده نکنید
 if [ "${LARAVEL_ROUTE_CACHE:-false}" = "true" ]; then
   php artisan route:cache --no-interaction 2>/dev/null || true
 fi

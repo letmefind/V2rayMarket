@@ -96,7 +96,8 @@ sleep 10
 docker exec "$CONTAINER" rm -f /var/www/html/bootstrap/cache/config.php 2>/dev/null || true
 docker exec "$CONTAINER" php artisan config:clear --no-interaction
 
-echo "→ .env داخل کانتینر:"
+echo "→ mount و .env داخل کانتینر:"
+docker inspect "$CONTAINER" --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' | grep -E 'instance|\.env' || true
 docker exec "$CONTAINER" grep -E '^(DB_|APP_DOMAIN)=' /var/www/html/.env
 
 echo "→ migrate"
