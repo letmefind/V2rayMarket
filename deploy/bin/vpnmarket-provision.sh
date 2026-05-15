@@ -112,6 +112,26 @@ instance_env_file() {
   printf '%s/.env' "$(cd "$dest" && pwd)"
 }
 
+app_image_from_env() {
+  local env_file="$1" line
+  line="$(grep -E '^APP_IMAGE=' "$env_file" | tail -1 || true)"
+  line="${line#APP_IMAGE=}"
+  line="${line%\"}"
+  line="${line#\"}"
+  printf '%s' "${line:-vpnmarket/app:latest}"
+}
+
+build_app_image() {
+  local env_file="$1" image
+  image="$(app_image_from_env "$env_file")"
+  if [ ! -f "$ROOT/Dockerfile" ]; then
+    err "Dockerfile در $ROOT نیست"
+    return 1
+  fi
+  info "ساخت image از $ROOT/Dockerfile → $image"
+  docker build -t "$image" -f "$ROOT/Dockerfile" "$ROOT"
+}
+
 compose_bot() {
   local dest="$1"
   shift
@@ -121,6 +141,7 @@ compose_bot() {
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
     -f "$ROOT/deploy/docker-compose.instance-env.yml" \
+    -f "$ROOT/deploy/docker-compose.build-root.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \
     --env-file "$INSTANCE_ENV_FILE" \
@@ -137,6 +158,7 @@ compose_pickup() {
     -f "$ROOT/docker-compose.yml" \
     -f "$ROOT/deploy/docker-compose.no-local-db.yml" \
     -f "$ROOT/deploy/docker-compose.instance-env.yml" \
+    -f "$ROOT/deploy/docker-compose.build-root.yml" \
     -f "$ROOT/deploy/docker-compose.pickup-only.yml" \
     -f "$ROOT/docker-compose.traefik.yml" \
     -f "$dest/docker-compose.yml" \
@@ -318,7 +340,8 @@ bootstrap_bot_container() {
   local dest="$1" domain="$2" token="$3" admin_email="$4" admin_pass="$5" admin_chat="$6"
 
   info "ساخت و اجرای کانتینرهای ربات ..."
-  compose_bot "$dest" up -d --build
+  build_app_image "$(instance_env_file "$dest")"
+  compose_bot "$dest" up -d
 
   if ! wait_url "https://${domain}/up" 120; then
     warn "health check از بیرون ناموفق — ادامه با docker exec ..."
@@ -354,10 +377,12 @@ provision_pickup_site() {
     mkdir -p "$dest"
   else
     mkdir -p "$dest"
+    cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
     local app_key
     app_key="$(gen_app_key)"
     write_pickup_env "$dest" "$domain" "$project" "$app_key"
   fi
+  cp "$ROOT/deploy/instances/_template.pickup/docker-compose.yml" "$dest/docker-compose.yml"
 
   info "اجرای وب pickup ($domain) ..."
   compose_pickup "$dest" up -d --build

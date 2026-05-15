@@ -1,0 +1,13 @@
+# build واقعی در provision با `docker build -f $ROOT/Dockerfile` انجام می‌شود
+services:
+  web:
+    build: !reset null
+    image: ${APP_IMAGE:-vpnmarket/app:latest}
+
+  queue:
+    build: !reset null
+    image: ${APP_IMAGE:-vpnmarket/app:latest}
+
+  scheduler:
+    build: !reset null
+    image: ${APP_IMAGE:-vpnmarket/app:latest}
