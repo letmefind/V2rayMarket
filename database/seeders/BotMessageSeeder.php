@@ -157,8 +157,8 @@ class BotMessageSeeder extends Seeder
                 'key' => 'msg_card_payment_info',
                 'category' => 'messages',
                 'title' => 'پیام: اطلاعات پرداخت کارت به کارت',
-                'content' => "💳 *پرداخت کارت به کارت*\n\nلطفاً مبلغ *{amount} تومان* را به حساب زیر واریز نمایید:\n\n👤 *به نام:* {card_holder}\n💳 *شماره کارت:*\n`{card_number}`\n\n🔔 *مهم:* پس از واریز، *فقط عکس رسید* را در همین چت ارسال کنید\\.",
-                'description' => 'نمایش اطلاعات کارت برای پرداخت دستی. متغیرها: {amount}, {card_holder}, {card_number}',
+                'content' => "💳 <b>پرداخت کارت به کارت</b>\n\nلطفاً مبلغ <b>{amount} تومان</b> را به حساب زیر واریز نمایید:\n\n👤 <b>به نام:</b> {card_holder}\n💳 <b>شماره کارت</b> <i>(لمس کنید تا کپی شود)</i>:\n<code>{card_number}</code>\n\n🔔 <b>مهم:</b> پس از واریز، <b>فقط عکس رسید</b> را در همین چت ارسال کنید.",
+                'description' => 'فرمت HTML. متغیرها: {amount}, {card_holder}, {card_number} — {card_number} داخل <code> برای کپی با لمس',
             ],
             [
                 'key' => 'msg_wallet_xmplus_intro',

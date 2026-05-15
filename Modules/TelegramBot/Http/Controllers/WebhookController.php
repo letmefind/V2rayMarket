@@ -1770,20 +1770,88 @@ class WebhookController extends Controller
         $cardNumber = $this->settings->get('payment_card_number', 'شماره کارتی تنظیم نشده');
         $cardHolder = $this->settings->get('payment_card_holder_name', 'صاحب حسابی تنظیم نشده');
         $amountToPay = number_format($order->amount);
+        $cardForCopy = $this->formatCardNumberForTelegramCopy((string) $cardNumber);
+
+        $defaultHtml = "💳 <b>پرداخت کارت به کارت</b>\n\n"
+            ."لطفاً مبلغ <b>{amount} تومان</b> را به حساب زیر واریز نمایید:\n\n"
+            ."👤 <b>به نام:</b> {card_holder}\n"
+            ."💳 <b>شماره کارت</b> <i>(لمس کنید تا کپی شود)</i>:\n"
+            ."<code>{card_number}</code>\n\n"
+            ."🔔 <b>مهم:</b> پس از واریز، <b>فقط عکس رسید</b> را در همین چت ارسال کنید.";
 
         $message = \App\Models\BotMessage::get(
             'msg_card_payment_info',
-            "💳 *پرداخت کارت به کارت*\n\nلطفاً مبلغ *{amount} تومان* را به حساب زیر واریز نمایید:\n\n👤 *به نام:* {card_holder}\n💳 *شماره کارت:*\n`{card_number}`\n\n🔔 *مهم:* پس از واریز، *فقط عکس رسید* را در همین چت ارسال کنید\\.",
+            $defaultHtml,
             [
-                'amount' => $this->escape($amountToPay),
-                'card_holder' => $this->escape((string) $cardHolder),
-                'card_number' => $this->escape((string) $cardNumber),
+                'amount' => $this->htmlEscape($amountToPay),
+                'card_holder' => $this->htmlEscape((string) $cardHolder),
+                'card_number' => $cardForCopy,
             ]
         );
 
         $keyboard = Keyboard::make()->inline()->row([Keyboard::inlineButton(['text' => '❌ انصراف از پرداخت', 'callback_data' => '/cancel_action'])]);
 
-        $this->sendRawMarkdownMessage($chatId, $message, $keyboard, $messageId);
+        $this->sendRawHtmlMessage($chatId, $message, $keyboard, $messageId);
+    }
+
+    /**
+     * شماره کارت فقط با رقم (گروه ۴تایی) برای تگ &lt;code&gt; تلگرام — لمس = کپی.
+     */
+    protected function formatCardNumberForTelegramCopy(string $cardNumber): string
+    {
+        $digits = preg_replace('/\D+/', '', $cardNumber) ?? '';
+        if ($digits !== '' && strlen($digits) >= 12) {
+            return trim(chunk_split($digits, 4, ' '));
+        }
+
+        return $this->htmlEscape($cardNumber);
+    }
+
+    protected function htmlEscape(string $text): string
+    {
+        return htmlspecialchars($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
+
+    protected function sendRawHtmlMessage($chatId, $text, $keyboard, $messageId = null, $disablePreview = false): void
+    {
+        $payload = [
+            'chat_id' => (int) $chatId,
+            'text' => $text,
+            'parse_mode' => 'HTML',
+            'reply_markup' => $keyboard,
+            'disable_web_page_preview' => $disablePreview,
+        ];
+
+        try {
+            if ($messageId) {
+                $payload['message_id'] = $messageId;
+                Telegram::editMessageText($payload);
+            } else {
+                Telegram::sendMessage($payload);
+            }
+        } catch (\Exception $e) {
+            if ($messageId && Str::contains($e->getMessage(), 'not found')) {
+                unset($payload['message_id']);
+                try {
+                    Telegram::sendMessage($payload);
+                } catch (\Exception $e2) {
+                    Log::error('sendRawHtmlMessage fallback send failed: '.$e2->getMessage());
+                }
+            } else {
+                Log::warning('sendRawHtmlMessage failed: '.$e->getMessage());
+                unset($payload['parse_mode']);
+                try {
+                    if ($messageId) {
+                        $payload['message_id'] = $messageId;
+                        Telegram::editMessageText($payload);
+                    } else {
+                        Telegram::sendMessage($payload);
+                    }
+                } catch (\Exception $e2) {
+                    Log::error('sendRawHtmlMessage plain retry failed: '.$e2->getMessage());
+                }
+            }
+        }
     }
 
     protected function isManualCryptoActive(): bool

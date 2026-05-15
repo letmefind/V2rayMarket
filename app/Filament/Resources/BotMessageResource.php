@@ -58,7 +58,7 @@ class BotMessageResource extends Resource
                         ->label('متن پیام / دکمه')
                         ->required()
                         ->rows(4)
-                        ->helperText('برای استفاده از متغیرها از {} استفاده کنید: {order_id}, {amount}, {plan_name}، برای حساب XMPlus: {panel_url}, {email}, {password}')
+                        ->helperText('برای پیام کارت به کارت (msg_card_payment_info) از HTML استفاده کنید: <b>، <i>، <code>{card_number}</code>. سایر پیام‌ها ممکن است Markdown باشند. متغیرها: {order_id}, {amount}, {plan_name}, {card_holder}, {card_number}, {panel_url}, {email}, {password}')
                         ->columnSpanFull(),
 
                     Forms\Components\Textarea::make('description')
