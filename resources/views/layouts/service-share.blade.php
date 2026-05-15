@@ -1,9 +1,8 @@
 @php
-    // اگر manifest/hot باشد (ایمیج Docker بعد از npm run build) همان CSS/JS محلی؛
-    // وابستگی به cdn.tailwindcss.com روی شبکه‌های فیلترشده صفحه را «بی‌استایل» می‌کند.
-    $viteBuilt = is_file(public_path('hot'))
-        || is_file(public_path('build/manifest.json'))
-        || is_file(public_path('build/.vite/manifest.json'));
+    // مثل سرور معمولی: nginx فایل‌های public/build را مستقیم می‌دهد — لینک نسبی /build/...
+    // بدون @vite تا با ASSET_URL/پروکسی، URL اشتباه نشود. با public/hot همان HMR @vite.
+    $viteHot = is_file(public_path('hot'));
+    $fromManifest = \App\Support\ServiceShareViteManifest::entryUrls();
 @endphp
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
@@ -13,10 +12,13 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="theme-color" content="#0f172a">
     <title>دریافت اشتراک — {{ \App\Services\ServiceShareService::publicDisplayTypingPath() }}</title>
-    @if ($viteBuilt)
+    @if ($viteHot)
         @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @elseif ($fromManifest)
+        <link rel="stylesheet" href="{{ $fromManifest['css'] }}">
+        <script type="module" src="{{ $fromManifest['js'] }}"></script>
     @else
-        {{-- فقط وقتی بیلد فرانت در image نیست (Dev بدون npm run build) --}}
+        {{-- فقط بدون بیلد (بدون Docker / بدون npm run build) --}}
         <script src="https://cdn.tailwindcss.com"></script>
         <script>
             tailwind.config = {
