@@ -9,7 +9,22 @@ COPY resources ./resources
 COPY public ./public
 RUN npm run build
 
-FROM composer:2 AS vendor
+# همان PHP 8.3 + extهای لازم composer (composer:2 اخیراً PHP 8.5 بدون intl/gd است)
+FROM php:8.3-cli-bookworm AS vendor
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    unzip \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
+    libzip-dev \
+    libicu-dev \
+    libonig-dev \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j"$(nproc)" mbstring gd zip intl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+ENV COMPOSER_ALLOW_SUPERUSER=1
 WORKDIR /app
 COPY composer.json composer.lock ./
 RUN composer install \
