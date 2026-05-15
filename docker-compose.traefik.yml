@@ -12,13 +12,14 @@ services:
       - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
       - traefik.http.services.${TRAEFIK_ROUTER_NAME}.loadbalancer.server.port=80
       # HTTPS
-      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.rule=Host(`${APP_DOMAIN}`)
+      # هر دو apex و www (مرورگرها اغلب یکی را باز می‌کنند؛ فقط apex باعث 404 ترefik می‌شود)
+      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.rule=Host(`${APP_DOMAIN}`, `www.${APP_DOMAIN}`)
       - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.entrypoints=websecure
       - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls=true
       - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}
       - traefik.http.routers.${TRAEFIK_ROUTER_NAME}.service=${TRAEFIK_ROUTER_NAME}
       # HTTP → HTTPS (ریدایرکت سراسری روی entrypoint نباید باشد — ACME روی :80 می‌شکند)
-      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.rule=Host(`${APP_DOMAIN}`)
+      - traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.rule=Host(`${APP_DOMAIN}`, `www.${APP_DOMAIN}`)
       - traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.entrypoints=web
       - traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.service=${TRAEFIK_ROUTER_NAME}
       - traefik.http.routers.${TRAEFIK_ROUTER_NAME}-http.middlewares=${TRAEFIK_ROUTER_NAME}-redirect-https
