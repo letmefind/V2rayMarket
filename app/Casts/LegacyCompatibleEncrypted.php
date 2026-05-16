@@ -7,7 +7,7 @@ use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Crypt;
 
 /**
- * مثل encrypted لاراول، ولی اگر decrypt نشد (import با APP_KEY دیگر یا متن ساده قدیمی) خطا نمی‌دهد.
+ * مثل encrypted لاراول؛ اگر با APP_KEY فعلی باز نشد، blob رمزنگاری‌شده را به کاربر نشان نمی‌دهد.
  */
 class LegacyCompatibleEncrypted implements CastsAttributes
 {
@@ -21,22 +21,16 @@ class LegacyCompatibleEncrypted implements CastsAttributes
             return null;
         }
 
-        try {
-            return (string) Crypt::decryptString($value);
-        } catch (DecryptException) {
-            try {
-                $decrypted = Crypt::decrypt($value, false);
-
-                return is_string($decrypted) ? $decrypted : null;
-            } catch (DecryptException) {
-                $payload = json_decode($value, true);
-                if (is_array($payload) && isset($payload['iv'], $payload['value'], $payload['mac'])) {
-                    return null;
-                }
-
-                return $value;
-            }
+        $plain = $this->tryDecrypt($value);
+        if ($plain !== null) {
+            return $plain;
         }
+
+        if ($this->looksLikeLaravelEncryptedPayload($value)) {
+            return null;
+        }
+
+        return $value;
     }
 
     public function set(mixed $model, string $key, mixed $value, array $attributes): ?string
@@ -46,5 +40,41 @@ class LegacyCompatibleEncrypted implements CastsAttributes
         }
 
         return Crypt::encryptString((string) $value);
+    }
+
+    private function tryDecrypt(string $value): ?string
+    {
+        try {
+            return (string) Crypt::decryptString($value);
+        } catch (DecryptException) {
+            try {
+                $decrypted = Crypt::decrypt($value, false);
+
+                return is_string($decrypted) ? $decrypted : null;
+            } catch (DecryptException) {
+                return null;
+            }
+        }
+    }
+
+    private function looksLikeLaravelEncryptedPayload(string $value): bool
+    {
+        $payload = json_decode($value, true);
+        if (is_array($payload) && isset($payload['iv'], $payload['value'], $payload['mac'])) {
+            return true;
+        }
+
+        if (! preg_match('/^[A-Za-z0-9+\/]+=*$/', $value)) {
+            return false;
+        }
+
+        $decoded = base64_decode($value, true);
+        if ($decoded === false) {
+            return false;
+        }
+
+        $payload = json_decode($decoded, true);
+
+        return is_array($payload) && isset($payload['iv'], $payload['value'], $payload['mac']);
     }
 }

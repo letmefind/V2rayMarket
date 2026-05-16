@@ -2856,6 +2856,17 @@ class WebhookController extends Controller
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
     }
 
+    /** رمز در DB با APP_KEY دیگر رمزنگاری شده و قابل خواندن نیست. */
+    protected function userHasUnreadableXmplusPassword(User $user): bool
+    {
+        $raw = $user->getRawOriginal('xmplus_client_password');
+        if (! is_string($raw) || trim($raw) === '') {
+            return false;
+        }
+
+        return trim((string) ($user->xmplus_client_password ?? '')) === '';
+    }
+
     /**
      * راهنمای ورود به پنل XMPlus (SymmetricNet) + نام کاربری و رمز — مشابه اطلاعاتی که هنگام پرداخت کارت/درگاه نمایش داده می‌شود.
      */
@@ -2896,6 +2907,9 @@ class WebhookController extends Controller
             $html = BotMessage::get('msg_xmplus_panel_account_empty', $defaultEmpty, $varsBase);
         } else {
             $pwdDisplay = $password !== '' ? $password : '—';
+            if ($pwdDisplay === '—' && $this->userHasUnreadableXmplusPassword($user)) {
+                $pwdDisplay = 'نامشخص (از بکاپ قدیمی — بعد از خرید/تمدید دوباره ساخته می‌شود)';
+            }
             $html = BotMessage::get('msg_xmplus_panel_account', $defaultFull, array_merge($varsBase, [
                 'email' => $esc($email),
                 'password' => $esc($pwdDisplay),
