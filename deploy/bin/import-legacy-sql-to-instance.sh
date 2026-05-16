@@ -14,6 +14,7 @@
 #   --dry-run                فقط جداول و دستورات را چاپ کن؛ چیزی روی DB ننویس
 #   --keep-staging           بعد از کار staging را حذف نکن
 #   --skip-confirm           بدون تأیید تعاملی
+#   --skip-settings          جدول settings را از بکاپ کپی نکن (توکن/تنظیمات فعلی ربات حفظ شود)
 #   --skip-telegram-settings جدول telegram_bot_settings را کپی نکن
 #   --no-artisan             در انتها artisan (config/cache clear) اجرا نشود
 #
@@ -33,6 +34,7 @@ ENV_FILE=""
 DRY_RUN=0
 KEEP_STAGING=0
 SKIP_CONFIRM=0
+SKIP_SETTINGS=0
 SKIP_TELEGRAM_SETTINGS=0
 NO_ARTISAN=0
 
@@ -52,7 +54,7 @@ TABLE_ORDER=(
 
 usage() {
   sed -n '1,25p' "$0" | sed -n '/# استفاده:/,/# گزینه‌ها/p' | sed 's/^# //' | head -n -1
-  echo "گزینه‌ها: --mysql-container --staging-db --dry-run --keep-staging --skip-confirm --skip-telegram-settings --no-artisan" >&2
+  echo "گزینه‌ها: --mysql-container --staging-db --dry-run --keep-staging --skip-confirm --skip-settings --skip-telegram-settings --no-artisan" >&2
 }
 
 while [ $# -gt 0 ]; do
@@ -63,6 +65,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --keep-staging) KEEP_STAGING=1; shift ;;
     --skip-confirm) SKIP_CONFIRM=1; shift ;;
+    --skip-settings) SKIP_SETTINGS=1; shift ;;
     --skip-telegram-settings) SKIP_TELEGRAM_SETTINGS=1; shift ;;
     --no-artisan) NO_ARTISAN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -134,6 +137,7 @@ is_tenant_table() {
 should_skip_table() {
   local t="$1"
   [[ " $SKIP_TABLES " == *" $t "* ]] && return 0
+  [ "$SKIP_SETTINGS" = 1 ] && [ "$t" = "settings" ] && return 0
   [ "$SKIP_TELEGRAM_SETTINGS" = 1 ] && [ "$t" = "telegram_bot_settings" ] && return 0
   return 1
 }
