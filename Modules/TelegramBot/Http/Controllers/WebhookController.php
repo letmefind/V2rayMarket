@@ -235,9 +235,11 @@ class WebhookController extends Controller
                 return;
             }
 
-            $telegramSettings = \App\Models\TelegramBotSetting::pluck('value', 'key');
-            $welcomeMessage = $telegramSettings->get('welcome_message', "🌟 خوش آمدید {$userFirstName} عزیز!\n\nبرای شروع، یکی از گزینه‌های منو را انتخاب کنید:");
-            $welcomeMessage = str_replace('{userFirstName}', $userFirstName, $welcomeMessage);
+            $welcomeMessage = \App\Support\InstanceBotMessages::get(
+                \App\Support\InstanceBotMessages::KEY_WELCOME,
+                \App\Support\InstanceBotMessages::welcomeDefault($userFirstName),
+                ['userFirstName' => $userFirstName],
+            );
 
             if (Str::startsWith($text, '/start ')) {
                 $referralCode = Str::after($text, '/start ');
@@ -334,8 +336,10 @@ class WebhookController extends Controller
                 break;
 
             case '/start':
-                $telegramSettings = \App\Models\TelegramBotSetting::pluck('value', 'key');
-                $startMessage = $telegramSettings->get('start_message', 'سلام مجدد! لطفاً یک گزینه را انتخاب کنید:');
+                $startMessage = \App\Support\InstanceBotMessages::get(
+                    \App\Support\InstanceBotMessages::KEY_START,
+                    \App\Support\InstanceBotMessages::startDefault(),
+                );
                 try {
                     Telegram::sendMessage([
                         'chat_id' => (int) $chatId,

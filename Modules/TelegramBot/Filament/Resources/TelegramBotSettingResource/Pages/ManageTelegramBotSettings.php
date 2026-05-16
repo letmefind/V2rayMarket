@@ -9,6 +9,7 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Form;
 use App\Models\TelegramBotSetting;
+use App\Support\InstanceBotMessages;
 use Filament\Notifications\Notification;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Section;
@@ -43,6 +44,15 @@ class ManageTelegramBotSettings extends Page implements HasForms
 
         $this->currentAmounts = $settings['deposit_amounts'];
 
+        $settings['welcome_message'] = InstanceBotMessages::contentForAdmin(
+            InstanceBotMessages::KEY_WELCOME,
+            'welcome_message',
+        );
+        $settings['start_message'] = InstanceBotMessages::contentForAdmin(
+            InstanceBotMessages::KEY_START,
+            'start_message',
+        );
+
         $this->form->fill($settings);
     }
 
@@ -70,10 +80,20 @@ class ManageTelegramBotSettings extends Page implements HasForms
                     ->hidden(fn () => $this->activeTab !== 'tutorials'),
 
 
-                Section::make('پیام‌های عمومی')->schema([
-                    Textarea::make('welcome_message')->label('پیام خوش‌آمدگویی')->rows(5),
-                    Textarea::make('start_message')->label('پیام دستور /start')->rows(3),
-                ])->columnSpan('full')->hidden(fn() => $this->activeTab !== 'messages'),
+                Section::make('پیام‌های عمومی')
+                    ->description('فقط برای همین ربات ذخیره می‌شود (جدول پیام‌های ربات). همان متن در منوی «پیام‌های ربات» با کلید msg_welcome و msg_start هم دیده می‌شود.')
+                    ->schema([
+                        Textarea::make('welcome_message')
+                            ->label('پیام خوش‌آمدگویی')
+                            ->rows(8)
+                            ->helperText('متغیر: {userFirstName} — اولین ورود کاربر جدید'),
+                        Textarea::make('start_message')
+                            ->label('پیام دستور /start')
+                            ->rows(4)
+                            ->helperText('وقتی کاربر قبلاً ثبت‌نام کرده و دوباره /start می‌زند'),
+                    ])
+                    ->columnSpan('full')
+                    ->hidden(fn () => $this->activeTab !== 'messages'),
 
 //                Section::make('تنظیمات ربات')->schema([
 //                    Textarea::make('bot_name')->label('نام ربات')->rows(1),
@@ -113,8 +133,27 @@ class ManageTelegramBotSettings extends Page implements HasForms
 
 
         if (isset($formData['deposit_amounts'])) {
-
             $formData['deposit_amounts'] = json_encode($formData['deposit_amounts']);
+        }
+
+        if (array_key_exists('welcome_message', $formData)) {
+            InstanceBotMessages::upsert(
+                InstanceBotMessages::KEY_WELCOME,
+                (string) ($formData['welcome_message'] ?? ''),
+                'پیام: خوش‌آمدگویی کاربر جدید',
+                'اولین ورود به ربات. متغیر: {userFirstName}',
+            );
+            unset($formData['welcome_message']);
+        }
+
+        if (array_key_exists('start_message', $formData)) {
+            InstanceBotMessages::upsert(
+                InstanceBotMessages::KEY_START,
+                (string) ($formData['start_message'] ?? ''),
+                'پیام: دستور /start (کاربر موجود)',
+                'وقتی کاربر قبلاً ثبت‌نام کرده و دوباره /start می‌زند.',
+            );
+            unset($formData['start_message']);
         }
 
         foreach ($formData as $key => $value) {

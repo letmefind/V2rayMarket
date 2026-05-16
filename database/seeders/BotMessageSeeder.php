@@ -84,6 +84,20 @@ class BotMessageSeeder extends Seeder
 
             // پیام‌ها - Messages
             [
+                'key' => 'msg_welcome',
+                'category' => 'messages',
+                'title' => 'پیام: خوش‌آمدگویی کاربر جدید',
+                'content' => "🌟 خوش آمدید {userFirstName} عزیز!\n\nبرای شروع، یکی از گزینه‌های منو را انتخاب کنید:",
+                'description' => 'اولین ورود به ربات. متغیر: {userFirstName}',
+            ],
+            [
+                'key' => 'msg_start',
+                'category' => 'messages',
+                'title' => 'پیام: دستور /start (کاربر موجود)',
+                'content' => 'سلام مجدد! لطفاً یک گزینه را انتخاب کنید:',
+                'description' => 'وقتی کاربر قبلاً ثبت‌نام کرده و دوباره /start می‌زند.',
+            ],
+            [
                 'key' => 'msg_invoice_header',
                 'category' => 'messages',
                 'title' => 'پیام: سربرگ فاکتور',
