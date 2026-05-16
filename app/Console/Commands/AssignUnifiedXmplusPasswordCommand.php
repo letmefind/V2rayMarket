@@ -24,6 +24,11 @@ class AssignUnifiedXmplusPasswordCommand extends Command
     {
         $password = (string) ($this->option('password') ?: env('XMPLUS_UNIFIED_PASSWORD', ''));
         if ($password === '') {
+            if (! $this->input->isInteractive()) {
+                $this->error('رمز را با --password= یا env XMPLUS_UNIFIED_PASSWORD بدهید (در docker بدون TTY نمی‌توان interactively پرسید).');
+
+                return self::FAILURE;
+            }
             $password = (string) $this->secret('رمز یکسان XMPlus (همان را در پنل XMPlus هم بگذارید)');
         }
         if (strlen($password) < 8) {

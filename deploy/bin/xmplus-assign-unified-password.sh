@@ -36,6 +36,14 @@ CTR="${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME missing}-web-1"
 EXTRA=()
 for a in "$@"; do EXTRA+=("$a"); done
 
-exec docker exec -u www-data "$CTR" php artisan xmplus:assign-unified-password \
-  --instance="$APP_INSTANCE_ID" \
+DOCKER_ARGS=(-u www-data)
+ARTISAN_ARGS=(--instance="$APP_INSTANCE_ID")
+
+if [ -n "${XMPLUS_UNIFIED_PASSWORD:-}" ]; then
+  DOCKER_ARGS+=(-e "XMPLUS_UNIFIED_PASSWORD=${XMPLUS_UNIFIED_PASSWORD}")
+  ARTISAN_ARGS+=(--password="${XMPLUS_UNIFIED_PASSWORD}")
+fi
+
+exec docker exec "${DOCKER_ARGS[@]}" "$CTR" php artisan xmplus:assign-unified-password \
+  "${ARTISAN_ARGS[@]}" \
   "${EXTRA[@]}"
