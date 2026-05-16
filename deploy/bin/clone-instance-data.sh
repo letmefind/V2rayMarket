@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# کپی دادهٔ یک ربات (instance_id مبدأ) به ربات دیگر در همان DB_DATABASE مشترک.
+# انتقال یا کپی دادهٔ یک ربات به ربات دیگر در همان DB_DATABASE (MySQL مشترک).
+#
+# در MySQL مشترک کلید اصلی id سراسری است؛ INSERT با همان id خطای Duplicate می‌دهد.
+# پیش‌فرض: --mode move  →  فقط instance_id عوض می‌شود (داده از مبدأ به مقصد منتقل می‌شود؛ مبدأ خالی می‌شود).
 #
 # استفاده:
 #   ./deploy/bin/clone-instance-data.sh aof.bypax.store robot.bypax.store
-#   ./deploy/bin/clone-instance-data.sh deploy/instances/aof.bypax.store/.env deploy/instances/robot.bypax.store/.env
 #
 # گزینه‌ها:
-#   --mysql-container NAME     پیش‌فرض: vpnmarket_shared_mysql
-#   --skip-settings            settings مبدأ کپی نشود (توکن ربات مقصد حفظ می‌شود)
-#   --skip-confirm
-#   --dry-run                  فقط SQL چاپ شود
-#   --no-artisan
+#   --mode move|copy         پیش‌فرض: move (copy هنوز پشتیبانی نمی‌شود — به id جدید نیاز دارد)
+#   --mysql-container NAME   پیش‌فرض: vpnmarket_shared_mysql
+#   --skip-settings          settings مبدأ منتقل نشود (توکن robot حفظ شود)
+#   --skip-confirm  --dry-run  --no-artisan
 #
 set -euo pipefail
 
@@ -24,26 +25,21 @@ ok() { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
 MYSQL_C="${MYSQL_C:-vpnmarket_shared_mysql}"
 SRC_ENV=""
 DST_ENV=""
+MODE="move"
 SKIP_SETTINGS=0
 SKIP_CONFIRM=0
 DRY_RUN=0
 NO_ARTISAN=0
 
-TENANT_TABLES=(
-  users plans settings inbounds bot_messages discount_codes
-  orders transactions discount_code_usages notifications user_trials
-  tickets ticket_replies
-)
-
-# حذف: فرزند قبل از والد
+# حذف مقصد: فرزند قبل از والد
 DELETE_ORDER=(
   ticket_replies tickets discount_code_usages notifications user_trials
   transactions orders inbounds discount_codes bot_messages plans settings users
 )
 
-# درج: والد قبل از فرزند
-INSERT_ORDER=(
-  users plans settings inbounds bot_messages discount_codes
+# انتقال instance_id (ترتیب برای FK مهم نیست؛ فقط ستون instance_id عوض می‌شود)
+MOVE_ORDER=(
+  users plans inbounds bot_messages discount_codes settings
   orders transactions discount_code_usages notifications user_trials
   tickets ticket_replies
 )
@@ -51,12 +47,13 @@ INSERT_ORDER=(
 while [ $# -gt 0 ]; do
   case "$1" in
     --mysql-container) MYSQL_C="${2:?}"; shift 2 ;;
+    --mode) MODE="${2:?}"; shift 2 ;;
     --skip-settings) SKIP_SETTINGS=1; shift ;;
     --skip-confirm) SKIP_CONFIRM=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --no-artisan) NO_ARTISAN=1; shift ;;
     -h|--help)
-      sed -n '1,18p' "$0" | sed 's/^# \?//'
+      sed -n '1,16p' "$0" | sed 's/^# \?//'
       exit 0
       ;;
     -*)
@@ -72,7 +69,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$SRC_ENV" ] && [ -n "$DST_ENV" ] || err "مبدأ و مقصد را بدهید: clone-instance-data.sh aof.bypax.store robot.bypax.store"
+[ -n "$SRC_ENV" ] && [ -n "$DST_ENV" ] || err "مبدأ و مقصد: clone-instance-data.sh aof.bypax.store robot.bypax.store"
+[ "$MODE" = "move" ] || [ "$MODE" = "copy" ] || err "--mode باید move یا copy باشد"
+[ "$MODE" = "move" ] || err "حالت copy (دو ربات هم‌زمان با همان id) پشتیبانی نمی‌شود — از --mode move استفاده کنید یا import از SQL."
 
 resolve_env_file() {
   local x="$1"
@@ -105,8 +104,7 @@ MYSQL_ROOT_PASSWORD="$(load_env "$SRC_ENV" MYSQL_ROOT_PASSWORD)"
 [ -n "$MYSQL_ROOT_PASSWORD" ] || MYSQL_ROOT_PASSWORD="$(load_env "$DST_ENV" MYSQL_ROOT_PASSWORD)"
 
 [ -n "$SRC_ID" ] && [ -n "$DST_ID" ] || err "APP_INSTANCE_ID در .env خالی است"
-[ -n "$SRC_DB" ] && [ -n "$DST_DB" ] || err "DB_DATABASE خالی است"
-[ "$SRC_DB" = "$DST_DB" ] || err "DB_DATABASE مبدأ و مقصد یکی نیست ($SRC_DB ≠ $DST_DB) — این اسکریپت فقط کپی داخل یک دیتابیس است"
+[ "$SRC_DB" = "$DST_DB" ] || err "DB_DATABASE مبدأ و مقصد یکی نیست"
 [ "$SRC_ID" != "$DST_ID" ] || err "مبدأ و مقصد یک instance_id دارند: $SRC_ID"
 
 docker ps --format '{{.Names}}' | grep -qx "$MYSQL_C" || err "MySQL در حال اجرا نیست: $MYSQL_C"
@@ -139,49 +137,14 @@ table_has_column() {
   [ "${n:-0}" -gt 0 ]
 }
 
-dest_columns() {
-  local tbl="$1"
-  mysql_root -N -e "
-    SELECT COLUMN_NAME FROM information_schema.COLUMNS
-    WHERE TABLE_SCHEMA='${SQL_DB}' AND TABLE_NAME='$(escape_sql "$tbl")'
-    ORDER BY ORDINAL_POSITION
-  "
-}
-
-build_insert_select() {
-  local tbl="$1"
-  local cols=() select_parts=()
-  local col
-  while IFS= read -r col; do
-    [ -z "$col" ] && continue
-    if [ "$SKIP_SETTINGS" = 1 ] && [ "$tbl" = "settings" ]; then
-      return 1
-    fi
-    cols+=("\`$(escape_sql "$col")\`")
-    if [ "$col" = "instance_id" ]; then
-      select_parts+=("'${SQL_DST}'")
-    else
-      select_parts+=("\`$(escape_sql "$col")\`")
-    fi
-  done < <(dest_columns "$tbl")
-
-  [ ${#cols[@]} -gt 0 ] || return 1
-
-  local col_list sel_list
-  col_list="$(IFS=,; echo "${cols[*]}")"
-  sel_list="$(IFS=,; echo "${select_parts[*]}")"
-
-  printf 'INSERT INTO `%s`.`%s` (%s)\nSELECT %s\nFROM `%s`.`%s`\nWHERE instance_id='\''%s'\'';\n' \
-    "$SQL_DB" "$(escape_sql "$tbl")" "$col_list" "$sel_list" \
-    "$SQL_DB" "$(escape_sql "$tbl")" "$SQL_SRC"
-}
-
 if [ "$SKIP_CONFIRM" != 1 ] && [ "$DRY_RUN" != 1 ]; then
-  warn "مبدأ: $SRC_ID ($SRC_ENV)"
-  warn "مقصد: $DST_ID ($DST_ENV)"
+  warn "حالت: $MODE | مبدأ: $SRC_ID → مقصد: $DST_ID"
   warn "دیتابیس: $SRC_DB | MySQL: $MYSQL_C"
-  warn "همهٔ ردیف‌های instance_id مقصد حذف و با دادهٔ مبدأ جایگزین می‌شوند."
-  [ "$SKIP_SETTINGS" = 1 ] && warn "settings کپی نمی‌شود (توکن ربات robot حفظ می‌شود)."
+  if [ "$MODE" = "move" ]; then
+    warn "دادهٔ مقصد (robot) پاک می‌شود؛ سپس همهٔ ردیف‌های مبدأ (aof) با همان id به مقصد منتقل می‌شوند."
+    warn "بعد از انتقال، ربات مبدأ (aof) دیگر دادهٔ tenant ندارد."
+  fi
+  [ "$SKIP_SETTINGS" = 1 ] && warn "settings منتقل نمی‌شود."
   read -r -p "ادامه؟ [y/N] " ans
   case "$ans" in y|Y|yes|YES) ;; *) err "لغو" ;; esac
 fi
@@ -208,30 +171,21 @@ WHERE u.instance_id='${SQL_DST}' OR s.source_instance_id='${SQL_DST}';"
     echo "DELETE FROM \`${SQL_DB}\`.\`$(escape_sql "$tbl")\` WHERE instance_id='${SQL_DST}';"
   done
 
-  for tbl in "${INSERT_ORDER[@]}"; do
+  for tbl in "${MOVE_ORDER[@]}"; do
     table_exists "$tbl" || continue
     table_has_column "$tbl" instance_id || continue
-    build_insert_select "$tbl" || true
+    if [ "$SKIP_SETTINGS" = 1 ] && [ "$tbl" = "settings" ]; then
+      continue
+    fi
+    echo "UPDATE \`${SQL_DB}\`.\`$(escape_sql "$tbl")\`
+SET instance_id='${SQL_DST}'
+WHERE instance_id='${SQL_SRC}';"
   done
 
   if table_exists service_shares && table_has_column service_shares source_instance_id; then
-    cols=() sel=()
-    while IFS= read -r col; do
-      [ -z "$col" ] && continue
-      cols+=("\`$(escape_sql "$col")\`")
-      if [ "$col" = "source_instance_id" ]; then
-        sel+=("'${SQL_DST}'")
-      else
-        sel+=("s.\`$(escape_sql "$col")\`")
-      fi
-    done < <(dest_columns service_shares)
-    col_list="$(IFS=,; echo "${cols[*]}")"
-    sel_list="$(IFS=,; echo "${sel[*]}")"
-    echo "INSERT INTO \`${SQL_DB}\`.\`service_shares\` ($col_list)
-SELECT $sel_list
-FROM \`${SQL_DB}\`.\`service_shares\` AS s
-INNER JOIN \`${SQL_DB}\`.\`users\` AS u ON u.id = s.user_id
-WHERE u.instance_id='${SQL_SRC}';"
+    echo "UPDATE \`${SQL_DB}\`.\`service_shares\`
+SET source_instance_id='${SQL_DST}'
+WHERE source_instance_id='${SQL_SRC}';"
   fi
 
   echo "SET FOREIGN_KEY_CHECKS=1;"
@@ -243,8 +197,8 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-info "اجرای کپی…"
-mysql_root --force "$SRC_DB" <"$SQL_FILE"
+info "اجرای انتقال (move)…"
+mysql_root "$SRC_DB" <"$SQL_FILE"
 
 WEB_C="${DST_PROJECT}-web-1"
 if [ "$NO_ARTISAN" != 1 ] && docker ps --format '{{.Names}}' | grep -qx "$WEB_C"; then
@@ -255,5 +209,10 @@ if [ "$NO_ARTISAN" != 1 ] && docker ps --format '{{.Names}}' | grep -qx "$WEB_C"
     || docker exec "$WEB_C" php artisan cache:clear --no-interaction || true
 fi
 
-ok "کپی تمام شد: $SRC_ID → $DST_ID"
-warn "اگر ربات robot توکن جدا دارد، با --skip-settings اجرا کنید یا بعداً توکن را در Filament/DB تنظیم کنید."
+ok "انتقال تمام: $SRC_ID → $DST_ID"
+if [ "$SKIP_SETTINGS" = 1 ]; then
+  warn "settings مبدأ هنوز روی $SRC_ID است؛ robot توکن/تنظیمات خودش را دارد."
+else
+  warn "settings هم منتقل شد — در صورت نیاز webhook/token را برای robot بررسی کنید."
+fi
+warn "ربات مبدأ ($SRC_ID) اکنون بدون دادهٔ tenant است (مگر settings با --skip-settings)."
