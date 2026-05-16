@@ -17,6 +17,7 @@ use Filament\Tables\Actions\Action;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
@@ -28,6 +29,11 @@ class OrderResource extends Resource
     protected static ?string $modelLabel = 'سفارش';
     protected static ?string $pluralModelLabel = 'سفارشات';
     protected static ?string $navigationGroup = 'مدیریت سفارشات';
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with(['user', 'plan']);
+    }
 
     public static function form(Form $form): Form
     {
@@ -45,12 +51,32 @@ class OrderResource extends Resource
         return $table
             ->columns([
                 ImageColumn::make('card_payment_receipt')->label('رسید')->disk('public')->toggleable()->size(60)->circular()->url(fn (Order $record): ?string => $record->card_payment_receipt ? Storage::disk('public')->url($record->card_payment_receipt) : null)->openUrlInNewTab(),
-                Tables\Columns\TextColumn::make('user.name')->label('کاربر')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('plan.name')->label('پلن / آیتم')->default(fn (Order $record): string => $record->plan_id ? $record->plan->name : "شارژ کیف پول")->description(function (Order $record): string {
-                    if ($record->renews_order_id) return " (تمدید سفارش #" . $record->renews_order_id . ")";
-                    if (!$record->plan_id) return number_format($record->amount) . ' تومان';
-                    return '';
-                })->color(fn(Order $record) => $record->renews_order_id ? 'primary' : 'gray'),
+                Tables\Columns\TextColumn::make('user.name')
+                    ->label('کاربر')
+                    ->searchable()
+                    ->sortable()
+                    ->placeholder('—')
+                    ->formatStateUsing(fn ($state): string => filled($state) ? (string) $state : '—'),
+                Tables\Columns\TextColumn::make('plan_label')
+                    ->label('پلن / آیتم')
+                    ->getStateUsing(function (Order $record): string {
+                        if (! $record->plan_id) {
+                            return 'شارژ کیف پول';
+                        }
+
+                        return $record->plan?->name ?? ('پلن #'.$record->plan_id);
+                    })
+                    ->description(function (Order $record): string {
+                        if ($record->renews_order_id) {
+                            return ' (تمدید سفارش #'.$record->renews_order_id.')';
+                        }
+                        if (! $record->plan_id) {
+                            return number_format((float) ($record->amount ?? 0)).' تومان';
+                        }
+
+                        return '';
+                    })
+                    ->color(fn (Order $record): string => $record->renews_order_id ? 'primary' : 'gray'),
                 IconColumn::make('source')->label('منبع')->icon(fn (?string $state): string => match ($state) { 'web' => 'heroicon-o-globe-alt', 'telegram' => 'heroicon-o-paper-airplane', default => 'heroicon-o-question-mark-circle' })->color(fn (?string $state): string => match ($state) { 'web' => 'primary', 'telegram' => 'info', default => 'gray' }),
                 Tables\Columns\TextColumn::make('payment_method')->label('روش پرداخت')->toggleable(isToggledHiddenByDefault: true)->formatStateUsing(fn (?string $state): string => match ($state) {
                     'manual_crypto' => 'USDT/USDC دستی',
@@ -77,13 +103,31 @@ class OrderResource extends Resource
                         if ($state === null || $state === '') {
                             return '—';
                         }
-                        $settings = Setting::all()->pluck('value', 'key');
+                        try {
+                            $settings = Setting::all()->pluck('value', 'key');
 
-                        return ManualCryptoService::formatAmountForDisplay((float) $state, $settings);
+                            return ManualCryptoService::formatAmountForDisplay((float) $state, $settings);
+                        } catch (\Throwable) {
+                            return (string) $state;
+                        }
                     }),
                 Tables\Columns\TextColumn::make('crypto_tx_hash')->label('TxID')->limit(24)->toggleable(isToggledHiddenByDefault: true),
                 ImageColumn::make('crypto_payment_proof')->label('اثبات کریپتو')->disk('public')->toggleable(isToggledHiddenByDefault: true)->size(60)->circular()->url(fn (Order $record): ?string => $record->crypto_payment_proof ? Storage::disk('public')->url($record->crypto_payment_proof) : null)->openUrlInNewTab(),
-                Tables\Columns\TextColumn::make('status')->label('وضعیت')->badge()->color(fn (string $state): string => match ($state) { 'pending' => 'warning', 'paid' => 'success', 'expired' => 'danger', default => 'gray' })->formatStateUsing(fn (string $state): string => match ($state) { 'pending' => 'در انتظار پرداخت', 'paid' => 'پرداخت شده', 'expired' => 'منقضی شده', default => $state }),
+                Tables\Columns\TextColumn::make('status')
+                    ->label('وضعیت')
+                    ->badge()
+                    ->color(fn (?string $state): string => match ($state) {
+                        'pending' => 'warning',
+                        'paid' => 'success',
+                        'expired' => 'danger',
+                        default => 'gray',
+                    })
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'pending' => 'در انتظار پرداخت',
+                        'paid' => 'پرداخت شده',
+                        'expired' => 'منقضی شده',
+                        default => $state ?? 'نامشخص',
+                    }),
                 Tables\Columns\TextColumn::make('created_at')->label('تاریخ سفارش')->dateTime('Y-m-d')->sortable(),
                 Tables\Columns\TextColumn::make('expires_at')->label('تاریخ انقضا')->dateTime('Y-m-d')->sortable(),
             ])
