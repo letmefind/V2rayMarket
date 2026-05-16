@@ -39,10 +39,11 @@ DELETE_ORDER=(
 
 # انتقال instance_id (ترتیب برای FK مهم نیست؛ فقط ستون instance_id عوض می‌شود)
 MOVE_ORDER=(
-  users plans inbounds bot_messages discount_codes settings
+  users plans inbounds discount_codes settings
   orders transactions discount_code_usages notifications user_trials
   tickets ticket_replies
 )
+# bot_messages جدا با sync-bot-messages.sh (UPSERT روی key؛ جلوگیری از تداخل seed و کش)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -199,6 +200,14 @@ fi
 
 info "اجرای انتقال (move)…"
 mysql_root "$SRC_DB" <"$SQL_FILE"
+
+SYNC_MSG="$ROOT/deploy/bin/sync-bot-messages.sh"
+if [ -x "$SYNC_MSG" ]; then
+  info "همگام‌سازی bot_messages…"
+  "$SYNC_MSG" "$SRC_ENV" "$DST_ENV" --mysql-container "$MYSQL_C" --skip-confirm --no-artisan
+else
+  warn "sync-bot-messages.sh نیست — bot_messages را دستی همگام کنید"
+fi
 
 WEB_C="${DST_PROJECT}-web-1"
 if [ "$NO_ARTISAN" != 1 ] && docker ps --format '{{.Names}}' | grep -qx "$WEB_C"; then
