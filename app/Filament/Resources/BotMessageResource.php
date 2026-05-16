@@ -6,8 +6,8 @@ use App\Filament\Resources\BotMessageResource\Pages;
 use App\Models\BotMessage;
 use App\Support\InstanceId;
 use Filament\Forms;
-use Illuminate\Validation\Rules\Unique;
 use Filament\Forms\Form;
+use Illuminate\Validation\Rule;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -30,15 +30,20 @@ class BotMessageResource extends Resource
                     Forms\Components\TextInput::make('key')
                         ->label('کلید (Key)')
                         ->required()
-                        ->unique(
-                            ignoreRecord: true,
-                            modifyRuleUsing: fn (Unique $rule): Unique => $rule->where(
-                                'instance_id',
-                                InstanceId::current(),
-                            ),
-                        )
+                        ->disabled(fn (?BotMessage $record): bool => $record !== null)
+                        ->dehydrated(fn (?BotMessage $record): bool => $record === null)
+                        ->rules(fn (?BotMessage $record): array => $record !== null
+                            ? []
+                            : [
+                                'required',
+                                'string',
+                                'max:255',
+                                Rule::unique('bot_messages', 'key')->where(
+                                    'instance_id',
+                                    InstanceId::current(),
+                                ),
+                            ])
                         ->helperText('مثال: btn_payment_online یا msg_welcome')
-                        ->disabled(fn ($record) => $record !== null)
                         ->columnSpan(1),
 
                     Forms\Components\Select::make('category')
