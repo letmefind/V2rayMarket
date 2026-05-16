@@ -7,6 +7,7 @@ use App\Models\Plan;
 use App\Models\User;
 use App\Services\XmplusInvoiceDatabaseSyncService;
 use App\Services\XmplusPackageAwareRenewalService;
+use App\Support\XmplusCredentialRecovery;
 use App\Support\XmplusGatewayTelegram;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -518,6 +519,9 @@ class XmplusProvisioningService
         }
         $domain = ltrim($domain, '@');
 
+        XmplusCredentialRecovery::rehydratePassword($user);
+        $user->refresh();
+
         $email = $user->xmplus_client_email;
         $passwdPlain = null;
         $credentialsMessage = null;
@@ -537,37 +541,35 @@ class XmplusProvisioningService
             $reg = $api->register($name, $email, $passwdPlain, $regCode, $aff);
             if (! self::apiOk($reg)) {
                 if (self::apiIsEmailAlreadyRegistered($reg)) {
-                    // اگر ایمیل قبلاً ثبت شده و رمز در VPNMarket موجود است، از همان استفاده کن
-                    $existingPassword = $user->xmplus_client_password;
-                    if (is_string($existingPassword) && $existingPassword !== '') {
+                    $existingPassword = self::resolveXmplusClientPassword($user);
+                    if ($existingPassword !== null) {
                         $api->log('info', 'XMPlus: کاربر قبلاً register شده، از رمز موجود استفاده می‌شود', [
                             'email' => $email,
                         ]);
                         $passwdPlain = $existingPassword;
-                        // از loop register خارج شو و ادامه بده
-                    } else {
-                        // کاربر در XMPlus موجود است اما رمز ذخیره نشده
-                        // سعی کن از orders موفق قبلی password را پیدا کنی
-                        $successfulOrder = Order::where('user_id', $user->id)
-                            ->where('status', 'paid')
-                            ->whereNotNull('panel_username')
-                            ->whereNotNull('panel_client_id')
-                            ->latest()
-                            ->first();
-                        
-                        if ($successfulOrder && $successfulOrder->panel_username === $email) {
-                            // این کاربر قبلاً خرید موفق داشته، اما password در user table ذخیره نشده
-                            // احتمالاً در زمان تمدید استفاده شده
-                            $api->log('warning', 'XMPlus: کاربر موجود است اما password در user ذخیره نشده. لطفاً password را در admin panel وارد کنید.', [
-                                'email' => $email,
-                                'user_id' => $user->id,
-                            ]);
+                        $user->forceFill([
+                            'xmplus_client_email' => $email,
+                            'xmplus_client_password' => $passwdPlain,
+                        ])->save();
+                    } elseif ($allowXmplusStaleCredentialReset) {
+                        $recovered = self::recoverMissingXmplusCredentials($api, $settings, $user, $email, $aff, $panelBase);
+                        if (! empty($recovered['clear_and_restart'])) {
+                            return self::doNewPurchase($api, $settings, $user->fresh(), $plan, $order, $pid, $billing, $aff, $panelBase, $shopPaymentAlreadyCollected, false);
                         }
-                        
+                        $passwdPlain = $recovered['password'] ?? null;
+                        $email = $recovered['email'] ?? $email;
+                        $credentialsMessage = $recovered['credentials_message'] ?? $credentialsMessage;
+                        if ($passwdPlain !== null && $passwdPlain !== '') {
+                            $user->forceFill([
+                                'xmplus_client_email' => $email,
+                                'xmplus_client_password' => $passwdPlain,
+                            ])->save();
+                        }
+                    }
+                    if (! is_string($passwdPlain) || $passwdPlain === '') {
                         throw new RuntimeException(
                             'XMPlus: ایمیل '.$email.' از قبل در پنل ثبت است ولی فروشگاه هنوز رمز Client API این کاربر را ندارد. '
-                            .'لطفاً از پنل Admin XMPlus، password کاربر '.$email.' را ببینید یا reset کنید، سپس در پروفایل کاربر VPNMarket (User ID: '.$user->id.') ذخیره کنید. '
-                            .'یا کاربر را در XMPlus حذف کنید تا دوباره ثبت‌نام شود.'
+                            .'APP_PREVIOUS_KEYS را از سرور قدیمی در .env بگذارید، یا رمز را در پروفایل کاربر (ID: '.$user->id.') ذخیره کنید.'
                         );
                     }
                 } else {
@@ -590,9 +592,20 @@ class XmplusProvisioningService
             $credentialsMessage = self::formatCredentialsMessage($email, $passwdPlain, $panelBase);
             $api->log('info', 'XMPlus کاربر جدید ثبت شد', ['step' => 'register_ok', 'email' => $email]);
         } else {
-            $passwdPlain = $user->xmplus_client_password;
+            $passwdPlain = self::resolveXmplusClientPassword($user);
+            if ($passwdPlain === null && $allowXmplusStaleCredentialReset) {
+                $recovered = self::recoverMissingXmplusCredentials($api, $settings, $user, $email, $aff, $panelBase);
+                if (! empty($recovered['clear_and_restart'])) {
+                    return self::doNewPurchase($api, $settings, $user->fresh(), $plan, $order, $pid, $billing, $aff, $panelBase, $shopPaymentAlreadyCollected, false);
+                }
+                $passwdPlain = $recovered['password'] ?? null;
+                $email = $recovered['email'] ?? $email;
+                if (isset($recovered['credentials_message']) && is_string($recovered['credentials_message'])) {
+                    $credentialsMessage = $recovered['credentials_message'];
+                }
+            }
             if (! is_string($passwdPlain) || $passwdPlain === '') {
-                throw new RuntimeException('XMPlus: ایمیل کاربر در دیتابیس هست اما رمز ذخیره‌شده نیست؛ امکان ساخت فاکتور نیست.');
+                throw new RuntimeException('XMPlus: ایمیل کاربر ثبت است اما رمز ذخیره نشده است.');
             }
             $api->log('info', 'XMPlus استفاده از حساب موجود', ['step' => 'existing_user', 'email' => $email]);
         }
@@ -908,8 +921,8 @@ class XmplusProvisioningService
             throw new InvalidArgumentException('XMPlus تمدید: سفارش اصلی نامعتبر است.');
         }
         $email = $user->xmplus_client_email ?? $originalOrder->panel_username;
-        $passwdPlain = $user->xmplus_client_password;
-        if (! is_string($email) || $email === '' || ! is_string($passwdPlain) || $passwdPlain === '') {
+        $passwdPlain = self::resolveXmplusClientPassword($user);
+        if (! is_string($email) || $email === '' || $passwdPlain === null) {
             throw new RuntimeException('XMPlus تمدید: اطلاعات ورود کاربر به پنل یافت نشد.');
         }
 
@@ -1485,6 +1498,101 @@ class XmplusProvisioningService
         $msg = strtolower((string) ($row['message'] ?? ''));
 
         return str_contains($msg, 'already registered') || str_contains($msg, 'already been registered');
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    protected static function apiIsInvalidPassword(array $row): bool
+    {
+        $msg = strtolower((string) ($row['message'] ?? ''));
+        $code = (int) ($row['code'] ?? 0);
+        if ($code !== 208) {
+            return false;
+        }
+
+        return str_contains($msg, 'password')
+            && (str_contains($msg, 'invalid') || str_contains($msg, 'incorrect') || str_contains($msg, 'wrong'));
+    }
+
+    protected static function resolveXmplusClientPassword(User $user): ?string
+    {
+        XmplusCredentialRecovery::rehydratePassword($user);
+        $user->refresh();
+        $pwd = $user->xmplus_client_password;
+
+        return is_string($pwd) && $pwd !== '' ? $pwd : null;
+    }
+
+    /**
+     * @return array{password: ?string, email: string, credentials_message: ?string, clear_and_restart?: bool}
+     */
+    protected static function recoverMissingXmplusCredentials(
+        XmplusService $api,
+        Collection $settings,
+        User $user,
+        string $email,
+        string $aff,
+        string $panelBase
+    ): array {
+        $plain = self::resolveXmplusClientPassword($user);
+        if ($plain !== null) {
+            return ['password' => $plain, 'email' => $email, 'credentials_message' => null];
+        }
+
+        if (! XmplusCredentialRecovery::userHasXmplusEmailWithoutPassword($user)) {
+            return ['password' => null, 'email' => $email, 'credentials_message' => null];
+        }
+
+        try {
+            $probe = $api->accountInfo($email, Str::password(12, symbols: false));
+        } catch (\Throwable $e) {
+            $probe = ['status' => 'error', 'code' => 0, 'message' => $e->getMessage()];
+        }
+
+        if (self::apiIsEmailNotFoundOnClient($probe)) {
+            $api->log('warning', 'XMPlus: ایمیل ذخیره‌شده در پنل Client API یافت نشد — پاک‌سازی creds', [
+                'email' => $email,
+                'user_id' => $user->id,
+            ]);
+            $user->forceFill([
+                'xmplus_client_email' => null,
+                'xmplus_client_password' => null,
+            ])->save();
+
+            return [
+                'password' => null,
+                'email' => '',
+                'credentials_message' => null,
+                'clear_and_restart' => true,
+            ];
+        }
+
+        if (self::apiIsInvalidPassword($probe)) {
+            $domain = ltrim(trim((string) $settings->get('xmplus_email_domain', '')), '@');
+            if ($domain === '') {
+                throw new InvalidArgumentException('XMPlus: دامنه ایمیل (xmplus_email_domain) تنظیم نشده است.');
+            }
+            $sendCode = filter_var($settings->get('xmplus_send_register_code', false), FILTER_VALIDATE_BOOLEAN);
+            $regCode = (string) ($settings->get('xmplus_registration_code', ''));
+            $alt = XmplusCredentialRecovery::registerAlternateXmplusIdentity(
+                $api,
+                $user->fresh() ?? $user,
+                $domain,
+                $aff,
+                $panelBase,
+                $regCode,
+                $sendCode
+            );
+
+            return [
+                'password' => $alt['password'],
+                'email' => $alt['email'],
+                'credentials_message' => $alt['credentials_message'],
+            ];
+        }
+
+        return ['password' => null, 'email' => $email, 'credentials_message' => null];
     }
 
     /**
@@ -2329,13 +2437,16 @@ class XmplusProvisioningService
         }
         $domain = ltrim($domain, '@');
 
+        XmplusCredentialRecovery::rehydratePassword($user);
+        $user->refresh();
+
         $credentialsMessage = null;
         $existingInv = trim((string) ($order->xmplus_inv_id ?? ''));
 
         if ($existingInv !== '') {
             $email = $user->xmplus_client_email;
-            $passwdPlain = $user->xmplus_client_password;
-            if (! is_string($email) || $email === '' || ! is_string($passwdPlain) || $passwdPlain === '') {
+            $passwdPlain = self::resolveXmplusClientPassword($user);
+            if (! is_string($email) || $email === '' || $passwdPlain === null) {
                 throw new RuntimeException('XMPlus: برای ادامهٔ پرداخت، حساب XMPlus کاربر ناقص است.');
             }
             try {
@@ -2365,20 +2476,71 @@ class XmplusProvisioningService
             $reg = $api->register($name, $email, $passwdPlain, $regCode, $aff);
             if (! self::apiOk($reg)) {
                 if (self::apiIsEmailAlreadyRegistered($reg)) {
-                    throw new RuntimeException(
-                        'XMPlus: ایمیل '.$email.' از قبل در پنل ثبت است ولی فروشگاه هنوز رمز Client API این کاربر را ندارد. '
-                        .'در پروفایل/ادمین همان رمز پنل را ذخیره کنید یا کاربر را در XMPlus حذف کنید. پاسخ: '.json_encode($reg, JSON_UNESCAPED_UNICODE)
+                    $existingPassword = self::resolveXmplusClientPassword($user);
+                    if ($existingPassword !== null) {
+                        $passwdPlain = $existingPassword;
+                        $user->forceFill([
+                            'xmplus_client_email' => $email,
+                            'xmplus_client_password' => $passwdPlain,
+                        ])->save();
+                    } elseif ($allowXmplusStaleCredentialReset) {
+                        $recovered = self::recoverMissingXmplusCredentials($api, $settings, $user, $email, $aff, $panelBase);
+                        if (! empty($recovered['clear_and_restart'])) {
+                            return self::webCheckoutEnsureNewPurchaseInvoice(
+                                $api,
+                                $settings,
+                                $user->fresh(),
+                                $plan,
+                                $order->fresh(),
+                                $pid,
+                                $billing,
+                                $aff,
+                                $panelBase,
+                                false
+                            );
+                        }
+                        $passwdPlain = $recovered['password'] ?? null;
+                        $email = $recovered['email'] ?? $email;
+                        $credentialsMessage = $recovered['credentials_message'] ?? null;
+                    }
+                    if (! is_string($passwdPlain) || $passwdPlain === '') {
+                        throw new RuntimeException(
+                            'XMPlus: ایمیل '.$email.' از قبل در پنل ثبت است ولی رمز Client API در فروشگاه نیست. '
+                            .'APP_PREVIOUS_KEYS را در .env بگذارید یا رمز را در پروفایل کاربر ذخیره کنید.'
+                        );
+                    }
+                } else {
+                    throw new RuntimeException('XMPlus ثبت‌نام ناموفق: '.json_encode($reg, JSON_UNESCAPED_UNICODE));
+                }
+            } else {
+                $user->forceFill([
+                    'xmplus_client_email' => $email,
+                    'xmplus_client_password' => $passwdPlain,
+                ])->save();
+                $credentialsMessage = self::formatCredentialsMessage($email, $passwdPlain, $panelBase);
+            }
+        } else {
+            $passwdPlain = self::resolveXmplusClientPassword($user);
+            if ($passwdPlain === null && $allowXmplusStaleCredentialReset) {
+                $recovered = self::recoverMissingXmplusCredentials($api, $settings, $user, $email, $aff, $panelBase);
+                if (! empty($recovered['clear_and_restart'])) {
+                    return self::webCheckoutEnsureNewPurchaseInvoice(
+                        $api,
+                        $settings,
+                        $user->fresh(),
+                        $plan,
+                        $order->fresh(),
+                        $pid,
+                        $billing,
+                        $aff,
+                        $panelBase,
+                        false
                     );
                 }
-                throw new RuntimeException('XMPlus ثبت‌نام ناموفق: '.json_encode($reg, JSON_UNESCAPED_UNICODE));
+                $passwdPlain = $recovered['password'] ?? null;
+                $email = $recovered['email'] ?? $email;
+                $credentialsMessage = $recovered['credentials_message'] ?? null;
             }
-            $user->forceFill([
-                'xmplus_client_email' => $email,
-                'xmplus_client_password' => $passwdPlain,
-            ])->save();
-            $credentialsMessage = self::formatCredentialsMessage($email, $passwdPlain, $panelBase);
-        } else {
-            $passwdPlain = $user->xmplus_client_password;
             if (! is_string($passwdPlain) || $passwdPlain === '') {
                 throw new RuntimeException('XMPlus: ایمیل کاربر ثبت است اما رمز ذخیره نشده است.');
             }

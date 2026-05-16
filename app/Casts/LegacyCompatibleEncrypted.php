@@ -2,6 +2,7 @@
 
 namespace App\Casts;
 
+use App\Support\LegacyAppKeyDecryptor;
 use Illuminate\Contracts\Database\Eloquent\CastsAttributes;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\Crypt;
@@ -26,7 +27,7 @@ class LegacyCompatibleEncrypted implements CastsAttributes
             return $plain;
         }
 
-        if ($this->looksLikeLaravelEncryptedPayload($value)) {
+        if (LegacyAppKeyDecryptor::looksLikeLaravelEncryptedPayload($value)) {
             return null;
         }
 
@@ -52,29 +53,8 @@ class LegacyCompatibleEncrypted implements CastsAttributes
 
                 return is_string($decrypted) ? $decrypted : null;
             } catch (DecryptException) {
-                return null;
+                return LegacyAppKeyDecryptor::tryDecrypt($value);
             }
         }
-    }
-
-    private function looksLikeLaravelEncryptedPayload(string $value): bool
-    {
-        $payload = json_decode($value, true);
-        if (is_array($payload) && isset($payload['iv'], $payload['value'], $payload['mac'])) {
-            return true;
-        }
-
-        if (! preg_match('/^[A-Za-z0-9+\/]+=*$/', $value)) {
-            return false;
-        }
-
-        $decoded = base64_decode($value, true);
-        if ($decoded === false) {
-            return false;
-        }
-
-        $payload = json_decode($decoded, true);
-
-        return is_array($payload) && isset($payload['iv'], $payload['value'], $payload['mac']);
     }
 }
