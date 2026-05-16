@@ -22,7 +22,7 @@ class ManageTelegramBotSettings extends Page implements HasForms
     protected static string $view = 'filament.pages.manage-settings';
 
 
-    public ?string $activeTab = 'settings';
+    public ?string $activeTab = 'messages';
     public ?array $data = [];
 
 
@@ -101,6 +101,8 @@ class ManageTelegramBotSettings extends Page implements HasForms
                             ])
                             ->helperText('این مبالغ به صورت دکمه در ربات به کاربر نمایش داده می‌شوند.'),
                     ])
+                    ->columnSpan('full')
+                    ->hidden(fn () => $this->activeTab !== 'wallet'),
             ])
             ->statePath('data');
     }
