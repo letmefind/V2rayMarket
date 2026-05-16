@@ -4,7 +4,9 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\BotMessageResource\Pages;
 use App\Models\BotMessage;
+use App\Support\InstanceId;
 use Filament\Forms;
+use Illuminate\Validation\Rules\Unique;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
@@ -28,7 +30,13 @@ class BotMessageResource extends Resource
                     Forms\Components\TextInput::make('key')
                         ->label('کلید (Key)')
                         ->required()
-                        ->unique(ignoreRecord: true)
+                        ->unique(
+                            ignoreRecord: true,
+                            modifyRuleUsing: fn (Unique $rule): Unique => $rule->where(
+                                'instance_id',
+                                InstanceId::current(),
+                            ),
+                        )
                         ->helperText('مثال: btn_payment_online یا msg_welcome')
                         ->disabled(fn ($record) => $record !== null)
                         ->columnSpan(1),

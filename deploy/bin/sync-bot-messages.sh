@@ -115,6 +115,13 @@ if [ "$SKIP_CONFIRM" != 1 ]; then
   case "$ans" in y|Y|yes|YES) ;; *) err "لغو" ;; esac
 fi
 
+info "حذف ردیف‌های تکراری (همان instance_id + key)…"
+mysql_root "$DB" <<EOF
+DELETE b1 FROM \`${SQL_DB}\`.\`bot_messages\` AS b1
+INNER JOIN \`${SQL_DB}\`.\`bot_messages\` AS b2
+  ON b1.instance_id = b2.instance_id AND b1.\`key\` = b2.\`key\` AND b1.id < b2.id;
+EOF
+
 info "قبل — مبدأ: $(count_for "$SRC_ID") | مقصد: $(count_for "$DST_ID") | default: $(count_for "default")"
 
 if [ "$INCLUDE_DEFAULT" = 1 ]; then
