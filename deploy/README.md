@@ -143,6 +143,20 @@ docker exec vpnmarket_lab_bypax_store-web-1 php artisan telegram:set-webhook --n
 
 import دوباره: `--force-reimport` — فقط export قبلی: `--template /root/templates/....sql --skip-export`
 
+### بعد از `git pull` — چرا migrate «Nothing to migrate»؟
+
+کد داخل **image** است، نه bind-mount از پوشهٔ `~/VPNMarket`. تا rebuild نکنید، migration و PHP جدید داخل کانتینر نیست.
+
+```bash
+cd ~/VPNMarket && git pull
+./deploy/bin/rebuild-instance-web.sh lab.bypax.store
+docker exec vpnmarket_lab_bypax_store-web-1 php artisan migrate --force
+docker exec vpnmarket_lab_bypax_store-web-1 php artisan vpnmarket:sync-renew-eligibility-messages
+docker exec vpnmarket_lab_bypax_store-web-1 php artisan optimize:clear
+```
+
+بررسی: `docker exec … test -f database/migrations/2026_05_16_120000_add_renew_eligibility_bot_messages.php && echo OK`
+
 ## ۴) ساخت نمونهٔ ربات (مثلاً x.com)
 
 ```bash
