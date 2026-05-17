@@ -15,6 +15,7 @@ use App\Services\MarzbanService;
 use App\Services\PlisioService;
 use App\Actions\CompleteXmplusGatewayPaymentAction;
 use App\Services\XmplusProvisioningService;
+use App\Support\XmplusRenewalEligibility;
 use App\Services\XUIService;
 use App\Models\Notification;
 use Illuminate\Http\Request;
@@ -211,6 +212,14 @@ class OrderController extends Controller
             abort(403);
         }
 
+        $dashSettings = Setting::all()->pluck('value', 'key');
+        if (($dashSettings->get('panel_type') ?? '') === 'xmplus') {
+            $renewCheck = XmplusRenewalEligibility::evaluateForOrder($order->user, $order, $dashSettings);
+            if (! $renewCheck['allowed']) {
+                return redirect()->route('dashboard')->with('error', $renewCheck['reason']);
+            }
+        }
+
         $newOrder = $order->replicate();
         $newOrder->created_at = now();
         $newOrder->status = 'pending';
@@ -223,7 +232,6 @@ class OrderController extends Controller
         $newOrder->amount = $order->plan->price; // مبلغ اصلی بدون تخفیف
         $newOrder->save();
 
-        $dashSettings = Setting::all()->pluck('value', 'key');
         $xmRenew = XmplusProvisioningService::ensurePendingShopInvoice($newOrder->fresh(['plan', 'user']), $dashSettings);
         if (! $xmRenew['ok']) {
             Log::channel('xmplus')->warning('ensurePendingShopInvoice (order.renew): '.($xmRenew['error'] ?? ''), ['order_id' => $newOrder->id]);

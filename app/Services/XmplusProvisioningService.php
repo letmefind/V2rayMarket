@@ -9,6 +9,7 @@ use App\Services\XmplusInvoiceDatabaseSyncService;
 use App\Services\XmplusPackageAwareRenewalService;
 use App\Support\XmplusCredentialRecovery;
 use App\Support\XmplusGatewayTelegram;
+use App\Support\XmplusRenewalEligibility;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -931,6 +932,11 @@ class XmplusProvisioningService
             throw new RuntimeException('XMPlus تمدید: شناسه سرویس (sid) روی سفارش اصلی ذخیره نشده؛ یک بار سرویس را دوباره از پنل همگام کنید یا سفارش جدید بگیرید.');
         }
         $sid = (int) $sid;
+
+        $eligibility = XmplusRenewalEligibility::evaluateForOrder($user, $originalOrder, $settings);
+        if (! $eligibility['allowed']) {
+            throw new RuntimeException($eligibility['reason']);
+        }
 
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
@@ -2342,7 +2348,11 @@ class XmplusProvisioningService
                 if (! $originalOrder) {
                     return ['ok' => false, 'error' => 'سفارش اصلی برای تمدید یافت نشد.'];
                 }
-                self::webCheckoutEnsureRenewalInvoice($api, $order->user, $order, $originalOrder);
+                $eligibility = XmplusRenewalEligibility::evaluateForOrder($order->user, $originalOrder, $settings);
+                if (! $eligibility['allowed']) {
+                    return ['ok' => false, 'error' => $eligibility['reason']];
+                }
+                self::webCheckoutEnsureRenewalInvoice($api, $settings, $order->user, $order, $originalOrder);
             } else {
                 self::webCheckoutEnsureNewPurchaseInvoice(
                     $api,
@@ -2404,8 +2414,13 @@ class XmplusProvisioningService
                 if (! $originalOrder) {
                     return ['ok' => false, 'error' => 'سفارش اصلی برای تمدید یافت نشد.', 'gateways' => []];
                 }
+                $eligibility = XmplusRenewalEligibility::evaluateForOrder($user, $originalOrder, $settings);
+                if (! $eligibility['allowed']) {
+                    return ['ok' => false, 'error' => $eligibility['reason'], 'gateways' => []];
+                }
                 [$email, $passwdPlain, $invid, $knownSid, $credentialsMessage] = self::webCheckoutEnsureRenewalInvoice(
                     $api,
+                    $settings,
                     $user,
                     $order,
                     $originalOrder
@@ -2634,6 +2649,7 @@ class XmplusProvisioningService
      */
     protected static function webCheckoutEnsureRenewalInvoice(
         XmplusService $api,
+        Collection $settings,
         User $user,
         Order $renewalOrder,
         Order $originalOrder
@@ -2675,6 +2691,16 @@ class XmplusProvisioningService
             throw new RuntimeException('XMPlus تمدید: شناسه فاکتور (invid) در پاسخ نیست.');
         }
         $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
+
+        try {
+            XmplusInvoiceDatabaseSyncService::setRenewalInvoiceServiceId($settings, $invid, $sid);
+        } catch (\Throwable $e) {
+            $api->log('warning', 'XMPlus webCheckout renewal: setRenewalInvoiceServiceId', [
+                'error' => $e->getMessage(),
+                'invid' => $invid,
+                'sid' => $sid,
+            ]);
+        }
 
         return [$email, $passwdPlain, $invid, $sid, null];
     }

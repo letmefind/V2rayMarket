@@ -10,6 +10,7 @@ use App\Models\Setting;
 use App\Support\AdminOrderCallback;
 use App\Support\XmplusCatalog;
 use App\Support\XmplusGatewayTelegram;
+use App\Support\XmplusRenewalEligibility;
 use App\Support\XmplusServerHelper;
 use App\Support\AdminTicketCallback;
 use App\Models\TelegramBotSetting;
@@ -53,6 +54,48 @@ class WebhookController extends Controller
         }
 
         return ($this->settings->get('panel_type') ?? '') === 'xmplus';
+    }
+
+    /**
+     * @return array{allowed: bool, reason: string, expired: bool, low_traffic: bool, error: ?string}
+     */
+    protected function xmplusRenewalEligibility(User $user, Order $order): array
+    {
+        if (! $this->settings) {
+            $this->settings = Setting::all()->pluck('value', 'key');
+        }
+
+        return XmplusRenewalEligibility::evaluateForOrder($user, $order, $this->settings);
+    }
+
+    protected function xmplusRenewalIsAllowed(User $user, Order $order): bool
+    {
+        if (! $this->isXmplusPanel()) {
+            return true;
+        }
+
+        return $this->xmplusRenewalEligibility($user, $order)['allowed'];
+    }
+
+    /** @return bool true اگر تمدید مسدود شد (caller باید return کند) */
+    protected function blockXmplusRenewalIfNotAllowed(User $user, Order $order, ?int $messageId, string $backCallback = '/renew'): bool
+    {
+        if (! $this->isXmplusPanel()) {
+            return false;
+        }
+
+        $check = $this->xmplusRenewalEligibility($user, $order);
+        if ($check['allowed']) {
+            return false;
+        }
+
+        $keyboard = Keyboard::make()->inline()->row([
+            Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+            Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => $backCallback]),
+        ]);
+        $this->sendOrEditMessage($user->telegram_chat_id, '❌ '.$check['reason'], $keyboard, $messageId);
+
+        return true;
     }
 
     /** متن دکمهٔ «حساب پنل XMPlus» از پیام‌های ربات (Filament → پیام‌های ربات). */
@@ -2067,6 +2110,11 @@ class WebhookController extends Controller
 
             return;
         }
+
+        if ($this->blockXmplusRenewalIfNotAllowed($user, $originalOrder, $messageId)) {
+            return;
+        }
+
         $plan = $originalOrder->plan;
         $newRenewalOrder = $user->orders()->create([
             'plan_id' => $plan->id,
@@ -2544,11 +2592,14 @@ class WebhookController extends Controller
             $tempFile = tempnam(sys_get_temp_dir(), 'qr_') . '.png';
             file_put_contents($tempFile, $qrData);
 
-            $keyboard = Keyboard::make()->inline()
-                ->row([
-                    Keyboard::inlineButton(['text' => "🔄 تمدید سرویس", 'callback_data' => "renew_order_{$order->id}"]),
-                    Keyboard::inlineButton(['text' => '⬅️ بازگشت به جزئیات', 'callback_data' => "show_service_{$order->id}"]),
-                ])
+            $keyboard = Keyboard::make()->inline();
+            $qrTopRow = [
+                Keyboard::inlineButton(['text' => '⬅️ بازگشت به جزئیات', 'callback_data' => "show_service_{$order->id}"]),
+            ];
+            if ($this->xmplusRenewalIsAllowed($user, $order)) {
+                array_unshift($qrTopRow, Keyboard::inlineButton(['text' => '🔄 تمدید سرویس', 'callback_data' => "renew_order_{$order->id}"]));
+            }
+            $keyboard->row($qrTopRow)
                 ->row([Keyboard::inlineButton(['text' => '🇮🇷 ارسال به ایران (کد ۵ رقمی)', 'callback_data' => 'sir_'.$order->id])])
                 ->row([Keyboard::inlineButton(['text' => '⬅️ بازگشت به لیست سرویس‌ها', 'callback_data' => '/my_services'])]);
 
@@ -2659,6 +2710,29 @@ class WebhookController extends Controller
             return;
         }
 
+        $eligibleOrders = $orders->filter(function (Order $order) use ($user) {
+            if (! $order->plan) {
+                return false;
+            }
+
+            return $this->xmplusRenewalIsAllowed($user, $order);
+        });
+
+        if ($eligibleOrders->isEmpty()) {
+            $keyboard = Keyboard::make()->inline()->row([
+                Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
+                Keyboard::inlineButton(['text' => '⬅️ منوی اصلی', 'callback_data' => '/start']),
+            ]);
+            $this->sendOrEditMessage(
+                $user->telegram_chat_id,
+                "⚠️ هیچ سرویسی در وضعیت تمدید نیست.\n\nتمدید فقط وقتی مجاز است که سرویس منقضی شده باشد (status=-1) یا کمتر از ۱۰٪ حجم باقی مانده باشد — مثل پنل XMPlus.",
+                $keyboard,
+                $messageId
+            );
+
+            return;
+        }
+
         $message = BotMessage::get(
             'msg_renew_service_picker',
             "🔄 *تمدید سرویس*\n\nیکی از سرویس‌های زیر را برای تمدید انتخاب کنید:"
@@ -2666,11 +2740,7 @@ class WebhookController extends Controller
 
         $keyboard = Keyboard::make()->inline();
 
-        foreach ($orders as $order) {
-            if (! $order->plan) {
-                continue;
-            }
-
+        foreach ($eligibleOrders as $order) {
             $expiresAt = Carbon::parse($order->expires_at);
             $statusIcon = '🟢';
             if ($expiresAt->isPast()) {
@@ -2774,12 +2844,14 @@ class WebhookController extends Controller
             ]);
         }
 
-        $keyboard->row([
-            Keyboard::inlineButton(['text' => "🔄 تمدید سرویس", 'callback_data' => "renew_order_{$order->id}"])
-        ]);
+        if ($this->xmplusRenewalIsAllowed($user, $order)) {
+            $keyboard->row([
+                Keyboard::inlineButton(['text' => '🔄 تمدید سرویس', 'callback_data' => "renew_order_{$order->id}"]),
+            ]);
+        }
 
         $keyboard->row([
-            Keyboard::inlineButton(['text' => '⬅️ بازگشت به لیست سرویس‌ها', 'callback_data' => '/my_services'])
+            Keyboard::inlineButton(['text' => '⬅️ بازگشت به لیست سرویس‌ها', 'callback_data' => '/my_services']),
         ]);
 
         $this->sendOrEditMessage($user->telegram_chat_id, $message, $keyboard, $messageId);
@@ -3625,6 +3697,10 @@ class WebhookController extends Controller
             return;
         }
 
+        if ($this->blockXmplusRenewalIfNotAllowed($user, $originalOrder, $messageId)) {
+            return;
+        }
+
         $plan = $originalOrder->plan;
         $balance = $user->balance ?? 0;
         $expiresAt = Carbon::parse($originalOrder->expires_at);
@@ -3686,6 +3762,10 @@ class WebhookController extends Controller
         // بررسی‌های اولیه
         if (!$originalOrder || !$originalOrder->plan || $originalOrder->status !== 'paid') {
             $this->sendOrEditMainMenu($user->telegram_chat_id, "❌ سرویس مورد نظر برای تمدید یافت نشد.", $messageId);
+            return;
+        }
+
+        if ($this->blockXmplusRenewalIfNotAllowed($user, $originalOrder, $messageId, '/my_services')) {
             return;
         }
 
@@ -3825,6 +3905,11 @@ class WebhookController extends Controller
             $this->sendOrEditMainMenu($user->telegram_chat_id, "❌ سرویس مورد نظر برای تمدید یافت نشد.", $messageId);
             return;
         }
+
+        if ($this->blockXmplusRenewalIfNotAllowed($user, $originalOrder, $messageId)) {
+            return;
+        }
+
         $plan = $originalOrder->plan;
 
         // ساخت سفارش بدون renews_order_id در create
@@ -3854,6 +3939,11 @@ class WebhookController extends Controller
 
             return;
         }
+
+        if ($this->blockXmplusRenewalIfNotAllowed($user, $originalOrder, $messageId)) {
+            return;
+        }
+
         $plan = $originalOrder->plan;
 
         $newRenewalOrder = $user->orders()->create([
@@ -3879,6 +3969,11 @@ class WebhookController extends Controller
 
             return;
         }
+
+        if ($this->blockXmplusRenewalIfNotAllowed($user, $originalOrder, $messageId)) {
+            return;
+        }
+
         $plan = $originalOrder->plan;
 
         $newRenewalOrder = $user->orders()
