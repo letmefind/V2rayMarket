@@ -1507,12 +1507,28 @@ class XmplusProvisioningService
     {
         $msg = strtolower((string) ($row['message'] ?? ''));
         $code = (int) ($row['code'] ?? 0);
-        if ($code !== 208) {
-            return false;
+
+        if ($code === 208) {
+            if (self::apiIsEmailAlreadyRegistered($row)) {
+                return false;
+            }
+            if (str_contains($msg, 'billing') && str_contains($msg, 'unavailable')) {
+                return false;
+            }
+            foreach (['password', 'passwd', 'credential', 'login', 'auth'] as $needle) {
+                if (str_contains($msg, $needle)) {
+                    return true;
+                }
+            }
         }
 
-        return str_contains($msg, 'password')
-            && (str_contains($msg, 'invalid') || str_contains($msg, 'incorrect') || str_contains($msg, 'wrong'));
+        foreach (['invalid password', 'incorrect password', 'wrong password', 'invalid passwd', 'authentication failed'] as $needle) {
+            if (str_contains($msg, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected static function resolveXmplusClientPassword(User $user): ?string
@@ -1568,31 +1584,60 @@ class XmplusProvisioningService
             ];
         }
 
-        if (self::apiIsInvalidPassword($probe)) {
-            $domain = ltrim(trim((string) $settings->get('xmplus_email_domain', '')), '@');
-            if ($domain === '') {
-                throw new InvalidArgumentException('XMPlus: دامنه ایمیل (xmplus_email_domain) تنظیم نشده است.');
-            }
-            $sendCode = filter_var($settings->get('xmplus_send_register_code', false), FILTER_VALIDATE_BOOLEAN);
-            $regCode = (string) ($settings->get('xmplus_registration_code', ''));
-            $alt = XmplusCredentialRecovery::registerAlternateXmplusIdentity(
+        if (self::apiIsInvalidPassword($probe) || ! self::apiOk($probe)) {
+            return self::provisionAlternateXmplusIdentityForUser(
                 $api,
-                $user->fresh() ?? $user,
-                $domain,
+                $settings,
+                $user,
                 $aff,
                 $panelBase,
-                $regCode,
-                $sendCode
+                $probe
             );
-
-            return [
-                'password' => $alt['password'],
-                'email' => $alt['email'],
-                'credentials_message' => $alt['credentials_message'],
-            ];
         }
 
         return ['password' => null, 'email' => $email, 'credentials_message' => null];
+    }
+
+    /**
+     * @param  array<string, mixed>  $probeForLog
+     * @return array{password: string, email: string, credentials_message: string}
+     */
+    protected static function provisionAlternateXmplusIdentityForUser(
+        XmplusService $api,
+        Collection $settings,
+        User $user,
+        string $aff,
+        string $panelBase,
+        array $probeForLog = []
+    ): array {
+        $domain = ltrim(trim((string) $settings->get('xmplus_email_domain', '')), '@');
+        if ($domain === '') {
+            throw new InvalidArgumentException('XMPlus: دامنه ایمیل (xmplus_email_domain) تنظیم نشده است.');
+        }
+
+        $api->log('warning', 'XMPlus: ساخت هویت Client API جایگزین (رمز محلی موجود نیست)', [
+            'user_id' => $user->id,
+            'old_email' => $user->xmplus_client_email,
+            'probe' => $probeForLog,
+        ]);
+
+        $sendCode = filter_var($settings->get('xmplus_send_register_code', false), FILTER_VALIDATE_BOOLEAN);
+        $regCode = (string) ($settings->get('xmplus_registration_code', ''));
+        $alt = XmplusCredentialRecovery::registerAlternateXmplusIdentity(
+            $api,
+            $user->fresh() ?? $user,
+            $domain,
+            $aff,
+            $panelBase,
+            $regCode,
+            $sendCode
+        );
+
+        return [
+            'password' => $alt['password'],
+            'email' => $alt['email'],
+            'credentials_message' => $alt['credentials_message'],
+        ];
     }
 
     /**
