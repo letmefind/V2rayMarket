@@ -118,7 +118,14 @@ if [ -z "$MYSQL_C" ]; then
   MYSQL_C="${COMPOSE_PROJECT_NAME}-mysql-1"
 fi
 
-docker ps --format '{{.Names}}' | grep -qx "$MYSQL_C" || err "کانتینر MySQL در حال اجرا نیست: $MYSQL_C"
+if ! docker ps --format '{{.Names}}' | grep -qx "$MYSQL_C"; then
+  if docker ps --format '{{.Names}}' | grep -qx 'vpnmarket_shared_mysql'; then
+    info "کانتینر $MYSQL_C نیست — استفاده از MySQL مشترک: vpnmarket_shared_mysql"
+    MYSQL_C='vpnmarket_shared_mysql'
+  else
+    err "کانتینر MySQL در حال اجرا نیست: $MYSQL_C (و vpnmarket_shared_mysql هم پیدا نشد)"
+  fi
+fi
 
 escape_sql() {
   printf '%s' "$1" | sed "s/'/''/g"

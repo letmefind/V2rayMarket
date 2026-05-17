@@ -28,4 +28,10 @@ for a in "$@"; do [ "$a" = "--skip-settings" ] && USE_SKIP_SETTINGS=0; done
 ARGS=( "$TARGET" "$TEMPLATE" --skip-telegram-settings --skip-confirm "$@" )
 [ "$USE_SKIP_SETTINGS" = 1 ] && ARGS=( --skip-settings "${ARGS[@]}" )
 
+HAS_MYSQL_ARG=0
+for a in "$@"; do [ "$a" = "--mysql-container" ] && HAS_MYSQL_ARG=1; done
+if [ "$HAS_MYSQL_ARG" = 0 ] && docker ps --format '{{.Names}}' | grep -qx 'vpnmarket_shared_mysql'; then
+  ARGS=( --mysql-container vpnmarket_shared_mysql "${ARGS[@]}" )
+fi
+
 exec "$IMPORT" "${ARGS[@]}"
