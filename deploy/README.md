@@ -118,6 +118,31 @@ cp deploy/instances/_template.pickup/docker-compose.yml deploy/instances/bale.cy
 
 در `.env` هر **ربات** مقدار `IRAN_SERVICE_SHARE_URL` / `services.iran_share` را روی `https://bale.cyou` بگذارید (همان دامنهٔ pickup).
 
+## محیط Lab — کپی کامل aof برای تست
+
+روی **همان سرور** (MySQL مشترک)، بدون جابه‌جایی دادهٔ aof:
+
+```bash
+cd ~/VPNMarket
+git pull
+
+# DNS: lab.bypax.store → IP سرور (یا دامنهٔ lab خودتان)
+
+chmod +x deploy/bin/bootstrap-lab-from-instance.sh
+./deploy/bin/bootstrap-lab-from-instance.sh aof.bypax.store lab.bypax.store
+```
+
+اسکریپت: export دادهٔ aof → ساخت `deploy/instances/lab.bypax.store` (همان `APP_KEY` / XMPlus) → import → rebuild.
+
+بعداً **توکن ربات جدا** و webhook:
+
+```bash
+docker exec vpnmarket_lab_bypax_store-web-1 php artisan vpnmarket:provision-instance --token='BOT_TOKEN' --no-interaction
+docker exec vpnmarket_lab_bypax_store-web-1 php artisan telegram:set-webhook --no-interaction
+```
+
+import دوباره: `--force-reimport` — فقط export قبلی: `--template /root/templates/....sql --skip-export`
+
 ## ۴) ساخت نمونهٔ ربات (مثلاً x.com)
 
 ```bash
