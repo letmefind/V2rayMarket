@@ -93,7 +93,12 @@ class WebhookController extends Controller
             Keyboard::inlineButton(['text' => '🛠 سرویس‌های من', 'callback_data' => '/my_services']),
             Keyboard::inlineButton(['text' => '⬅️ بازگشت', 'callback_data' => $backCallback]),
         ]);
-        $this->sendOrEditMessage($user->telegram_chat_id, '❌ '.$check['reason'], $keyboard, $messageId);
+        $this->sendOrEditMessage(
+            $user->telegram_chat_id,
+            BotMessage::get('msg_renew_not_eligible', XmplusRenewalEligibility::userDenialMessage()),
+            $keyboard,
+            $messageId
+        );
 
         return true;
     }
@@ -2725,7 +2730,7 @@ class WebhookController extends Controller
             ]);
             $this->sendOrEditMessage(
                 $user->telegram_chat_id,
-                "⚠️ هیچ سرویسی در وضعیت تمدید نیست.\n\nتمدید فقط وقتی مجاز است که سرویس منقضی شده باشد (status=-1) یا کمتر از ۱۰٪ حجم باقی مانده باشد — مثل پنل XMPlus.",
+                BotMessage::get('msg_renew_none_eligible', XmplusRenewalEligibility::userEmptyRenewMenuMessage()),
                 $keyboard,
                 $messageId
             );

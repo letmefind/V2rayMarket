@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\BotMessage;
+use App\Support\XmplusRenewalEligibility;
 use Illuminate\Database\Seeder;
 
 class BotMessageSeeder extends Seeder
@@ -279,6 +280,20 @@ class BotMessageSeeder extends Seeder
                 'title' => 'پیام: انتخاب سرویس برای تمدید',
                 'content' => "🔄 *تمدید سرویس*\n\nیکی از سرویس‌های زیر را برای تمدید انتخاب کنید:",
                 'description' => 'متن لیست تمدید از منوی اصلی',
+            ],
+            [
+                'key' => 'msg_renew_not_eligible',
+                'category' => 'messages',
+                'title' => 'پیام: تمدید مجاز نیست (حجم کافی)',
+                'content' => XmplusRenewalEligibility::USER_DENIAL_MESSAGE,
+                'description' => 'وقتی سرویس هنوز بیش از ۱۰٪ حجم دارد؛ XMPlus',
+            ],
+            [
+                'key' => 'msg_renew_none_eligible',
+                'category' => 'messages',
+                'title' => 'پیام: هیچ سرویسی برای تمدید نیست',
+                'content' => XmplusRenewalEligibility::USER_EMPTY_RENEW_MENU_MESSAGE,
+                'description' => 'منوی تمدید وقتی همهٔ سرویس‌ها هنوز حجم دارند',
             ],
             [
                 'key' => 'btn_renew_card',

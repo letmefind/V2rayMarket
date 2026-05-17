@@ -16,6 +16,34 @@ final class XmplusRenewalEligibility
 {
     public const LOW_TRAFFIC_FRACTION = 0.1;
 
+    /** متن برای کاربر وقتی هنوز حجم کافی دارد (تمدید مجاز نیست). */
+    public const USER_DENIAL_MESSAGE = <<<'TXT'
+ℹ️ سرویس شما هنوز حجم دارد.
+
+تمدید وقتی امکان‌پذیر است که کمتر از ۱۰٪ حجم باقی مانده باشد.
+
+توجه: در صورت تمدید، حجم باقی‌ماندهٔ قبلی به دورهٔ جدید اضافه نمی‌شود؛ بهتر است تا پایان حجم صبر کنید.
+TXT;
+
+    /** وقتی در منوی تمدید هیچ سرویس واجد شرایطی نیست. */
+    public const USER_EMPTY_RENEW_MENU_MESSAGE = <<<'TXT'
+⚠️ فعلاً سرویسی برای تمدید در دسترس نیست.
+
+سرویس‌های شما هنوز حجم دارند. هر زمان کمتر از ۱۰٪ حجم باقی ماند می‌توانید تمدید کنید.
+
+توجه: در صورت تمدید، حجم باقی‌ماندهٔ قبلی به دورهٔ جدید اضافه نمی‌شود؛ بهتر است تا پایان حجم صبر کنید.
+TXT;
+
+    public static function userDenialMessage(): string
+    {
+        return self::USER_DENIAL_MESSAGE;
+    }
+
+    public static function userEmptyRenewMenuMessage(): string
+    {
+        return self::USER_EMPTY_RENEW_MENU_MESSAGE;
+    }
+
     /**
      * @return array{allowed: bool, reason: string, expired: bool, low_traffic: bool, error: ?string}
      */
@@ -90,9 +118,7 @@ final class XmplusRenewalEligibility
 
         return [
             'allowed' => $allowed,
-            'reason' => $allowed
-                ? ''
-                : 'تمدید فقط وقتی مجاز است که سرویس منقضی شده باشد یا کمتر از ۱۰٪ حجم باقی مانده باشد (مثل پنل XMPlus).',
+            'reason' => $allowed ? '' : self::userDenialMessage(),
             'expired' => $expired,
             'low_traffic' => $lowTraffic,
             'error' => null,
