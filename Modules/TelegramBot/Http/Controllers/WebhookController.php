@@ -1399,24 +1399,7 @@ class WebhookController extends Controller
                     ]);
                     $this->sendOrEditMainMenu($chatId, "چه کار دیگری برایتان انجام دهم?");
 
-                    $adminChatId = $this->settings->get('telegram_admin_chat_id');
-                    if ($adminChatId) {
-                        $orderType = $order->renews_order_id ? 'تمدید سرویس' : ($order->plan_id ? 'خرید سرویس' : 'شارژ کیف پول');
-
-                        $adminMessage = "🧾 *رسید جدید برای سفارش \\#{$orderId}*\n\n";
-                        $adminMessage .= "*کاربر:* " . $this->escape($user->name) . " \\(ID: `{$user->id}`\\)\n";
-                        $adminMessage .= "*مبلغ:* " . $this->escape(number_format($order->amount) . ' تومان') . "\n";
-                        $adminMessage .= "*نوع سفارش:* " . $this->escape($orderType) . "\n\n";
-                        $adminMessage .= $this->escape('با دکمه‌های زیر تأیید کنید یا سفارش را لغو کنید.');
-
-                        Telegram::sendPhoto([
-                            'chat_id' => $adminChatId,
-                            'photo' => InputFile::create(Storage::disk('public')->path($fileName)),
-                            'caption' => $adminMessage,
-                            'parse_mode' => 'MarkdownV2',
-                            'reply_markup' => $this->adminPendingOrderKeyboard($order->fresh()),
-                        ]);
-                    }
+                    $this->notifyAdminCardReceipt($order->fresh(), $user, $fileName);
 
                 } catch (\Exception $e) {
                     Log::error("Receipt processing failed for order {$orderId}: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
@@ -2012,6 +1995,38 @@ class WebhookController extends Controller
         $user->update(['bot_state' => null]);
         Telegram::sendMessage(['chat_id' => $user->telegram_chat_id, 'text' => '✅ TxID ثبت شد. پس از تأیید ادمین نتیجه اعلام می‌شود.']);
         $this->notifyAdminManualCrypto($order->fresh(), $user, 'TxID کریپتو ثبت شد');
+    }
+
+    protected function notifyAdminCardReceipt(Order $order, User $user, string $receiptPath): void
+    {
+        $adminChatId = $this->settings->get('telegram_admin_chat_id');
+        if (! $adminChatId) {
+            return;
+        }
+
+        $orderType = $order->renews_order_id ? 'تمدید سرویس' : ($order->plan_id ? 'خرید سرویس' : 'شارژ کیف پول');
+        $orderId = $order->id;
+
+        $adminMessage = "🧾 *رسید جدید برای سفارش \\#{$orderId}*\n\n";
+        $adminMessage .= '*کاربر:* '.$this->escape($user->name)." \\(ID: `{$user->id}`\\)\n";
+        $adminMessage .= '*مبلغ:* '.$this->escape(number_format($order->amount).' تومان')."\n";
+        $adminMessage .= '*نوع سفارش:* '.$this->escape($orderType)."\n\n";
+        $adminMessage .= $this->escape('با دکمه‌های زیر تأیید کنید یا سفارش را لغو کنید.');
+
+        try {
+            Telegram::sendPhoto([
+                'chat_id' => (int) $adminChatId,
+                'photo' => InputFile::create(Storage::disk('public')->path($receiptPath)),
+                'caption' => $adminMessage,
+                'parse_mode' => 'MarkdownV2',
+                'reply_markup' => $this->adminPendingOrderKeyboard($order),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('notifyAdminCardReceipt: '.$e->getMessage(), [
+                'order_id' => $order->id,
+                'admin_chat_id' => $adminChatId,
+            ]);
+        }
     }
 
     protected function notifyAdminManualCrypto(Order $order, User $user, string $captionLine): void
