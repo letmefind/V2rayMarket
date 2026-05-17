@@ -8,6 +8,7 @@ use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use App\Casts\LegacyCompatibleEncrypted;
 use App\Models\Concerns\BelongsToInstance;
+use App\Models\ServiceShare;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 
 use Modules\Ticketing\Models\Ticket;
@@ -75,6 +76,19 @@ class User extends Authenticatable implements FilamentUser
     public function orders()
     {
         return $this->hasMany(Order::class);
+    }
+
+    public function serviceShares()
+    {
+        return $this->hasMany(ServiceShare::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::deleting(function (User $user): void {
+            // جلوگیری از خطای FK بین users ↔ orders ↔ service_shares (SET NULL + CASCADE)
+            ServiceShare::query()->where('user_id', $user->id)->delete();
+        });
     }
     public function tickets()
     {
