@@ -157,6 +157,34 @@ docker exec vpnmarket_lab_bypax_store-web-1 php artisan optimize:clear
 
 بررسی: `docker exec … test -f database/migrations/2026_05_16_120000_add_renew_eligibility_bot_messages.php && echo OK`
 
+### استقرار روی همهٔ ربات‌های سرور اصلی (بدون قطع DB/Traefik)
+
+روی سرور production — **یک‌بار** کافی است؛ `bale.cyou` (pickup) و MySQL/Redis/Traefik دست نخورده می‌مانند:
+
+```bash
+cd ~/VPNMarket
+git pull
+
+chmod +x deploy/bin/rollout-all-bots.sh
+./deploy/bin/rollout-all-bots.sh
+```
+
+این اسکریپت به ترتیب: `rebuild-instance-web.sh --all-bots` → recreate `queue`/`scheduler` → `migrate` → `vpnmarket:sync-renew-eligibility-messages` → `optimize:clear` برای هر ربات.
+
+**پیشنهاد:** ساعات کم‌ترافیک؛ هر ربات چند ثانیه web recreate می‌شود (قطعی کوتاه webhook).
+
+**دستی (فقط چند ربات):**
+
+```bash
+./deploy/bin/rebuild-instance-web.sh aof.bypax.store bypassnet.bypax.store raydar.bypax.store robot.bypax.store
+for c in vpnmarket_aof_bypax_store-web-1 vpnmarket_bypassnet_bypax_store-web-1 \
+         vpnmarket_raydar_bypax_store-web-1 vpnmarket_robot_bypax_store-web-1; do
+  docker exec "$c" php artisan migrate --force
+  docker exec "$c" php artisan vpnmarket:sync-renew-eligibility-messages
+  docker exec "$c" php artisan optimize:clear
+done
+```
+
 ## ۴) ساخت نمونهٔ ربات (مثلاً x.com)
 
 ```bash
