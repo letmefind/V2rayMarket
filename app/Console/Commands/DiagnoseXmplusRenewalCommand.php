@@ -43,6 +43,23 @@ class DiagnoseXmplusRenewalCommand extends Command
 
         $ok = true;
 
+        $panelUrl = trim((string) ($settings->get('xmplus_panel_url') ?? ''));
+        $apiKey = trim((string) ($settings->get('xmplus_client_api_key') ?? ''));
+        if ($panelUrl === '' || $apiKey === '') {
+            $this->error('✗ xmplus_panel_url یا xmplus_client_api_key در settings این instance خالی است — API XMPlus اصلاً نباید کار کند.');
+            $ok = false;
+        } else {
+            $this->line('✓ xmplus_panel_url = '.$panelUrl);
+            $this->line('✓ xmplus_client_api_key = (تنظیم شده، '.strlen($apiKey).' کاراکتر)');
+        }
+
+        $mysqlDirect = strtolower(trim((string) ($settings->get('xmplus_mysql_direct_enabled') ?? 'no')));
+        if (in_array($mysqlDirect, ['yes', '1', 'true'], true)) {
+            $this->line('✓ xmplus_mysql_direct_enabled = yes (تمدید مستقیم service پس از pay)');
+        } else {
+            $this->line('  xmplus_mysql_direct_enabled = خیر/خالی');
+        }
+
         $gateway = trim((string) ($settings->get('xmplus_auto_pay_gateway_id') ?? ''));
         if ($gateway === '' || ! is_numeric($gateway)) {
             $this->error('✗ xmplus_auto_pay_gateway_id خالی است — بعد از پرداخت فاکتور تمدید بسته نمی‌شود.');
@@ -145,8 +162,10 @@ class DiagnoseXmplusRenewalCommand extends Command
             return self::SUCCESS;
         }
 
-        $this->warn('جمع‌بندی: همگام‌سازی MySQL فاکتور و host را در Filament پر کنید (credentials از پنل/هاست XMPlus).');
-        $this->line('اگر export از lab هم sync=0 بود، lab با همان تنظیمات production را تمدید نمی‌کند مگر در پنل XMPlus دستی extend شده باشد.');
+        $this->warn('جمع‌بندی: روی **همین ربات** در Filament → تنظیمات تم:');
+        $this->line('  1) همگام‌سازی MySQL فاکتور = روشن + host/user/pass جدول invoice پنل **همین** فروشگاه');
+        $this->line('  2) تست اتصال MySQL');
+        $this->line('lab و production سرور/DB جدا هستند — export lab فقط gateway=24 دارد؛ credentials MySQL را از **هاست پنل production** بگیرید، نه از lab.');
 
         return self::FAILURE;
     }
