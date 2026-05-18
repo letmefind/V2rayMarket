@@ -155,6 +155,28 @@ class XmplusServiceRenewalService
     }
 
     /**
+     * تمدید با تعداد روز مشخص (fallback وقتی API pay سرویس را تمدید نمی‌کند).
+     */
+    public static function renewServiceWithDays(Collection $settings, int $serviceId, int $addDays): bool
+    {
+        if ($addDays <= 0) {
+            return false;
+        }
+
+        return self::renewServiceDirectly($settings, $serviceId, [
+            'package_expire' => $addDays,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $invoiceData
+     */
+    public static function renewalDaysFromInvoiceData(array $invoiceData): int
+    {
+        return self::calculateRenewalDays($invoiceData);
+    }
+
+    /**
      * محاسبه تعداد روزهای تمدید از invoice
      */
     private static function calculateRenewalDays(array $invoiceData): int

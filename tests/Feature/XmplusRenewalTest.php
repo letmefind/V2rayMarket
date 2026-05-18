@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use Tests\TestCase;
 use App\Services\XmplusService;
 use App\Services\XmplusProvisioningService;
+use App\Support\XmplusServicePanelState;
 use App\Models\Setting;
 use App\Models\User;
 use App\Models\Order;
@@ -92,5 +93,18 @@ class XmplusRenewalTest extends TestCase
             method_exists(XmplusProvisioningService::class, 'doRenewal'),
             'متد doRenewal در XmplusProvisioningService وجود ندارد!'
         );
+    }
+
+    public function test_service_panel_state_detects_expired_service(): void
+    {
+        $row = ['code' => 100, 'sid' => 17858, 'status' => 'Expired', 'expire_date' => ''];
+        $this->assertTrue(XmplusServicePanelState::responseIndicatesExistingService($row));
+        $this->assertFalse(XmplusServicePanelState::renewalAppliedOnPanel($row));
+    }
+
+    public function test_service_panel_state_detects_active_renewal(): void
+    {
+        $row = ['code' => 100, 'sid' => 4, 'status' => 'Active', 'expire_date' => '2027-01-11 00:47'];
+        $this->assertTrue(XmplusServicePanelState::renewalAppliedOnPanel($row));
     }
 }

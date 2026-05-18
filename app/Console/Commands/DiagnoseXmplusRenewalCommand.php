@@ -95,6 +95,12 @@ class DiagnoseXmplusRenewalCommand extends Command
         }
 
         $this->newLine();
+        $this->line('چرا lab کار می‌کند و production نه؟');
+        $this->line('  • کد یکسان است؛ تفاوت معمولاً در تنظیمات instance است (همگام‌سازی فاکتور + MySQL مستقیم service).');
+        $this->line('  • API درست: service/renew (sid) → invid با serviceid → invoice/pay (gateway ShopPrepaidConfirm).');
+        $this->line('  • اگر فقط invoice/create استفاده شود، serviceid خالی می‌ماند و pay سرویس را تمدید نمی‌کند.');
+        $this->line('  • اگر pay موفق باشد ولی expire_date در service/info خالی بماند، پنل سرویس را تمدید نکرده (خطای PaymentSuccess یا due_date خالی در DB).');
+        $this->newLine();
         $this->line('کد deploy:');
         if ($this->artisanHas('vpnmarket:sync-renew-eligibility-messages')) {
             $this->line('✓ vpnmarket:sync-renew-eligibility-messages موجود است (image به‌روز)');

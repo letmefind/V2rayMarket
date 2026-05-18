@@ -10,6 +10,7 @@ use App\Services\XmplusPackageAwareRenewalService;
 use App\Support\XmplusCredentialRecovery;
 use App\Support\XmplusGatewayTelegram;
 use App\Support\XmplusRenewalEligibility;
+use App\Support\XmplusServicePanelState;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -92,6 +93,11 @@ class XmplusProvisioningService
         ?Order $originalOrder,
         bool $shopPaymentAlreadyCollected = false
     ): array {
+        if (! $isRenewal && $order->renews_order_id) {
+            $isRenewal = true;
+            $originalOrder = $originalOrder ?? Order::find($order->renews_order_id);
+        }
+
         $lock = Cache::lock('xmplus_provision_order:'.$order->id, 180);
         if (! $lock->get()) {
             throw new RuntimeException(
@@ -523,6 +529,28 @@ class XmplusProvisioningService
         XmplusCredentialRecovery::rehydratePassword($user);
         $user->refresh();
 
+        if ($order->renews_order_id) {
+            $originalOrder = Order::find($order->renews_order_id);
+            if ($originalOrder) {
+                $api->log('warning', 'XMPlus: سفارش تمدید به مسیر خرید جدید (invoice/create) رسید — هدایت به doRenewal', [
+                    'order_id' => $order->id,
+                    'renews_order_id' => $order->renews_order_id,
+                ]);
+
+                return self::doRenewal(
+                    $api,
+                    $settings,
+                    $user,
+                    $plan,
+                    $order,
+                    $originalOrder,
+                    $pid,
+                    $panelBase,
+                    $shopPaymentAlreadyCollected
+                );
+            }
+        }
+
         $email = $user->xmplus_client_email;
         $passwdPlain = null;
         $credentialsMessage = null;
@@ -942,13 +970,34 @@ class XmplusProvisioningService
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
 
         $invid = trim((string) ($renewalOrder->xmplus_inv_id ?? ''));
-        
+
+        // فاکتور ساخته‌شده با invoice/create (بدون serviceid) برای تمدید قابل استفاده نیست.
+        if ($invid !== '') {
+            try {
+                $viewInv = $api->invoiceView($email, $passwdPlain, $invid);
+                if (! self::invoiceViewResponseHasServiceId($viewInv)) {
+                    $api->log('warning', 'XMPlus تمدید: فاکتور ذخیره‌شده serviceid ندارد — serviceRenew مجدد', [
+                        'invid' => $invid,
+                        'order_id' => $renewalOrder->id,
+                        'sid' => $sid,
+                    ]);
+                    $invid = '';
+                    $renewalOrder->forceFill(['xmplus_inv_id' => null])->save();
+                }
+            } catch (\Throwable $e) {
+                $api->log('debug', 'XMPlus تمدید: invoice/view قبل از serviceRenew', [
+                    'error' => $e->getMessage(),
+                    'invid' => $invid,
+                ]);
+            }
+        }
+
         // بررسی می‌کنیم که آیا service اصلی هنوز وجود دارد یا خیر
         $serviceExists = false;
         if ($invid !== '') {
             try {
                 $svcCheck = $api->serviceInfo($email, $passwdPlain, $sid);
-                if (self::apiOk($svcCheck)) {
+                if (XmplusServicePanelState::responseIndicatesExistingService($svcCheck)) {
                     $serviceExists = true;
                 }
             } catch (\Throwable $e) {
@@ -1097,37 +1146,17 @@ class XmplusProvisioningService
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
 
-            // ✅ تمدید service بر اساس package تعریف شده در XMPlus
             if ($shopPaymentAlreadyCollected) {
-                try {
-                    $invoiceViewForRenewal = $api->invoiceView($email, $passwdPlain, $invid);
-                    
-                    if (self::invoiceViewResponseIsPaid($invoiceViewForRenewal)) {
-                        $renewed = XmplusPackageAwareRenewalService::renewServiceFromPackage(
-                            $api,
-                            $email,
-                            $passwdPlain,
-                            $sid,
-                            $pid,
-                            $settings
-                        );
-                        
-                        if ($renewed) {
-                            $api->log('info', 'XMPlus تمدید: ✅ service با package تمدید شد', [
-                                'invid' => $invid,
-                                'service_id' => $sid,
-                                'package_id' => $pid,
-                            ]);
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    $api->log('warning', 'XMPlus تمدید: خطا در تمدید با package', [
-                        'error' => $e->getMessage(),
-                        'invid' => $invid,
-                        'sid' => $sid,
-                        'pid' => $pid,
-                    ]);
-                }
+                self::enforcePanelRenewalAfterShopPay(
+                    $api,
+                    $settings,
+                    $plan,
+                    $email,
+                    $passwdPlain,
+                    $sid,
+                    $pid,
+                    $invid
+                );
             }
 
             return [
@@ -1205,6 +1234,97 @@ class XmplusProvisioningService
             'credentials_message' => null,
             'plain_password' => null,
         ];
+    }
+
+    /**
+     * پس از invoice/pay: اگر API هنوز Expired و expire_date خالی است، MySQL مستقیم (در صورت فعال بودن) یا خطا.
+     */
+    protected static function enforcePanelRenewalAfterShopPay(
+        XmplusService $api,
+        Collection $settings,
+        Plan $plan,
+        string $email,
+        string $passwdPlain,
+        int $sid,
+        int $pid,
+        string $invid
+    ): void {
+        try {
+            $svc = $api->serviceInfo($email, $passwdPlain, $sid);
+        } catch (\Throwable $e) {
+            $api->log('warning', 'XMPlus تمدید: service/info پس از pay', ['error' => $e->getMessage(), 'sid' => $sid]);
+
+            return;
+        }
+
+        if (XmplusServicePanelState::renewalAppliedOnPanel($svc)) {
+            return;
+        }
+
+        $api->log('warning', 'XMPlus تمدید: فاکتور Paid اما سرویس روی پنل هنوز منقضی است — fallback', [
+            'invid' => $invid,
+            'sid' => $sid,
+            'status' => $svc['status'] ?? null,
+            'expire_date' => $svc['expire_date'] ?? null,
+        ]);
+
+        $invoiceRow = [];
+        try {
+            $view = $api->invoiceView($email, $passwdPlain, $invid);
+            if (self::invoiceViewResponseIsPaid($view)) {
+                $invoiceRow = (array) data_get($view, 'invoice', []);
+            }
+        } catch (\Throwable $e) {
+            $api->log('debug', 'XMPlus تمدید: invoice/view برای fallback', ['error' => $e->getMessage()]);
+        }
+
+        $renewed = false;
+        if ($invoiceRow !== []) {
+            $renewed = XmplusPackageAwareRenewalService::renewServiceFromPackage(
+                $api,
+                $email,
+                $passwdPlain,
+                $sid,
+                $pid,
+                $settings
+            );
+        }
+
+        if (! $renewed) {
+            $days = max(1, (int) ($plan->duration_days ?? 30));
+            if ($invoiceRow !== []) {
+                $days = max($days, XmplusServiceRenewalService::renewalDaysFromInvoiceData($invoiceRow));
+            }
+            $renewed = XmplusServiceRenewalService::renewServiceWithDays($settings, $sid, $days);
+        }
+
+        try {
+            $svcAfter = $api->serviceInfo($email, $passwdPlain, $sid);
+        } catch (\Throwable $e) {
+            throw new RuntimeException(
+                'XMPlus تمدید: فاکتور پرداخت شد اما وضعیت سرویس روی پنل قابل بررسی نیست: '.$e->getMessage()
+            );
+        }
+
+        if (XmplusServicePanelState::renewalAppliedOnPanel($svcAfter)) {
+            $api->log('info', 'XMPlus تمدید: fallback پنل موفق بود', ['sid' => $sid, 'invid' => $invid]);
+
+            return;
+        }
+
+        $hints = [];
+        if (! XmplusInvoiceDatabaseSyncService::enabled($settings)) {
+            $hints[] = 'در Theme Settings «همگام‌سازی MySQL فاکتور» (xmplus_invoice_db_sync_enabled) را فعال کنید.';
+        }
+        if (strtolower(trim((string) $settings->get('xmplus_mysql_direct_enabled', 'no'))) !== 'yes') {
+            $hints[] = 'xmplus_mysql_direct_enabled را yes کنید تا پس از pay تاریخ due_date در جدول service به‌روز شود (lab معمولاً این را دارد).';
+        }
+        $hints[] = 'در پنل XMPlus خطای PHP PaymentSuccess در invoice/pay و Next Due Date خالی سرویس '.$sid.' را برطرف کنید.';
+
+        throw new RuntimeException(
+            'XMPlus تمدید: فاکتور در پنل Paid شد اما سرویس #'.$sid.' هنوز منقضی است (expire_date خالی یا Expired). '
+            .implode(' ', $hints)
+        );
     }
 
     protected static function xmplusDisplayName(User $user): string
@@ -2662,8 +2782,8 @@ class XmplusProvisioningService
         Order $originalOrder
     ): array {
         $email = $user->xmplus_client_email ?? $originalOrder->panel_username;
-        $passwdPlain = $user->xmplus_client_password;
-        if (! is_string($email) || $email === '' || ! is_string($passwdPlain) || $passwdPlain === '') {
+        $passwdPlain = self::resolveXmplusClientPassword($user);
+        if (! is_string($email) || $email === '' || $passwdPlain === null) {
             throw new RuntimeException('XMPlus تمدید: اطلاعات ورود کاربر به پنل یافت نشد.');
         }
         $sidRaw = $originalOrder->panel_client_id ?? null;
@@ -2680,8 +2800,15 @@ class XmplusProvisioningService
             try {
                 $view = $api->invoiceView($email, $passwdPlain, $existingInv);
                 $st = strtolower((string) data_get($view, 'invoice.status', ''));
-                if ($st === 'pending') {
+                if ($st === 'pending' && self::invoiceViewResponseHasServiceId($view)) {
                     return [$email, $passwdPlain, $existingInv, $sid, null];
+                }
+                if ($st === 'pending') {
+                    $api->log('warning', 'XMPlus webCheckout renewal: فاکتور Pending بدون serviceid — serviceRenew', [
+                        'invid' => $existingInv,
+                        'order_id' => $renewalOrder->id,
+                        'sid' => $sid,
+                    ]);
                 }
             } catch (\Throwable) {
             }
