@@ -173,21 +173,40 @@ chmod +x deploy/bin/rollout-all-bots.sh
 
 **پیشنهاد:** ساعات کم‌ترافیک؛ هر ربات چند ثانیه web recreate می‌شود (قطعی کوتاه webhook).
 
-### فقط lab تمدید می‌کند، بقیه نه
+### فقط lab تمدید می‌کند، بقیه نه (lab روی سرور دیگر)
 
-معمولاً **کد** همه جا یکی است؛ تفاوت در جدول `settings` هر `instance_id` است (همگام‌سازی MySQL فاکتور XMPlus و `xmplus_auto_pay_gateway_id`). lab را درست تنظیم کرده‌اید؛ بقیه خاموش یا ناقص‌اند.
+**lab و production دیتابیس مشترک ندارند** — `sync --from=lab` روی MultiRobot کار نمی‌کند.
+
+**۱) روی سرور lab** (جایی که تمدید درست است):
+
+```bash
+docker exec vpnmarket_lab_bypax_store-web-1 php artisan vpnmarket:export-xmplus-renewal-settings \
+  --output=/tmp/xmplus-renewal.json
+docker cp vpnmarket_lab_bypax_store-web-1:/tmp/xmplus-renewal.json ./xmplus-renewal.json
+```
+
+فایل را با `scp` به سرور production ببرید.
+
+**۲) روی سرور production** (MultiRobot):
 
 ```bash
 cd ~/VPNMarket && git pull
-./deploy/bin/rollout-all-bots.sh   # اگر هنوز نزده‌اید
+./deploy/bin/rollout-all-bots.sh   # یک‌بار image جدید
 
-chmod +x deploy/bin/fix-xmplus-renewal-all-bots.sh
-./deploy/bin/fix-xmplus-renewal-all-bots.sh
+./deploy/bin/fix-xmplus-renewal-all-bots.sh /root/xmplus-renewal.json
 ```
 
-یا دستی تشخیص یک ربات:
+یا اگر **یک ربات** production (مثلاً aof) از قبل sync روشن دارد، فقط بین ربات‌های همین سرور:
+
 ```bash
-docker exec vpnmarket_aof_bypax_store-web-1 php artisan vpnmarket:diagnose-xmplus-renewal
+FROM=vpnmarket_aof_bypax_store ./deploy/bin/fix-xmplus-renewal-all-bots.sh
+```
+
+**۳) Filament (بدون JSON):** در هر ربات → تنظیمات تم → همان مقادیر lab (MySQL فاکتور XMPlus + درگاه خودکار).
+
+تشخیص:
+```bash
+docker exec vpnmarket_robot_bypax_store-web-1 php artisan vpnmarket:diagnose-xmplus-renewal
 ```
 
 **دستی (فقط چند ربات):**
