@@ -170,7 +170,8 @@ final class ShopPrepaidConfirm
             return ['ret' => 0, 'msg' => $e->getMessage()];
         }
 
-        $msg = Localization::get('PaymentSuccess') ?: 'Payment successful.';
+        // کلید صحیح در i18n پنل: PaymentSuccessful (نه PaymentSuccess — باعث Warning و خرابی JSON می‌شود).
+        $msg = Localization::get('PaymentSuccessful') ?: 'Payment successful.';
         $out = [
             'ret' => 1,
             'msg' => $msg,
@@ -840,6 +841,18 @@ final class ShopPrepaidConfirmKernel
         }
     }
 
+    /**
+     * اسکیمای رسمی XMPlus ستون invoice را service_id می‌نامد؛ API گاهی serviceid برمی‌گرداند.
+     *
+     * @return array<string, int|string>
+     */
+    private static function invoiceServiceIdColumnAttrs(int $serviceId): array
+    {
+        $v = (string) $serviceId;
+
+        return ['serviceid' => $v, 'service_id' => $v];
+    }
+
     private static function invoiceHasServiceId(object $invoice): bool
     {
         foreach (['serviceid', 'service_id', 'sid'] as $k) {
@@ -965,7 +978,7 @@ final class ShopPrepaidConfirmKernel
                     }
                 } catch (Throwable $e) {
                 }
-                self::updateInvoiceRowByPublicKey(self::INVOICE_MODEL, $invId, ['serviceid' => $serviceId]);
+                self::updateInvoiceRowByPublicKey(self::INVOICE_MODEL, $invId, self::invoiceServiceIdColumnAttrs($serviceId));
             }
 
             if (self::invoiceHasServiceId($invoice)) {
@@ -1158,7 +1171,7 @@ final class ShopPrepaidConfirmKernel
             }
         } catch (Throwable $e) {
         }
-        self::updateInvoiceRowByPublicKey(self::INVOICE_MODEL, $invId, ['serviceid' => $candidate]);
+        self::updateInvoiceRowByPublicKey(self::INVOICE_MODEL, $invId, self::invoiceServiceIdColumnAttrs($candidate));
         self::debugLog($config, 'service_sync:attached', [
             'inv_id' => $invId,
             'uid' => $uid,
