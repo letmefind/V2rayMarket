@@ -36,7 +36,7 @@ class XmplusPackageAwareRenewalService
             // 2. اتصال مستقیم به دیتابیس
             $enabled = $settings->get('xmplus_mysql_direct_enabled', 'no');
             if ($enabled !== 'yes') {
-                Log::info('XMPlus package-aware renewal: DB sync disabled', [
+                Log::info('XMPlus package-aware renewal: xmplus_mysql_direct_enabled غیرفعال است (مسیر جدا از همگام‌سازی فاکتور invoice)', [
                     'service_id' => $serviceId,
                 ]);
                 return false;
