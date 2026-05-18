@@ -1324,17 +1324,30 @@ class XmplusProvisioningService
             return;
         }
 
+        if ($renewed) {
+            $api->log('warning', 'XMPlus تمدید: fallback MySQL انجام شد ولی Client API هنوز Active نشان نمی‌دهد (ممکن است cache پنل)', [
+                'sid' => $sid,
+                'invid' => $invid,
+                'status' => $svcAfter['status'] ?? null,
+                'expire_date' => $svcAfter['expire_date'] ?? null,
+            ]);
+
+            return;
+        }
+
         $hints = [];
         if (! XmplusInvoiceDatabaseSyncService::enabled($settings)) {
-            $hints[] = 'در Theme Settings «همگام‌سازی MySQL فاکتور» (xmplus_invoice_db_sync_enabled) را فعال کنید.';
+            $hints[] = 'در Theme Settings «همگام‌سازی MySQL فاکتور» را فعال کنید.';
         }
-        if (strtolower(trim((string) $settings->get('xmplus_mysql_direct_enabled', 'no'))) !== 'yes') {
-            $hints[] = 'xmplus_mysql_direct_enabled را yes کنید تا پس از pay تاریخ due_date در جدول service به‌روز شود (lab معمولاً این را دارد).';
+        if (! XmplusInvoiceDatabaseSyncService::mysqlDirectEnabled($settings)) {
+            $hints[] = 'xmplus_mysql_direct_enabled را yes کنید (همان MySQL فاکتور کافی است).';
+        } elseif (trim((string) $settings->get('xmplus_invoice_db_host', '')) === '' && trim((string) $settings->get('xmplus_mysql_host', '')) === '') {
+            $hints[] = 'هاست MySQL پنل در تنظیمات تم خالی است.';
         }
-        $hints[] = 'در پنل XMPlus خطای PHP PaymentSuccess در invoice/pay و Next Due Date خالی سرویس '.$sid.' را برطرف کنید.';
+        $hints[] = 'ShopPrepaidConfirm.php جدید را روی پنل symmetricnet کپی کنید (کلید PaymentSuccessful).';
 
         throw new RuntimeException(
-            'XMPlus تمدید: فاکتور در پنل Paid شد اما سرویس #'.$sid.' هنوز منقضی است (expire_date خالی یا Expired). '
+            'XMPlus تمدید: فاکتور در پنل Paid شد اما سرویس #'.$sid.' هنوز منقضی است. '
             .implode(' ', $hints)
         );
     }
@@ -2838,15 +2851,7 @@ class XmplusProvisioningService
         }
         $renewalOrder->forceFill(['xmplus_inv_id' => $invid])->save();
 
-        try {
-            XmplusInvoiceDatabaseSyncService::setRenewalInvoiceServiceId($settings, $invid, $sid);
-        } catch (\Throwable $e) {
-            $api->log('warning', 'XMPlus webCheckout renewal: setRenewalInvoiceServiceId', [
-                'error' => $e->getMessage(),
-                'invid' => $invid,
-                'sid' => $sid,
-            ]);
-        }
+        // serviceid در DB را هنگام تأیید ادمین sync می‌کنیم — اینجا retry MySQL باعث تأخیر ~۵ثانیه‌ای پیام فیش می‌شد.
 
         return [$email, $passwdPlain, $invid, $sid, null];
     }

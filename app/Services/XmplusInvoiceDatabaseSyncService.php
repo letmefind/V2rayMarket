@@ -23,6 +23,41 @@ final class XmplusInvoiceDatabaseSyncService
         return filter_var($settings->get('xmplus_invoice_db_sync_enabled', false), FILTER_VALIDATE_BOOLEAN);
     }
 
+    public static function mysqlDirectEnabled(Collection $settings): bool
+    {
+        return strtolower(trim((string) ($settings->get('xmplus_mysql_direct_enabled', 'no') ?? 'no'))) === 'yes';
+    }
+
+    /**
+     * اتصال MySQL برای جدول service: اگر xmplus_mysql_host خالی باشد همان credهای invoice DB استفاده می‌شود.
+     *
+     * @throws RuntimeException|PDOException
+     */
+    public static function createPdoForServiceTable(Collection $settings): PDO
+    {
+        $hostRaw = trim((string) ($settings->get('xmplus_mysql_host', '') ?? ''));
+        if ($hostRaw !== '') {
+            $port = (int) ($settings->get('xmplus_mysql_port', 3306) ?: 3306);
+            $databaseRaw = trim((string) ($settings->get('xmplus_mysql_database', '') ?? ''));
+            $usernameRaw = trim((string) ($settings->get('xmplus_mysql_username', '') ?? ''));
+            $password = (string) ($settings->get('xmplus_mysql_password') ?? '');
+            [$database, $username] = self::resolveMysqlDatabaseAndUsername($databaseRaw, $usernameRaw);
+            $host = self::sanitizeMysqlHost($hostRaw);
+            if ($host === '' || $database === '' || $username === '') {
+                throw new RuntimeException('XMPlus service DB: xmplus_mysql_* ناقص است.');
+            }
+
+            return new PDO(
+                self::buildMysqlDsn($host, $port, $database),
+                $username,
+                $password,
+                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
+            );
+        }
+
+        return self::createPdoConnection($settings);
+    }
+
     /**
      * تست اتصال از همان منطق markInvoicePaid (بدون UPDATE).
      *
@@ -181,8 +216,13 @@ final class XmplusInvoiceDatabaseSyncService
      *
      * @throws RuntimeException|PDOException
      */
-    public static function setRenewalInvoiceServiceId(Collection $settings, string $invId, int $serviceId): int
-    {
+    public static function setRenewalInvoiceServiceId(
+        Collection $settings,
+        string $invId,
+        int $serviceId,
+        int $maxAttempts = 4,
+        int $retryDelayMicros = 300_000
+    ): int {
         $invId = trim($invId);
         if ($invId === '' || $serviceId <= 0) {
             throw new RuntimeException('XMPlus DB sync: inv_id یا service_id نامعتبر است.');
@@ -192,6 +232,9 @@ final class XmplusInvoiceDatabaseSyncService
             return 0;
         }
 
+        $maxAttempts = max(1, min(12, $maxAttempts));
+        $retryDelayMicros = max(0, min(2_000_000, $retryDelayMicros));
+
         $pdo = self::createPdoConnection($settings);
         $table = self::sanitizeTableName((string) ($settings->get('xmplus_invoice_db_table', 'invoice') ?: 'invoice'));
 
@@ -200,11 +243,9 @@ final class XmplusInvoiceDatabaseSyncService
         $invIdVariants = ['inv_id', 'invioce_id'];
         
         // امتحان با چند تلاش (XMPlus ممکن است invoice را هنوز commit نکرده باشد)
-        $maxAttempts = 8;
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-            if ($attempt > 1) {
-                // تأخیر قبل از تلاش بعدی
-                usleep($attempt <= 3 ? 500000 : 1000000);
+            if ($attempt > 1 && $retryDelayMicros > 0) {
+                usleep($retryDelayMicros);
                 Log::channel('xmplus')->debug('XMPlus invoice DB sync: تلاش '.$attempt.' برای set کردن serviceid', [
                     'inv_id' => $invId,
                     'attempt' => $attempt,

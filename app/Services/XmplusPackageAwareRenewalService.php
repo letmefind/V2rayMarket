@@ -34,15 +34,14 @@ class XmplusPackageAwareRenewalService
             }
 
             // 2. اتصال مستقیم به دیتابیس
-            $enabled = $settings->get('xmplus_mysql_direct_enabled', 'no');
-            if ($enabled !== 'yes') {
+            if (! XmplusInvoiceDatabaseSyncService::mysqlDirectEnabled($settings)) {
                 Log::info('XMPlus package-aware renewal: xmplus_mysql_direct_enabled غیرفعال است (مسیر جدا از همگام‌سازی فاکتور invoice)', [
                     'service_id' => $serviceId,
                 ]);
                 return false;
             }
 
-            $pdo = self::createPdoConnection($settings);
+            $pdo = XmplusInvoiceDatabaseSyncService::createPdoForServiceTable($settings);
             
             // 3. دریافت service فعلی
             $service = self::fetchService($pdo, $serviceId);
@@ -139,48 +138,6 @@ class XmplusPackageAwareRenewalService
             ]);
             return null;
         }
-    }
-
-    private static function createPdoConnection(Collection $settings): PDO
-    {
-        $hostRaw = $settings->get('xmplus_mysql_host', '');
-        $port = (int) $settings->get('xmplus_mysql_port', 3306);
-        $databaseRaw = $settings->get('xmplus_mysql_database', '');
-        $usernameRaw = $settings->get('xmplus_mysql_username', '');
-        $password = $settings->get('xmplus_mysql_password', '');
-
-        // Hestia format: admin_web.admin_xmplus
-        $database = $databaseRaw;
-        $username = $usernameRaw;
-        
-        if ($databaseRaw === $usernameRaw && str_contains($databaseRaw, '.')) {
-            Log::info('XMPlus package-aware renewal: Hestia format detected', [
-                'mysql_user' => $username,
-                'mysql_database' => $database,
-            ]);
-        }
-
-        // Sanitize host
-        $host = trim(str_replace(['mysql:', 'localhost'], '', $hostRaw));
-        if ($host === '') {
-            $host = 'localhost';
-        }
-
-        Log::info('XMPlus package-aware renewal: connecting to MySQL', [
-            'host_raw' => $hostRaw,
-            'host_used' => $host,
-            'port' => $port,
-            'database' => $database,
-            'username' => $username,
-        ]);
-
-        $dsn = "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4";
-
-        return new PDO($dsn, $username, $password, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]);
     }
 
     private static function fetchService(PDO $pdo, int $serviceId): ?array

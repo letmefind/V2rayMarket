@@ -22,8 +22,7 @@ class XmplusServiceRenewalService
      */
     public static function renewServiceDirectly(Collection $settings, int $serviceId, array $invoiceData): bool
     {
-        $enabled = $settings->get('xmplus_mysql_direct_enabled', 'no');
-        if ($enabled !== 'yes') {
+        if (! XmplusInvoiceDatabaseSyncService::mysqlDirectEnabled($settings)) {
             Log::warning('XMPlus direct DB renewal: غیرفعال', [
                 'service_id' => $serviceId,
             ]);
@@ -31,7 +30,7 @@ class XmplusServiceRenewalService
         }
 
         try {
-            $pdo = self::createPdoConnection($settings);
+            $pdo = XmplusInvoiceDatabaseSyncService::createPdoForServiceTable($settings);
             
             // بررسی اینکه service موجود است
             $service = self::fetchService($pdo, $serviceId);
@@ -57,11 +56,19 @@ class XmplusServiceRenewalService
             $currentDueDate = trim((string) ($service['due_date'] ?? ''));
             $newDueDate = self::calculateNewDueDate($currentDueDate, $addDays);
 
-            // تمدید service
-            $updated = self::updateService($pdo, $serviceId, [
+            $update = [
                 'due_date' => $newDueDate,
-                'status' => 1, // Active
-            ]);
+                'status' => 1,
+                'notify_expire' => 0,
+            ];
+            $trafficBytes = (int) ($service['traffic'] ?? 0);
+            if ($trafficBytes <= 0) {
+                $update['used'] = 0;
+                $update['u'] = 0;
+                $update['d'] = 0;
+            }
+
+            $updated = self::updateService($pdo, $serviceId, $update);
 
             if ($updated) {
                 Log::info('XMPlus direct renewal: ✅ service renewed', [
@@ -86,40 +93,6 @@ class XmplusServiceRenewalService
             ]);
             return false;
         }
-    }
-
-    /**
-     * ایجاد اتصال PDO به دیتابیس XMPlus
-     */
-    private static function createPdoConnection(Collection $settings): PDO
-    {
-        $host = $settings->get('xmplus_mysql_host', '');
-        $port = (int) $settings->get('xmplus_mysql_port', 3306);
-        $databaseRaw = $settings->get('xmplus_mysql_database', '');
-        $usernameRaw = $settings->get('xmplus_mysql_username', '');
-        $password = $settings->get('xmplus_mysql_password', '');
-
-        // رفع مشکل Hestia format (admin_web.admin_xmplus)
-        $database = $databaseRaw;
-        $username = $usernameRaw;
-        
-        if ($databaseRaw === $usernameRaw && str_contains($databaseRaw, '.')) {
-            // Hestia format: admin_web.admin_xmplus
-            Log::info('XMPlus direct renewal: Hestia format detected', [
-                'mysql_user' => $username,
-                'mysql_database' => $database,
-            ]);
-        }
-
-        $dsn = "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4";
-
-        $pdo = new PDO($dsn, $username, $password, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]);
-
-        return $pdo;
     }
 
     /**
