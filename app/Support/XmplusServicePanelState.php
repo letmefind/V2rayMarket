@@ -39,19 +39,8 @@ final class XmplusServicePanelState
         }
 
         $st = strtolower((string) ($row['status'] ?? ''));
-        if ($st === 'active') {
-            return true;
-        }
 
-        $expire = trim((string) ($row['expire_date'] ?? $row['expiredate'] ?? ''));
-        if ($expire === '' || $expire === '0000-00-00' || $expire === '0000-00-00 00:00:00') {
-            return false;
-        }
-
-        try {
-            return (new \DateTime($expire)) > new \DateTime();
-        } catch (\Throwable) {
-            return false;
-        }
+        // XMPlus گاهی status=Expired ولی expire_date آینده دارد — بدون Active/ترافیک تمدید واقعی نیست.
+        return $st === 'active';
     }
 }

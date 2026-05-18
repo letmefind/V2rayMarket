@@ -107,4 +107,10 @@ class XmplusRenewalTest extends TestCase
         $row = ['code' => 100, 'sid' => 4, 'status' => 'Active', 'expire_date' => '2027-01-11 00:47'];
         $this->assertTrue(XmplusServicePanelState::renewalAppliedOnPanel($row));
     }
+
+    public function test_expired_with_future_date_is_not_renewal_applied(): void
+    {
+        $row = ['code' => 100, 'sid' => 17858, 'status' => 'Expired', 'expire_date' => '2027-07-01 00:59', 'traffic' => '0 B'];
+        $this->assertFalse(XmplusServicePanelState::renewalAppliedOnPanel($row));
+    }
 }

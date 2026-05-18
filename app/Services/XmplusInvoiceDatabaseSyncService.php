@@ -200,11 +200,11 @@ final class XmplusInvoiceDatabaseSyncService
         $invIdVariants = ['inv_id', 'invioce_id'];
         
         // امتحان با چند تلاش (XMPlus ممکن است invoice را هنوز commit نکرده باشد)
-        $maxAttempts = 3;
+        $maxAttempts = 8;
         for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
             if ($attempt > 1) {
                 // تأخیر قبل از تلاش بعدی
-                usleep(500000); // 0.5 ثانیه
+                usleep($attempt <= 3 ? 500000 : 1000000);
                 Log::channel('xmplus')->debug('XMPlus invoice DB sync: تلاش '.$attempt.' برای set کردن serviceid', [
                     'inv_id' => $invId,
                     'attempt' => $attempt,

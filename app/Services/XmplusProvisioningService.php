@@ -1146,7 +1146,19 @@ class XmplusProvisioningService
             $sublink = $poll['sublink'];
             $outSid = $poll['sid'] ?? $sid;
 
-            if ($shopPaymentAlreadyCollected) {
+            if ($shopPaymentAlreadyCollected && $invid !== '') {
+                try {
+                    $viewPaid = $api->invoiceView($email, $passwdPlain, $invid);
+                    if (self::invoiceViewResponseIsPaid($viewPaid)) {
+                        self::trySyncXmplusInvoiceDatabaseRow($settings, $invid, $renewalOrder, true);
+                    }
+                } catch (\Throwable $e) {
+                    $api->log('warning', 'XMPlus تمدید: invoice DB sync پس از pay', [
+                        'error' => $e->getMessage(),
+                        'invid' => $invid,
+                    ]);
+                }
+
                 self::enforcePanelRenewalAfterShopPay(
                     $api,
                     $settings,
