@@ -122,6 +122,22 @@ class DiagnoseXmplusRenewalCommand extends Command
         }
 
         $this->newLine();
+        $this->line('همهٔ کلیدهای xmplus_* ذخیره‌شده:');
+        $allXm = Setting::query()->where('key', 'like', 'xmplus_%')->orderBy('key')->pluck('value', 'key');
+        if ($allXm->isEmpty()) {
+            $this->warn('  (هیچ کلید xmplus_* در settings نیست)');
+        } else {
+            foreach ($allXm as $k => $v) {
+                if (str_contains((string) $k, 'password')) {
+                    $display = ($v === null || $v === '') ? '(خالی)' : '(تنظیم شده)';
+                } else {
+                    $display = is_scalar($v) ? (string) $v : json_encode($v);
+                }
+                $this->line('  '.$k.' = '.$display);
+            }
+        }
+
+        $this->newLine();
         if ($ok) {
             $this->info('جمع‌بندی: پیش‌نیازهای تمدید برای این ربات OK به نظر می‌رسد.');
             $this->line('اگر هنوز تمدید نمی‌شود: storage/logs (channel xmplus) را برای invid و serviceid ببینید.');
@@ -129,7 +145,8 @@ class DiagnoseXmplusRenewalCommand extends Command
             return self::SUCCESS;
         }
 
-        $this->warn('جمع‌بندی: یک یا چند مورد بالا باید در Filament → تنظیمات تم (یا sync از lab) اصلاح شود.');
+        $this->warn('جمع‌بندی: همگام‌سازی MySQL فاکتور و host را در Filament پر کنید (credentials از پنل/هاست XMPlus).');
+        $this->line('اگر export از lab هم sync=0 بود، lab با همان تنظیمات production را تمدید نمی‌کند مگر در پنل XMPlus دستی extend شده باشد.');
 
         return self::FAILURE;
     }

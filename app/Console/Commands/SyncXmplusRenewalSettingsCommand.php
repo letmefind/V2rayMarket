@@ -47,7 +47,11 @@ class SyncXmplusRenewalSettingsCommand extends Command
 
         $sourceRows = Setting::withoutGlobalScope('instance')
             ->where('instance_id', $from)
-            ->whereIn('key', DiagnoseXmplusRenewalCommand::RENEWAL_SETTING_KEYS)
+            ->where(function ($q) {
+                $q->where('key', 'panel_type')
+                    ->orWhere('key', 'like', 'xmplus_%');
+            })
+            ->orderBy('key')
             ->get();
 
         if ($sourceRows->isEmpty()) {

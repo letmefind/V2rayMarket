@@ -35,11 +35,16 @@ class ImportXmplusRenewalSettingsCommand extends Command
 
         /** @var array<string, mixed> $settings */
         $settings = $data['settings'];
-        $allowed = array_flip(DiagnoseXmplusRenewalCommand::RENEWAL_SETTING_KEYS);
-        $filtered = array_intersect_key($settings, $allowed);
+        $filtered = [];
+        foreach ($settings as $key => $value) {
+            $key = (string) $key;
+            if ($key === 'panel_type' || str_starts_with($key, 'xmplus_')) {
+                $filtered[$key] = $value;
+            }
+        }
 
         if ($filtered === []) {
-            $this->error('هیچ کلید مجاز در فایل نیست.');
+            $this->error('هیچ کلید panel_type / xmplus_* در فایل نیست.');
 
             return self::FAILURE;
         }
