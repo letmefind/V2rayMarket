@@ -173,6 +173,23 @@ chmod +x deploy/bin/rollout-all-bots.sh
 
 **پیشنهاد:** ساعات کم‌ترافیک؛ هر ربات چند ثانیه web recreate می‌شود (قطعی کوتاه webhook).
 
+### فقط lab تمدید می‌کند، بقیه نه
+
+معمولاً **کد** همه جا یکی است؛ تفاوت در جدول `settings` هر `instance_id` است (همگام‌سازی MySQL فاکتور XMPlus و `xmplus_auto_pay_gateway_id`). lab را درست تنظیم کرده‌اید؛ بقیه خاموش یا ناقص‌اند.
+
+```bash
+cd ~/VPNMarket && git pull
+./deploy/bin/rollout-all-bots.sh   # اگر هنوز نزده‌اید
+
+chmod +x deploy/bin/fix-xmplus-renewal-all-bots.sh
+./deploy/bin/fix-xmplus-renewal-all-bots.sh
+```
+
+یا دستی تشخیص یک ربات:
+```bash
+docker exec vpnmarket_aof_bypax_store-web-1 php artisan vpnmarket:diagnose-xmplus-renewal
+```
+
 **دستی (فقط چند ربات):**
 
 ```bash

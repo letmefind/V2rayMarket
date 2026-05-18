@@ -981,7 +981,14 @@ class XmplusProvisioningService
                 
                 // ✅ تنظیم serviceid در invoice تمدید
                 try {
-                    XmplusInvoiceDatabaseSyncService::setRenewalInvoiceServiceId($settings, $invid, $sid);
+                    $linked = XmplusInvoiceDatabaseSyncService::setRenewalInvoiceServiceId($settings, $invid, $sid);
+                    if ($linked === 0 && ! XmplusInvoiceDatabaseSyncService::enabled($settings)) {
+                        $api->log('error', 'XMPlus تمدید: همگام‌سازی DB فاکتور خاموش است — serviceid set نمی‌شود؛ در تنظیمات تم «همگام‌سازی MySQL فاکتور» را فعال کنید یا vpnmarket:sync-xmplus-renewal-settings از lab', [
+                            'invid' => $invid,
+                            'sid' => $sid,
+                            'order_id' => $renewalOrder->id,
+                        ]);
+                    }
                 } catch (\Throwable $e) {
                     $api->log('warning', 'XMPlus تمدید: خطا در set کردن serviceid در invoice', [
                         'error' => $e->getMessage(),
