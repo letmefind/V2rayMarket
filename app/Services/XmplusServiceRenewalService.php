@@ -60,13 +60,10 @@ class XmplusServiceRenewalService
                 'due_date' => $newDueDate,
                 'status' => 1,
                 'notify_expire' => 0,
+                'used' => 0,
+                'u' => 0,
+                'd' => 0,
             ];
-            $trafficBytes = (int) ($service['traffic'] ?? 0);
-            if ($trafficBytes <= 0) {
-                $update['used'] = 0;
-                $update['u'] = 0;
-                $update['d'] = 0;
-            }
 
             $updated = self::updateService($pdo, $serviceId, $update);
 
@@ -91,6 +88,51 @@ class XmplusServiceRenewalService
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+            return false;
+        }
+    }
+
+    /**
+     * پنل XMPlus برای Active+حجم تمام، تمدید کامل (pay/ادمین) را نمی‌پذیرد؛ Expired/Suspended می‌پذیرد.
+     * قبل از service/renew موقت status=-1 می‌گذاریم تا InvoiceHelper همان مسیر منقضی را اجرا کند.
+     */
+    public static function markActiveDepletedAsExpiredForPanelRenewal(Collection $settings, int $serviceId): bool
+    {
+        if (! XmplusInvoiceDatabaseSyncService::mysqlDirectEnabled($settings)) {
+            return false;
+        }
+
+        try {
+            $pdo = XmplusInvoiceDatabaseSyncService::createPdoForServiceTable($settings);
+            $service = self::fetchService($pdo, $serviceId);
+            if ($service === null) {
+                return false;
+            }
+
+            if ((int) ($service['status'] ?? 0) !== 1) {
+                return false;
+            }
+
+            $trafficBytes = (int) ($service['traffic'] ?? 0);
+            if ($trafficBytes <= 0) {
+                return false;
+            }
+
+            $usedBytes = (int) ($service['u'] ?? 0) + (int) ($service['d'] ?? 0);
+            if ($usedBytes < (int) floor($trafficBytes * 0.9)) {
+                return false;
+            }
+
+            return self::updateService($pdo, $serviceId, [
+                'status' => -1,
+                'notify_expire' => 0,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('XMPlus renewal prep: could not mark depleted active as expired', [
+                'service_id' => $serviceId,
+                'error' => $e->getMessage(),
+            ]);
+
             return false;
         }
     }

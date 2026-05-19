@@ -966,6 +966,16 @@ class XmplusProvisioningService
             throw new RuntimeException($eligibility['reason']);
         }
 
+        if ($eligibility['low_traffic'] && ! $eligibility['expired']) {
+            $prepped = XmplusServiceRenewalService::markActiveDepletedAsExpiredForPanelRenewal($settings, $sid);
+            if ($prepped) {
+                $api->log('info', 'XMPlus تمدید: سرویس Active با حجم تمام موقتاً Expired شد تا پنل تمدید را بپذیرد', [
+                    'sid' => $sid,
+                    'order_id' => $renewalOrder->id,
+                ]);
+            }
+        }
+
         $gatewayId = $settings->get('xmplus_auto_pay_gateway_id');
         $autoPayConfigured = $gatewayId !== null && $gatewayId !== '' && is_numeric((string) $gatewayId);
 

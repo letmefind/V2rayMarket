@@ -28,7 +28,8 @@ final class XmplusServicePanelState
     }
 
     /**
-     * آیا پس از pay واقعاً تمدید روی پنل اعمال شده (تاریخ انقضا یا وضعیت Active).
+     * آیا پس از pay واقعاً تمدید روی پنل اعمال شده.
+     * Active با حجم تمام‌شده (≤۱۰٪ باقی) = تمدید هنوز اعمال نشده (pay ممکن است فقط فاکتور را ببندد).
      *
      * @param  array<string, mixed>  $row
      */
@@ -40,7 +41,10 @@ final class XmplusServicePanelState
 
         $st = strtolower((string) ($row['status'] ?? ''));
 
-        // XMPlus گاهی status=Expired ولی expire_date آینده دارد — بدون Active/ترافیک تمدید واقعی نیست.
-        return $st === 'active';
+        if ($st !== 'active') {
+            return false;
+        }
+
+        return ! XmplusRenewalEligibility::serviceRowHasLowRemainingTraffic($row);
     }
 }
