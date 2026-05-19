@@ -29,12 +29,18 @@ final class XmplusInvoiceDatabaseSyncService
     }
 
     /**
-     * اتصال MySQL برای جدول service: اگر xmplus_mysql_host خالی باشد همان credهای invoice DB استفاده می‌شود.
+     * اتصال MySQL برای جدول service.
+     * اولویت با همان credهای «همگام‌سازی فاکتور» (invoice_db) است — روی production اغلب فقط همان IP خصوصی (مثلاً 10.10.10.2) باز است.
+     * xmplus_mysql_* قدیمی اگر پر باشد ولی invoice_db هم تنظیم شده باشد، دیگر اولویت نمی‌گیرد (جلوگیری از timeout به IP عمومی).
      *
      * @throws RuntimeException|PDOException
      */
     public static function createPdoForServiceTable(Collection $settings): PDO
     {
+        if (self::enabled($settings) && trim((string) ($settings->get('xmplus_invoice_db_host', '') ?? '')) !== '') {
+            return self::createPdoConnection($settings);
+        }
+
         $hostRaw = trim((string) ($settings->get('xmplus_mysql_host', '') ?? ''));
         if ($hostRaw !== '') {
             $port = (int) ($settings->get('xmplus_mysql_port', 3306) ?: 3306);

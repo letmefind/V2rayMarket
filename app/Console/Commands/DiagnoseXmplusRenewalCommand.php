@@ -54,10 +54,18 @@ class DiagnoseXmplusRenewalCommand extends Command
         }
 
         $mysqlDirect = strtolower(trim((string) ($settings->get('xmplus_mysql_direct_enabled') ?? 'no')));
-        if (in_array($mysqlDirect, ['yes', '1', 'true'], true)) {
+        $mysqlDirectOn = in_array($mysqlDirect, ['yes', '1', 'true'], true);
+        if ($mysqlDirectOn) {
             $this->line('✓ xmplus_mysql_direct_enabled = yes (تمدید مستقیم service پس از pay)');
         } else {
             $this->line('  xmplus_mysql_direct_enabled = خیر/خالی');
+        }
+
+        $legacyMysqlHost = trim((string) ($settings->get('xmplus_mysql_host') ?? ''));
+        $invoiceHost = trim((string) ($settings->get('xmplus_invoice_db_host') ?? ''));
+        if ($legacyMysqlHost !== '' && $invoiceHost !== '' && $legacyMysqlHost !== $invoiceHost) {
+            $this->warn('⚠ xmplus_mysql_host ('.$legacyMysqlHost.') با xmplus_invoice_db_host ('.$invoiceHost.') فرق دارد.');
+            $this->line('  fallback تمدید service از invoice_db استفاده می‌کند؛ می‌توانید xmplus_mysql_host را خالی کنید یا همان 10.10.10.2 بگذارید.');
         }
 
         $gateway = trim((string) ($settings->get('xmplus_auto_pay_gateway_id') ?? ''));
@@ -90,6 +98,16 @@ class DiagnoseXmplusRenewalCommand extends Command
                     $this->error('✗ اتصال MySQL فاکتور XMPlus ناموفق:');
                     $this->line($test['message']);
                     $ok = false;
+                }
+                if ($mysqlDirectOn && $test['ok']) {
+                    try {
+                        $pdo = XmplusInvoiceDatabaseSyncService::createPdoForServiceTable($settings);
+                        $pdo->query('SELECT 1 FROM `service` LIMIT 1');
+                        $this->line('✓ اتصال MySQL جدول service (fallback تمدید): OK');
+                    } catch (\Throwable $e) {
+                        $this->error('✗ اتصال MySQL جدول service برای fallback تمدید: '.$e->getMessage());
+                        $ok = false;
+                    }
                 }
             }
         }
