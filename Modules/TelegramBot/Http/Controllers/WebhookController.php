@@ -538,9 +538,6 @@ class WebhookController extends Controller
 
         foreach ($orders as $order) {
             $u = $order->user;
-            $planLabel = $order->plan_id
-                ? ($order->plan ? $this->planTelegramDisplayName($order->plan) : 'پلن')
-                : 'شارژ کیف پول';
             $pay = match ($order->payment_method) {
                 'manual_crypto' => 'USDT/USDC دستی',
                 'card' => 'کارت به کارت',
@@ -549,7 +546,8 @@ class WebhookController extends Controller
                 default => $order->payment_method ?? '—',
             };
             $identity = $u ? $this->adminUserIdentityPlain($u, $order) : "کاربر: — (ID: {$order->user_id})\n";
-            $line = "🧾 سفارش #{$order->id}\n{$planLabel}\n{$identity}مبلغ: ".number_format($order->amount)." تومان\nروش: {$pay}";
+            $package = $this->adminOrderPackagePlain($order);
+            $line = "🧾 سفارش #{$order->id}\n{$identity}{$package}مبلغ فیش: ".number_format($order->amount)." تومان\nروش: {$pay}";
             try {
                 Telegram::sendMessage([
                     'chat_id' => $adminChatId,
@@ -2088,6 +2086,81 @@ class WebhookController extends Controller
             .'ایمیل پنل: '.($emails['panel'] !== '' ? $emails['panel'] : '—')."\n";
     }
 
+    /**
+     * @return array{title: string, details: string}
+     */
+    protected function adminOrderPackageSummaryParts(Order $order): array
+    {
+        $order->loadMissing('plan');
+
+        if (! $order->plan_id) {
+            return [
+                'title' => 'شارژ کیف پول',
+                'details' => number_format((float) $order->amount).' تومان',
+            ];
+        }
+
+        $plan = $order->plan;
+        if (! $plan) {
+            return [
+                'title' => 'پلن #'.$order->plan_id,
+                'details' => number_format((float) $order->amount).' تومان',
+            ];
+        }
+
+        if (! $this->settings) {
+            $this->settings = Setting::all()->pluck('value', 'key');
+        }
+
+        $title = $this->planTelegramDisplayName($plan);
+        if ($order->renews_order_id) {
+            $title .= ' (تمدید #'.$order->renews_order_id.')';
+        }
+
+        $detailBits = [];
+        if ((int) ($plan->volume_gb ?? 0) > 0) {
+            $detailBits[] = (int) $plan->volume_gb.' GB';
+        }
+        if ((int) ($plan->duration_days ?? 0) > 0) {
+            $detailBits[] = (string) $plan->duration_label;
+        }
+
+        $planPrice = (int) ($plan->price ?? 0);
+        $orderAmount = (int) ($order->amount ?? 0);
+        if ($planPrice > 0 && $planPrice !== $orderAmount) {
+            $detailBits[] = 'قیمت پلن '.number_format($planPrice).' → پرداختی '.number_format($orderAmount).' تومان';
+        } else {
+            $detailBits[] = number_format($orderAmount).' تومان';
+        }
+
+        if ($order->discount_amount > 0) {
+            $detailBits[] = 'تخفیف '.number_format((int) $order->discount_amount);
+        }
+
+        return [
+            'title' => $title,
+            'details' => $detailBits !== [] ? implode(' · ', $detailBits) : number_format($orderAmount).' تومان',
+        ];
+    }
+
+    protected function adminOrderPackageMarkdownV2(Order $order): string
+    {
+        $parts = $this->adminOrderPackageSummaryParts($order);
+
+        $block = '*پکیج:* '.$this->escape($parts['title'])."\n";
+        $block .= '*جزئیات طرح:* '.$this->escape($parts['details'])."\n";
+
+        return $block;
+    }
+
+    protected function adminOrderPackagePlain(Order $order): string
+    {
+        $parts = $this->adminOrderPackageSummaryParts($order);
+
+        return 'پکیج: '.$parts['title']."\n"
+            .'جزئیات طرح: '.$parts['details']."\n";
+    }
+
     protected function notifyAdminCardReceipt(Order $order, User $user, string $receiptPath): void
     {
         $adminChatId = $this->settings->get('telegram_admin_chat_id');
@@ -2100,7 +2173,8 @@ class WebhookController extends Controller
 
         $adminMessage = "🧾 *رسید جدید برای سفارش \\#{$orderId}*\n\n";
         $adminMessage .= $this->adminUserIdentityMarkdownV2($user, $order);
-        $adminMessage .= '*مبلغ:* '.$this->escape(number_format($order->amount).' تومان')."\n";
+        $adminMessage .= $this->adminOrderPackageMarkdownV2($order);
+        $adminMessage .= '*مبلغ فیش:* '.$this->escape(number_format($order->amount).' تومان')."\n";
         $adminMessage .= '*نوع سفارش:* '.$this->escape($orderType)."\n\n";
         $adminMessage .= $this->escape('با دکمه‌های زیر تأیید کنید یا سفارش را لغو کنید.');
 
@@ -2130,7 +2204,8 @@ class WebhookController extends Controller
         $network = $order->crypto_network ? ManualCryptoService::label($order->crypto_network) : '—';
         $body = $captionLine."\nسفارش #{$order->id}\n"
             .$this->adminUserIdentityPlain($user, $order)
-            .'مبلغ: '.number_format($order->amount)." تومان\nشبکه: {$network}\nTx: ".($order->crypto_tx_hash ?? '—')."\n\nبا دکمه‌ها تأیید یا لغو کنید.";
+            .$this->adminOrderPackagePlain($order)
+            .'مبلغ فیش: '.number_format($order->amount)." تومان\nشبکه: {$network}\nTx: ".($order->crypto_tx_hash ?? '—')."\n\nبا دکمه‌ها تأیید یا لغو کنید.";
         $keyboard = $this->adminPendingOrderKeyboard($order);
         try {
             if ($order->crypto_payment_proof && Storage::disk('public')->exists($order->crypto_payment_proof)) {
