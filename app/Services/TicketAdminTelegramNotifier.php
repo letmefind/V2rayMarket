@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Setting;
+use App\Support\AdminTelegramUserIdentity;
 use App\Support\AdminTicketCallback;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -37,12 +38,20 @@ final class TicketAdminTelegramNotifier
     private static function buildTicketSummary(Ticket $ticket, string $head, string $messageText): string
     {
         $u = $ticket->user;
+        if (! $u) {
+            return "📩 {$head}\n"
+                ."#{$ticket->id} — {$ticket->subject}\n"
+                ."کاربر: — (ID: {$ticket->user_id})\n\n"
+                .'💬 '.Str::limit(trim($messageText), 2500, '…');
+        }
+
         $src = $ticket->source ?? 'web';
-        $msg = Str::limit(trim($messageText), 3500, '…');
+        $msg = Str::limit(trim($messageText), 2500, '…');
+        $identity = AdminTelegramUserIdentity::plainBlock($u);
 
         return "📩 {$head}\n"
             ."#{$ticket->id} — {$ticket->subject}\n"
-            .'کاربر: '.($u->name ?? '—')." ({$ticket->user_id})\n"
+            .$identity
             ."منبع: {$src}\n"
             ."وضعیت: {$ticket->status}\n\n"
             ."💬 {$msg}";

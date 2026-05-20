@@ -2044,61 +2044,14 @@ class WebhookController extends Controller
         $this->notifyAdminManualCrypto($order->fresh(), $user, 'TxID کریپتو ثبت شد');
     }
 
-    /**
-     * @return array{bot_email: string, xmplus_email: string, service_name: string}
-     */
-    protected function adminReceiptUserIdentityParts(User $user, ?Order $order = null): array
-    {
-        $botEmail = trim((string) ($user->email ?? ''));
-
-        $xmplusEmail = trim((string) ($user->xmplus_client_email ?? ''));
-        if ($xmplusEmail === '' && $order !== null) {
-            $panelLogin = trim((string) ($order->panel_username ?? ''));
-            if (str_contains($panelLogin, '@')) {
-                $xmplusEmail = $panelLogin;
-            }
-        }
-
-        $serviceName = '';
-        if ($order !== null) {
-            $serviceName = $order->serviceDisplayLabel();
-        }
-
-        return [
-            'bot_email' => $botEmail,
-            'xmplus_email' => $xmplusEmail,
-            'service_name' => $serviceName,
-        ];
-    }
-
     protected function adminUserIdentityMarkdownV2(User $user, ?Order $order = null): string
     {
-        $parts = $this->adminReceiptUserIdentityParts($user, $order);
-        $displayName = trim((string) ($user->name ?? ''));
-        if ($displayName === '' || $displayName === '.') {
-            $displayName = '—';
-        }
-
-        $block = '*کاربر:* '.$this->escape($displayName)." \\(ID: `{$user->id}`\\)\n";
-        $block .= '*ایمیل ربات:* '.$this->escape($parts['bot_email'] !== '' ? $parts['bot_email'] : '—')."\n";
-        $block .= '*ایمیل XMPlus:* '.$this->escape($parts['xmplus_email'] !== '' ? $parts['xmplus_email'] : '—')."\n";
-        $block .= '*نام سرویس \\(انتخابی\\):* '.$this->escape($parts['service_name'] !== '' ? $parts['service_name'] : '—')."\n";
-
-        return $block;
+        return \App\Support\AdminTelegramUserIdentity::markdownBlock($user, $order);
     }
 
     protected function adminUserIdentityPlain(User $user, ?Order $order = null): string
     {
-        $parts = $this->adminReceiptUserIdentityParts($user, $order);
-        $displayName = trim((string) ($user->name ?? ''));
-        if ($displayName === '' || $displayName === '.') {
-            $displayName = '—';
-        }
-
-        return "کاربر: {$displayName} (ID: {$user->id})\n"
-            .'ایمیل ربات: '.($parts['bot_email'] !== '' ? $parts['bot_email'] : '—')."\n"
-            .'ایمیل XMPlus: '.($parts['xmplus_email'] !== '' ? $parts['xmplus_email'] : '—')."\n"
-            .'نام سرویس (انتخابی): '.($parts['service_name'] !== '' ? $parts['service_name'] : '—')."\n";
+        return \App\Support\AdminTelegramUserIdentity::plainBlock($user, $order);
     }
 
     /**
