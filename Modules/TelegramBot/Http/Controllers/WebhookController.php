@@ -2045,45 +2045,60 @@ class WebhookController extends Controller
     }
 
     /**
-     * @return array{bot: string, panel: string}
+     * @return array{bot_email: string, xmplus_email: string, service_name: string}
      */
-    protected function resolveAdminUserEmails(User $user, ?Order $order = null): array
+    protected function adminReceiptUserIdentityParts(User $user, ?Order $order = null): array
     {
-        $bot = trim((string) ($user->email ?? ''));
-        $panel = trim((string) ($order?->panel_username ?? ''));
-        if ($panel === '') {
-            $panel = trim((string) ($user->xmplus_client_email ?? ''));
+        $botEmail = trim((string) ($user->email ?? ''));
+
+        $xmplusEmail = trim((string) ($user->xmplus_client_email ?? ''));
+        if ($xmplusEmail === '' && $order !== null) {
+            $panelLogin = trim((string) ($order->panel_username ?? ''));
+            if (str_contains($panelLogin, '@')) {
+                $xmplusEmail = $panelLogin;
+            }
         }
 
-        return ['bot' => $bot, 'panel' => $panel];
+        $serviceName = '';
+        if ($order !== null) {
+            $serviceName = $order->serviceDisplayLabel();
+        }
+
+        return [
+            'bot_email' => $botEmail,
+            'xmplus_email' => $xmplusEmail,
+            'service_name' => $serviceName,
+        ];
     }
 
     protected function adminUserIdentityMarkdownV2(User $user, ?Order $order = null): string
     {
-        $emails = $this->resolveAdminUserEmails($user, $order);
+        $parts = $this->adminReceiptUserIdentityParts($user, $order);
         $displayName = trim((string) ($user->name ?? ''));
         if ($displayName === '' || $displayName === '.') {
             $displayName = '—';
         }
 
         $block = '*کاربر:* '.$this->escape($displayName)." \\(ID: `{$user->id}`\\)\n";
-        $block .= '*ایمیل ربات:* '.$this->escape($emails['bot'] !== '' ? $emails['bot'] : '—')."\n";
-        $block .= '*ایمیل پنل:* '.$this->escape($emails['panel'] !== '' ? $emails['panel'] : '—')."\n";
+        $block .= '*ایمیل ربات:* '.$this->escape($parts['bot_email'] !== '' ? $parts['bot_email'] : '—')."\n";
+        $block .= '*ایمیل XMPlus:* '.$this->escape($parts['xmplus_email'] !== '' ? $parts['xmplus_email'] : '—')."\n";
+        $block .= '*نام سرویس \\(انتخابی\\):* '.$this->escape($parts['service_name'] !== '' ? $parts['service_name'] : '—')."\n";
 
         return $block;
     }
 
     protected function adminUserIdentityPlain(User $user, ?Order $order = null): string
     {
-        $emails = $this->resolveAdminUserEmails($user, $order);
+        $parts = $this->adminReceiptUserIdentityParts($user, $order);
         $displayName = trim((string) ($user->name ?? ''));
         if ($displayName === '' || $displayName === '.') {
             $displayName = '—';
         }
 
         return "کاربر: {$displayName} (ID: {$user->id})\n"
-            .'ایمیل ربات: '.($emails['bot'] !== '' ? $emails['bot'] : '—')."\n"
-            .'ایمیل پنل: '.($emails['panel'] !== '' ? $emails['panel'] : '—')."\n";
+            .'ایمیل ربات: '.($parts['bot_email'] !== '' ? $parts['bot_email'] : '—')."\n"
+            .'ایمیل XMPlus: '.($parts['xmplus_email'] !== '' ? $parts['xmplus_email'] : '—')."\n"
+            .'نام سرویس (انتخابی): '.($parts['service_name'] !== '' ? $parts['service_name'] : '—')."\n";
     }
 
     /**
