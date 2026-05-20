@@ -3,6 +3,8 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\UserResource\Pages;
+use App\Filament\Resources\UserResource\RelationManagers;
+use App\Filament\Resources\OrderResource;
 use App\Models\User;
 use App\Models\Order;
 use App\Models\Transaction;
@@ -28,6 +30,24 @@ class UserResource extends Resource
     protected static ?string $navigationLabel = 'کاربران سایت';
     protected static ?string $pluralModelLabel = 'کاربران سایت';
     protected static ?string $modelLabel = 'کاربر';
+
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['id', 'name', 'email', 'xmplus_client_email', 'telegram_chat_id'];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function getGlobalSearchResultDetails(\Illuminate\Database\Eloquent\Model $record): array
+    {
+        /** @var User $record */
+        return array_filter([
+            'شناسه' => (string) $record->id,
+            'XMPlus' => $record->xmplus_client_email,
+            'تلگرام' => $record->telegram_chat_id ? (string) $record->telegram_chat_id : null,
+        ]);
+    }
 
     public static function form(Form $form): Form
     {
@@ -85,16 +105,51 @@ class UserResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('id')
+                    ->label('شناسه')
+                    ->sortable()
+                    ->searchable()
+                    ->copyable()
+                    ->tooltip('همان ID در پیام فیش تلگرام'),
                 Tables\Columns\TextColumn::make('name')->label('نام')->searchable(),
                 Tables\Columns\TextColumn::make('email')->label('ایمیل')->searchable(),
+                Tables\Columns\TextColumn::make('xmplus_client_email')
+                    ->label('ایمیل XMPlus')
+                    ->searchable()
+                    ->toggleable()
+                    ->placeholder('—'),
+                Tables\Columns\TextColumn::make('telegram_chat_id')
+                    ->label('چت تلگرام')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('orders_count')
+                    ->label('سفارش')
+                    ->counts('orders')
+                    ->sortable(),
                 Tables\Columns\IconColumn::make('is_admin')->label('ادمین')->boolean(),
                 Tables\Columns\TextColumn::make('created_at')->label('تاریخ ثبت‌نام')->dateTime('Y-m-d')->sortable(),
             ])
+            ->searchPlaceholder('شناسه، نام، ایمیل، XMPlus، چت تلگرام…')
             ->filters([
                 //
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
+                Action::make('view_orders')
+                    ->label('سفارش‌ها')
+                    ->icon('heroicon-o-shopping-cart')
+                    ->color('gray')
+                    ->url(fn (User $record): string => static::getUrl('edit', [
+                        'record' => $record,
+                        'activeRelationManager' => 0,
+                    ])),
+                Action::make('orders_list')
+                    ->label('لیست سفارشات')
+                    ->icon('heroicon-o-queue-list')
+                    ->color('info')
+                    ->url(fn (User $record): string => OrderResource::getUrl('index', [
+                        'tableFilters' => ['user_id' => ['value' => (string) $record->id]],
+                    ])),
                 Tables\Actions\DeleteAction::make(),
 
                 // ✅ این دکمه در سمت راست هر سطر نمایش داده می‌شود
@@ -366,7 +421,9 @@ class UserResource extends Resource
 
     public static function getRelations(): array
     {
-        return [];
+        return [
+            RelationManagers\OrdersRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

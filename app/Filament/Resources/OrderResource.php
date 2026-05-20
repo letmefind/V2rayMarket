@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Actions\ApprovePendingOrderAction;
 use App\Filament\Resources\OrderResource\Pages;
 use App\Models\Order;
+use App\Models\User;
 use App\Models\Setting;
 use App\Models\Notification as UserNotification;
 use App\Services\ManualCryptoService;
@@ -50,7 +51,20 @@ class OrderResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('id')
+                    ->label('#')
+                    ->sortable()
+                    ->searchable(),
                 ImageColumn::make('card_payment_receipt')->label('رسید')->disk('public')->toggleable()->size(60)->circular()->url(fn (Order $record): ?string => $record->card_payment_receipt ? Storage::disk('public')->url($record->card_payment_receipt) : null)->openUrlInNewTab(),
+                Tables\Columns\TextColumn::make('user_id')
+                    ->label('ID کاربر')
+                    ->sortable()
+                    ->searchable()
+                    ->url(fn (Order $record): ?string => $record->user_id
+                        ? \App\Filament\Resources\UserResource::getUrl('edit', ['record' => $record->user_id])
+                        : null)
+                    ->color('primary')
+                    ->tooltip('کلیک → ویرایش کاربر'),
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('کاربر')
                     ->searchable()
@@ -132,7 +146,37 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('expires_at')->label('تاریخ انقضا')->dateTime('Y-m-d')->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
+            ->searchPlaceholder('شماره سفارش، شناسه کاربر، نام کاربر…')
             ->filters([
+                Tables\Filters\SelectFilter::make('user_id')
+                    ->label('کاربر (شناسه)')
+                    ->searchable()
+                    ->getSearchResultsUsing(function (string $search): array {
+                        $query = User::query()->orderByDesc('id')->limit(25);
+                        if (ctype_digit(trim($search))) {
+                            $query->where('id', (int) trim($search));
+                        } else {
+                            $query->where(function ($q) use ($search): void {
+                                $q->where('name', 'like', "%{$search}%")
+                                    ->orWhere('email', 'like', "%{$search}%")
+                                    ->orWhere('xmplus_client_email', 'like', "%{$search}%");
+                            });
+                        }
+
+                        return $query->get()
+                            ->mapWithKeys(fn (User $u): array => [
+                                (string) $u->id => '#'.$u->id.' — '.($u->name ?: '—').' — '.($u->xmplus_client_email ?: $u->email),
+                            ])
+                            ->all();
+                    })
+                    ->getOptionLabelUsing(function ($value): string {
+                        $user = User::find($value);
+                        if (! $user) {
+                            return (string) $value;
+                        }
+
+                        return '#'.$user->id.' — '.($user->name ?: '—');
+                    }),
                 Tables\Filters\SelectFilter::make('status')->label('وضعیت')->options(['pending' => 'در انتظار پرداخت', 'paid' => 'پرداخت شده', 'expired' => 'منقضی شده']),
                 Tables\Filters\SelectFilter::make('source')->label('منبع')->options(['web' => 'وب‌سایت', 'telegram' => 'تلگرام']),
             ])
