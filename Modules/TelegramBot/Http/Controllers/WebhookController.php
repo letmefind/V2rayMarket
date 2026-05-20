@@ -548,7 +548,8 @@ class WebhookController extends Controller
                 'plisio' => 'Plisio',
                 default => $order->payment_method ?? '—',
             };
-            $line = "🧾 سفارش #{$order->id}\n{$planLabel}\nکاربر: ".($u->name ?? '—')." ({$order->user_id})\nمبلغ: ".number_format($order->amount)." تومان\nروش: {$pay}";
+            $identity = $u ? $this->adminUserIdentityPlain($u, $order) : "کاربر: — (ID: {$order->user_id})\n";
+            $line = "🧾 سفارش #{$order->id}\n{$planLabel}\n{$identity}مبلغ: ".number_format($order->amount)." تومان\nروش: {$pay}";
             try {
                 Telegram::sendMessage([
                     'chat_id' => $adminChatId,
@@ -2045,6 +2046,48 @@ class WebhookController extends Controller
         $this->notifyAdminManualCrypto($order->fresh(), $user, 'TxID کریپتو ثبت شد');
     }
 
+    /**
+     * @return array{bot: string, panel: string}
+     */
+    protected function resolveAdminUserEmails(User $user, ?Order $order = null): array
+    {
+        $bot = trim((string) ($user->email ?? ''));
+        $panel = trim((string) ($order?->panel_username ?? ''));
+        if ($panel === '') {
+            $panel = trim((string) ($user->xmplus_client_email ?? ''));
+        }
+
+        return ['bot' => $bot, 'panel' => $panel];
+    }
+
+    protected function adminUserIdentityMarkdownV2(User $user, ?Order $order = null): string
+    {
+        $emails = $this->resolveAdminUserEmails($user, $order);
+        $displayName = trim((string) ($user->name ?? ''));
+        if ($displayName === '' || $displayName === '.') {
+            $displayName = '—';
+        }
+
+        $block = '*کاربر:* '.$this->escape($displayName)." \\(ID: `{$user->id}`\\)\n";
+        $block .= '*ایمیل ربات:* '.$this->escape($emails['bot'] !== '' ? $emails['bot'] : '—')."\n";
+        $block .= '*ایمیل پنل:* '.$this->escape($emails['panel'] !== '' ? $emails['panel'] : '—')."\n";
+
+        return $block;
+    }
+
+    protected function adminUserIdentityPlain(User $user, ?Order $order = null): string
+    {
+        $emails = $this->resolveAdminUserEmails($user, $order);
+        $displayName = trim((string) ($user->name ?? ''));
+        if ($displayName === '' || $displayName === '.') {
+            $displayName = '—';
+        }
+
+        return "کاربر: {$displayName} (ID: {$user->id})\n"
+            .'ایمیل ربات: '.($emails['bot'] !== '' ? $emails['bot'] : '—')."\n"
+            .'ایمیل پنل: '.($emails['panel'] !== '' ? $emails['panel'] : '—')."\n";
+    }
+
     protected function notifyAdminCardReceipt(Order $order, User $user, string $receiptPath): void
     {
         $adminChatId = $this->settings->get('telegram_admin_chat_id');
@@ -2056,7 +2099,7 @@ class WebhookController extends Controller
         $orderId = $order->id;
 
         $adminMessage = "🧾 *رسید جدید برای سفارش \\#{$orderId}*\n\n";
-        $adminMessage .= '*کاربر:* '.$this->escape($user->name)." \\(ID: `{$user->id}`\\)\n";
+        $adminMessage .= $this->adminUserIdentityMarkdownV2($user, $order);
         $adminMessage .= '*مبلغ:* '.$this->escape(number_format($order->amount).' تومان')."\n";
         $adminMessage .= '*نوع سفارش:* '.$this->escape($orderType)."\n\n";
         $adminMessage .= $this->escape('با دکمه‌های زیر تأیید کنید یا سفارش را لغو کنید.');
@@ -2085,7 +2128,9 @@ class WebhookController extends Controller
         }
         $order = $order->fresh();
         $network = $order->crypto_network ? ManualCryptoService::label($order->crypto_network) : '—';
-        $body = $captionLine."\nسفارش #{$order->id}\nکاربر: {$user->name} ({$user->id})\nمبلغ: ".number_format($order->amount)." تومان\nشبکه: {$network}\nTx: ".($order->crypto_tx_hash ?? '—')."\n\nبا دکمه‌ها تأیید یا لغو کنید.";
+        $body = $captionLine."\nسفارش #{$order->id}\n"
+            .$this->adminUserIdentityPlain($user, $order)
+            .'مبلغ: '.number_format($order->amount)." تومان\nشبکه: {$network}\nTx: ".($order->crypto_tx_hash ?? '—')."\n\nبا دکمه‌ها تأیید یا لغو کنید.";
         $keyboard = $this->adminPendingOrderKeyboard($order);
         try {
             if ($order->crypto_payment_proof && Storage::disk('public')->exists($order->crypto_payment_proof)) {
