@@ -16,17 +16,21 @@ write_instance_mount_fragment() {
   }
 
   local frag="$dest_dir/docker-compose.mount.yml"
+  # app_storage باید همراه .env باشد؛ mount فقط .env باعث می‌شود رسید/فایل‌ها با recreate از بین بروند.
   if [ "$mode" = "bot" ]; then
     cat >"$frag" <<EOF
 services:
   web:
     volumes:
+      - app_storage:/var/www/html/storage
       - ${env_abs}:/run/instance.env:ro
   queue:
     volumes:
+      - app_storage:/var/www/html/storage
       - ${env_abs}:/run/instance.env:ro
   scheduler:
     volumes:
+      - app_storage:/var/www/html/storage
       - ${env_abs}:/run/instance.env:ro
 EOF
   else
@@ -34,6 +38,7 @@ EOF
 services:
   web:
     volumes:
+      - app_storage:/var/www/html/storage
       - ${env_abs}:/run/instance.env:ro
 EOF
   fi
