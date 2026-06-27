@@ -1433,8 +1433,30 @@ class WebhookController extends Controller
 
             if ($order && $order->user_id === $user->id && $order->status === 'pending') {
                 try {
-                    $fileName = $this->savePhotoAttachment($update, 'receipts');
-                    if (!$fileName) throw new \Exception("Failed to save photo attachment.");
+                    $fileId = \App\Services\TelegramPhotoStorageService::pickFileIdFromUpdate($update);
+                    if (! $fileId) {
+                        throw new \Exception('No photo in message.');
+                    }
+
+                    $fileName = $this->savePhotoAttachment($update, 'receipts', quick: true);
+                    if (! $fileName) {
+                        \App\Jobs\ProcessTelegramPhotoAttachmentJob::dispatch(
+                            (int) $orderId,
+                            (int) $user->id,
+                            $fileId,
+                            'receipts',
+                            'card_receipt',
+                        );
+                        $user->update(['bot_state' => null]);
+                        Telegram::sendMessage([
+                            'chat_id' => $chatId,
+                            'text' => $this->escape('⏳ اتصال به سرور تلگرام کند است؛ رسید در صف ثبت قرار گرفت. تا چند دقیقه دیگر پیام تأیید دریافت می‌کنید.'),
+                            'parse_mode' => 'MarkdownV2',
+                        ]);
+                        $this->sendOrEditMainMenu($chatId, 'چه کار دیگری برایتان انجام دهم?');
+
+                        return;
+                    }
 
                     $order->update(['card_payment_receipt' => $fileName]);
                     $user->update(['bot_state' => null]);
@@ -1446,7 +1468,7 @@ class WebhookController extends Controller
                     ]);
                     $this->sendOrEditMainMenu($chatId, "چه کار دیگری برایتان انجام دهم?");
 
-                    $this->notifyAdminCardReceipt($order->fresh(), $user, $fileName);
+                    \App\Services\CardReceiptAdminTelegramNotifier::notify($order->fresh(), $user, $fileName);
 
                 } catch (\Exception $e) {
                     Log::error("Receipt processing failed for order {$orderId}: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
@@ -2131,35 +2153,7 @@ class WebhookController extends Controller
 
     protected function notifyAdminCardReceipt(Order $order, User $user, string $receiptPath): void
     {
-        $adminChatId = $this->settings->get('telegram_admin_chat_id');
-        if (! $adminChatId) {
-            return;
-        }
-
-        $orderType = $order->renews_order_id ? 'تمدید سرویس' : ($order->plan_id ? 'خرید سرویس' : 'شارژ کیف پول');
-        $orderId = $order->id;
-
-        $adminMessage = "🧾 *رسید جدید برای سفارش \\#{$orderId}*\n\n";
-        $adminMessage .= $this->adminUserIdentityMarkdownV2($user, $order);
-        $adminMessage .= $this->adminOrderPackageMarkdownV2($order);
-        $adminMessage .= '*مبلغ فیش:* '.$this->escape(number_format($order->amount).' تومان')."\n";
-        $adminMessage .= '*نوع سفارش:* '.$this->escape($orderType)."\n\n";
-        $adminMessage .= $this->escape('با دکمه‌های زیر تأیید کنید یا سفارش را لغو کنید.');
-
-        try {
-            Telegram::sendPhoto([
-                'chat_id' => (int) $adminChatId,
-                'photo' => InputFile::create(Storage::disk('public')->path($receiptPath)),
-                'caption' => $adminMessage,
-                'parse_mode' => 'MarkdownV2',
-                'reply_markup' => $this->adminPendingOrderKeyboard($order),
-            ]);
-        } catch (\Exception $e) {
-            Log::warning('notifyAdminCardReceipt: '.$e->getMessage(), [
-                'order_id' => $order->id,
-                'admin_chat_id' => $adminChatId,
-            ]);
-        }
+        \App\Services\CardReceiptAdminTelegramNotifier::notify($order, $user, $receiptPath);
     }
 
     protected function notifyAdminManualCrypto(Order $order, User $user, string $captionLine): void
@@ -4651,33 +4645,16 @@ class WebhookController extends Controller
         $this->sendOrEditMessage($chatId, $message, $keyboard, $messageId);
     }
 
-    protected function savePhotoAttachment($update, $directory)
+    protected function savePhotoAttachment($update, $directory, bool $quick = false)
     {
-        $photo = collect($update->getMessage()->getPhoto())->last();
-        if(!$photo) return null;
-
         $botToken = $this->settings->get('telegram_bot_token');
-        try {
-            $file = Telegram::getFile(['file_id' => $photo->getFileId()]);
-            $filePath = method_exists($file, 'getFilePath') ? $file->getFilePath() : ($file['file_path'] ?? null);
-            if(!$filePath) { throw new \Exception('File path not found in Telegram response.'); }
+        if (empty($botToken)) {
+            Log::warning('Telegram bot token is not set.');
 
-            $fileContents = file_get_contents("https://api.telegram.org/file/bot{$botToken}/{$filePath}");
-            if ($fileContents === false) { throw new \Exception('Failed to download file content.');}
-
-            Storage::disk('public')->makeDirectory($directory);
-            $extension = pathinfo($filePath, PATHINFO_EXTENSION) ?: 'jpg';
-            $fileName = $directory . '/' . Str::random(40) . '.' . $extension;
-            $success = Storage::disk('public')->put($fileName, $fileContents);
-
-            if (!$success) { throw new \Exception('Failed to save file to storage.'); }
-
-            return $fileName;
-
-        } catch (\Exception $e) {
-            Log::error('Error saving photo attachment: ' . $e->getMessage(), ['file_id' => $photo->getFileId()]);
             return null;
         }
+
+        return \App\Services\TelegramPhotoStorageService::saveFromUpdate($update, $botToken, $directory, $quick);
     }
 
 

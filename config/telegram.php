@@ -100,7 +100,7 @@ return [
     | Default: https://api.telegram.org/bot
     |
     */
-    'base_bot_url' => null,
+    'base_bot_url' => env('TELEGRAM_API_BASE') ? rtrim(env('TELEGRAM_API_BASE'), '/').'/bot' : null,
 
     /*
     |--------------------------------------------------------------------------

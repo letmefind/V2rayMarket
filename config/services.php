@@ -48,4 +48,15 @@ return [
         'default_base_url' => env('IRAN_SERVICE_SHARE_DEFAULT', 'https://bale.cyou'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Telegram Bot API (proxy / Local Bot API)
+    |--------------------------------------------------------------------------
+    | پیش‌فرض: https://api.telegram.org
+    | اگر سرور به API تلگرام مستقیم timeout می‌دهد، آدرس پروکسی یا Local Bot API بگذارید.
+    */
+    'telegram' => [
+        'api_base' => env('TELEGRAM_API_BASE', 'https://api.telegram.org'),
+    ],
+
 ];
